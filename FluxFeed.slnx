@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/FluxFeed/FluxFeed.csproj" />
+  <Project Path="tests/FluxFeed.Tests/FluxFeed.Tests.csproj" />
+</Solution>
