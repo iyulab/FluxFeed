@@ -360,6 +360,43 @@ public sealed partial class VaultPipeline : IVaultPipeline
         LogRemovedChunks(_logger, documentId);
     }
 
+    /// <summary>
+    /// Bulk-deletes every vector tagged with the given <paramref name="vaultId"/> from the shared
+    /// vector store in a single filtered delete. Returns the number of vectors removed (0 if no
+    /// vector store is configured). This is the tenant/vault purge primitive used by
+    /// <c>IVault.PurgeAsync</c> — it replaces a per-entry delete loop.
+    /// </summary>
+    public async Task<int> PurgeVectorsAsync(string vaultId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(vaultId);
+
+        if (_vectorStore == null)
+        {
+            LogNoVectorStoreSkipRemoval(_logger);
+            return 0;
+        }
+
+        var deleted = await _vectorStore.DeleteByFilterAsync(
+            new Dictionary<string, object> { ["vault_id"] = vaultId }, ct);
+
+        LogRemovedChunks(_logger, $"vault_id={vaultId}");
+        return deleted;
+    }
+
+    /// <summary>
+    /// Applies the standard chunk provenance metadata (source path, filepath hash, file name) and,
+    /// when the vault is tenant-scoped, the <c>vault_id</c> tag used for tenant-bulk purge.
+    /// </summary>
+    private void ApplyChunkMetadata(DocumentChunk chunk, VaultEntry entry)
+    {
+        chunk.Metadata ??= new Dictionary<string, object>();
+        chunk.Metadata["source_path"] = entry.SourcePath;
+        chunk.Metadata["filepath_hash"] = entry.FilepathHash;
+        chunk.Metadata["file_name"] = entry.FileName;
+        if (!string.IsNullOrEmpty(_options.VaultId))
+            chunk.Metadata["vault_id"] = _options.VaultId;
+    }
+
     public async Task<VaultPipelineSearchResponse> SearchAsync(
         string query,
         IEnumerable<string>? documentIds = null,
@@ -655,11 +692,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             chunk.SetEmbedding(embeddingList[i]);
 
-            // Add metadata
-            chunk.Metadata ??= new Dictionary<string, object>();
-            chunk.Metadata["source_path"] = entry.SourcePath;
-            chunk.Metadata["filepath_hash"] = entry.FilepathHash;
-            chunk.Metadata["file_name"] = entry.FileName;
+            ApplyChunkMetadata(chunk, entry);
 
             documentChunks.Add(chunk);
         }
@@ -718,10 +751,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             chunk.SetEmbedding(embedding);
 
-            chunk.Metadata ??= new Dictionary<string, object>();
-            chunk.Metadata["source_path"] = entry.SourcePath;
-            chunk.Metadata["filepath_hash"] = entry.FilepathHash;
-            chunk.Metadata["file_name"] = entry.FileName;
+            ApplyChunkMetadata(chunk, entry);
 
             // Store single chunk (1-element batch — uses the same transactional path).
             // On commit success, the chunk row is durably in vector_chunks before we update the checkpoint.

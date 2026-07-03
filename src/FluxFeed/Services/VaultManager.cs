@@ -508,6 +508,17 @@ public sealed partial class VaultManager : IVault
         }
     }
 
+    /// <inheritdoc />
+    public Task<int> PurgeAsync(CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(_options.VaultId))
+            throw new InvalidOperationException(
+                "PurgeAsync requires a tenant-scoped vault (FileVaultOptions.VaultId must be set). " +
+                "For a single non-tenant vault, remove entries individually or clear the store directly.");
+
+        return _pipeline.PurgeVectorsAsync(_options.VaultId, ct);
+    }
+
     private async Task<VaultEntry> GetOrCreateEntryAsync(string fullPath, CancellationToken ct)
     {
         var filepathHash = FilepathHasher.ComputeHash(fullPath);

@@ -38,6 +38,12 @@ public interface IVaultPipeline
     Task RemoveAsync(VaultEntry entry, CancellationToken ct = default);
 
     /// <summary>
+    /// Bulk-deletes every vector tagged with the given vault id from the shared vector store in a
+    /// single filtered delete. Returns the number of vectors removed. Used by tenant/vault purge.
+    /// </summary>
+    Task<int> PurgeVectorsAsync(string vaultId, CancellationToken ct = default);
+
+    /// <summary>
     /// Searches indexed content using the requested strategy.
     /// </summary>
     /// <param name="query">Search query text.</param>

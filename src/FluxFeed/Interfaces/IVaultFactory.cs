@@ -80,6 +80,14 @@ public interface IVaultFactory : IDisposable, IAsyncDisposable
     Task DisposeAsync(string tenantId);
 
     /// <summary>
+    /// Disposes the tenant's vault and, when <paramref name="purgeVectors"/> is true, first
+    /// bulk-removes all of the tenant's vectors from the shared vector store in a single filtered
+    /// delete (no per-entry loop). Use when permanently deleting a tenant so its vectors do not
+    /// outlive the vault. When false, behaves like <see cref="DisposeAsync(string)"/>.
+    /// </summary>
+    Task DisposeAsync(string tenantId, bool purgeVectors);
+
+    /// <summary>
     /// Disposes all tenant vaults.
     /// </summary>
     Task DisposeAllAsync();

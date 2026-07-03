@@ -153,6 +153,23 @@ public sealed partial class VaultFactory : IVaultFactory
         }
     }
 
+    public async Task DisposeAsync(string tenantId, bool purgeVectors)
+    {
+        if (_vaults.TryRemove(tenantId, out var context))
+        {
+            if (purgeVectors)
+            {
+                // Bulk-remove this tenant's vectors from the shared store before tearing down,
+                // so they don't outlive the vault (single filtered delete — no per-entry loop).
+                await context.Vault.PurgeAsync();
+            }
+
+            await DisposeContextAsync(context);
+
+            LogDisposedVault(_logger, tenantId);
+        }
+    }
+
     public async Task DisposeAllAsync()
     {
         var contexts = _vaults.Values.ToList();
@@ -169,6 +186,7 @@ public sealed partial class VaultFactory : IVaultFactory
         // Clone default options and apply tenant-specific configuration
         var tenantOptions = CloneOptions(_defaultOptions);
         tenantOptions.VaultBasePath = GetTenantVaultPath(tenantId);
+        tenantOptions.VaultId = tenantId;
         configureOptions?.Invoke(tenantOptions);
 
         // Ensure directory exists

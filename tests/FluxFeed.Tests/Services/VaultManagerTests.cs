@@ -75,6 +75,41 @@ public class VaultManagerTests : IDisposable
             options);
     }
 
+    private VaultManager CreateVaultWithVaultId(string? vaultId) =>
+        new(
+            _contentHasher,
+            _gitServiceMock,
+            _pipelineMock,
+            _queueServiceMock,
+            _fileWatcherMock,
+            _storageMock,
+            NullLogger<VaultManager>.Instance,
+            MsOptions.Create(new FileVaultOptions { VaultBasePath = _vaultDir, VaultId = vaultId }));
+
+    [Fact]
+    public async Task PurgeAsync_TenantScoped_BulkDeletesViaPipelineWithVaultId()
+    {
+        _pipelineMock.PurgeVectorsAsync("tenant-x", Arg.Any<CancellationToken>())
+            .Returns(7);
+        var vault = CreateVaultWithVaultId("tenant-x");
+
+        var deleted = await vault.PurgeAsync();
+
+        deleted.Should().Be(7);
+        await _pipelineMock.Received(1).PurgeVectorsAsync("tenant-x", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PurgeAsync_NonTenantScoped_ThrowsRatherThanGuessing()
+    {
+        var vault = CreateVaultWithVaultId(vaultId: null);
+
+        var act = async () => await vault.PurgeAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        await _pipelineMock.DidNotReceive().PurgeVectorsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDir))

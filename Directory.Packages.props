@@ -3,7 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="FluxIndex.Core" Version="0.15.0" />
+    <PackageVersion Include="FluxIndex.Core" Version="0.17.0" />
     <PackageVersion Include="FileFlux" Version="0.10.6" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />

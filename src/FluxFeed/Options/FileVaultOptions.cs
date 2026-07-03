@@ -28,6 +28,15 @@ public sealed class FileVaultOptions
     public string? VaultBasePath { get; set; }
 
     /// <summary>
+    /// Identifier of the tenant/vault this instance serves. Set by <c>IVaultFactory</c> to the
+    /// tenant id when creating a tenant-scoped vault. When set, memorized chunks are tagged with a
+    /// <c>vault_id</c> metadata field so a multi-tenant consumer can bulk-purge one vault's vectors
+    /// from the shared vector store via a single filtered delete (see <c>IVault.PurgeAsync</c>).
+    /// Null for a single, non-tenant-scoped vault.
+    /// </summary>
+    public string? VaultId { get; set; }
+
+    /// <summary>
     /// Maximum file size in megabytes to process.
     /// Larger files will be skipped.
     /// </summary>
