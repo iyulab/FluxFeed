@@ -1,4 +1,6 @@
+using System.Linq;
 using FileFlux;
+using FileFlux.Core;
 using FluxFeed.Adapters;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
@@ -56,6 +58,28 @@ public static class ServiceCollectionExtensions
             ServiceDescriptor.Singleton<IHostedService, VaultBackgroundService>());
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers FileFlux core services unless the consumer already registered them.
+    /// </summary>
+    /// <remarks>
+    /// Calling <c>AddFileFlux()</c> unconditionally would append a second set of descriptors with the
+    /// default (Scoped) lifetime, which wins on resolution and silently overrides a consumer's prior
+    /// <c>AddFileFlux(ServiceLifetime.Singleton)</c> — reintroducing the captive-dependency error
+    /// (Singleton <c>FluxDocumentProcessor</c> consuming a now-Scoped <c>IDocumentReaderFactory</c>).
+    /// Presence of <see cref="IDocumentReaderFactory"/> means <c>AddFileFlux</c> has already run, so we
+    /// honor the consumer's lifetime choice rather than override it. Consumers that only use FluxFeed
+    /// entry points and need a non-Scoped lifetime should register <c>AddFileFlux(lifetime)</c> first.
+    /// </remarks>
+    private static void EnsureFileFluxRegistered(IServiceCollection services)
+    {
+        if (services.Any(d => d.ServiceType == typeof(IDocumentReaderFactory)))
+        {
+            return;
+        }
+
+        services.AddFileFlux();
     }
 
     /// <summary>
@@ -122,7 +146,8 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Adds FileVault with FileFlux integration for document extraction and chunking.
-    /// Registers FileFlux core services automatically.
+    /// Registers FileFlux core services automatically, unless the consumer already registered them via
+    /// <c>AddFileFlux(lifetime)</c> — in that case the consumer's lifetime choice is honored (not overridden).
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configureOptions">Optional configuration action for FileVaultOptions.</param>
@@ -134,7 +159,7 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         Action<FileVaultOptions>? configureOptions = null)
     {
-        services.AddFileFlux();
+        EnsureFileFluxRegistered(services);
         services.AddFileVault(configureOptions);
 
         // Register FileFlux adapters as Scoped (they depend on scoped IDocumentProcessorFactory)
@@ -146,7 +171,8 @@ public static class ServiceCollectionExtensions
 
     /// <summary>
     /// Adds FileVault with full FluxIndex integration for extraction, chunking, and memorization.
-    /// Registers FileFlux core services automatically.
+    /// Registers FileFlux core services automatically, unless the consumer already registered them via
+    /// <c>AddFileFlux(lifetime)</c> — in that case the consumer's lifetime choice is honored (not overridden).
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configureOptions">Optional configuration action for FileVaultOptions.</param>
@@ -238,11 +264,15 @@ public static class ServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configureOptions">Optional configuration for default options.</param>
     /// <returns>The service collection for chaining.</returns>
+    /// <remarks>
+    /// Registers FileFlux core services automatically, unless the consumer already registered them via
+    /// <c>AddFileFlux(lifetime)</c> — in that case the consumer's lifetime choice is honored (not overridden).
+    /// </remarks>
     public static IServiceCollection AddFileVaultFactoryWithFileFlux(
         this IServiceCollection services,
         Action<FileVaultOptions>? configureOptions = null)
     {
-        services.AddFileFlux();
+        EnsureFileFluxRegistered(services);
         services.AddFileVaultFactory(configureOptions);
 
         // Register FileFlux adapters as Scoped (they depend on scoped IDocumentProcessorFactory)
