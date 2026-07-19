@@ -6,6 +6,9 @@
     <PackageVersion Include="FluxIndex.Core" Version="0.17.0" />
     <PackageVersion Include="FileFlux" Version="0.10.6" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.8" />
+    <!-- Explicit lift: Microsoft.Data.Sqlite 10.0.8 pulls SQLitePCLRaw 2.1.11
+         (NU1903 high, GHSA-2m69-gcr7-jv3q); upstream 2.1.12 stable landed 2026-07-09. -->
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.8" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.8" />

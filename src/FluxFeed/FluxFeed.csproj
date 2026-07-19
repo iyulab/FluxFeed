@@ -9,6 +9,8 @@
     <PackageReference Include="FluxIndex.Core" />
     <PackageReference Include="FileFlux" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- Lifts the vulnerable SQLitePCLRaw 2.1.11 that Microsoft.Data.Sqlite drags in (GHSA-2m69-gcr7-jv3q). -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
