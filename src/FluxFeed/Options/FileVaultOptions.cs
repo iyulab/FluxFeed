@@ -72,6 +72,15 @@ public sealed class FileVaultOptions
     /// <summary>
     /// Default glob patterns for files to include.
     /// </summary>
+    /// <remarks>
+    /// Effective on the <b>discovery</b> paths only: <c>ScanFolderAsync</c>,
+    /// <c>SyncAsync</c>, and folder-watcher events (files outside the patterns are
+    /// skipped before change detection/queuing). Explicit single-file commands
+    /// (<c>MemorizeAsync</c>/<c>RefreshAsync</c>) intentionally bypass patterns —
+    /// an explicit call is an explicit intent, and silently skipping it would hide
+    /// the caller's error. Per-folder patterns given to <c>AddWatchedFolderAsync</c>
+    /// take precedence over these defaults. An empty list means "include all".
+    /// </remarks>
     public List<string> DefaultIncludePatterns { get; set; } =
     [
         "*.pdf", "*.docx", "*.doc", "*.xlsx", "*.xls", "*.pptx", "*.ppt",
@@ -82,6 +91,11 @@ public sealed class FileVaultOptions
     /// <summary>
     /// Default glob patterns for files to exclude.
     /// </summary>
+    /// <remarks>
+    /// Same effective scope as <see cref="DefaultIncludePatterns"/> (discovery paths
+    /// only); exclusion takes precedence over inclusion. Defaults cover common
+    /// system/temp artifacts (<c>Thumbs.db</c>, Office lock files <c>~$*</c>, etc.).
+    /// </remarks>
     public List<string> DefaultExcludePatterns { get; set; } =
     [
         "~$*", "*.tmp", "*.temp", "*.bak", "*.swp",
