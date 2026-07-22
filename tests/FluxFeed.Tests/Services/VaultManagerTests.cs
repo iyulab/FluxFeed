@@ -379,6 +379,22 @@ public class VaultManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task ScanFolderAsync_UnregisteredFolder_RespectsDefaultIncludePatterns()
+    {
+        // Arrange — files outside DefaultIncludePatterns must not enter DetectedChanges
+        CreateTestFile("doc1.pdf", "PDF content");
+        CreateTestFile("photo.jpg", "JPEG bytes");
+        CreateTestFile("Thumbs.db", "thumbnail cache");
+
+        // Act
+        var result = await _vault.ScanFolderAsync(_testDir);
+
+        // Assert
+        result.DetectedChanges.Should().OnlyContain(c => c.FilePath.EndsWith("doc1.pdf"));
+        result.SkippedFilesCount.Should().Be(2);
+    }
+
+    [Fact]
     public async Task DetectChangesAsync_NewFile_ReturnsMemorizeAction()
     {
         // Arrange
