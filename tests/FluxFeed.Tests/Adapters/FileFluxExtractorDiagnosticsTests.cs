@@ -109,6 +109,73 @@ public class FileFluxExtractorDiagnosticsTests
     }
 
     [Fact]
+    public async Task ExtractAsync_ProjectsRawImagesWithIdentityAndAltText()
+    {
+        // The one seam where real FileFlux image data enters the vault: identity, mime type and
+        // alt text must survive, and an image the reader left unnamed must still get a stable id.
+        var raw = new RawContent
+        {
+            Text = "body",
+            Images =
+            {
+                new ImageInfo
+                {
+                    Id = "chart_1",
+                    Caption = "quarterly sales",
+                    MimeType = "image/jpeg",
+                    Data = [1, 2, 3]
+                },
+                new ImageInfo { Id = string.Empty, Data = [4, 5] }
+            }
+        };
+        var extractor = CreateExtractor(raw, [new DocumentChunk { Content = "body" }]);
+
+        var result = await extractor.ExtractAsync("report.docx");
+
+        result.Images.Should().HaveCount(2);
+
+        var first = result.Images![0];
+        first.Id.Should().Be("chart_1");
+        first.ContentType.Should().Be("image/jpeg");
+        first.AltText.Should().Be("quarterly sales");
+        first.Data.Should().Equal([1, 2, 3]);
+
+        var second = result.Images[1];
+        second.Id.Should().Be("img_001", "an unnamed image still needs a stable id, indexed by position");
+        second.ContentType.Should().Be("image/png", "unknown mime type falls back to png");
+        second.AltText.Should().BeNull("no caption means no alt text, not an empty one");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_SkipsImagesWithoutData()
+    {
+        // A reader can report an image it could not materialise (external URL, unsupported codec).
+        // Storing a zero-byte artifact would give an enricher nothing to look at.
+        var raw = new RawContent
+        {
+            Text = "body",
+            Images =
+            {
+                new ImageInfo { Id = "external", Data = null, SourceUrl = "https://example.com/a.png" },
+                new ImageInfo { Id = "real", Data = [7] }
+            }
+        };
+        var extractor = CreateExtractor(raw, [new DocumentChunk { Content = "body" }]);
+
+        var result = await extractor.ExtractAsync("page.html");
+
+        result.Images.Should().ContainSingle().Which.Id.Should().Be("real");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_NoImages_LeavesImagesNull()
+    {
+        var extractor = CreateExtractor(new RawContent { Text = "body" }, [new DocumentChunk { Content = "body" }]);
+
+        (await extractor.ExtractAsync("plain.txt")).Images.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ExtractAsync_NonScalarHints_AreDropped()
     {
         // PageRanges is reader-internal structure; stringifying it would persist a bare type name
