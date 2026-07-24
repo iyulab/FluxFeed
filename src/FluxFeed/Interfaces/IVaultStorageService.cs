@@ -60,6 +60,20 @@ public interface IVaultStorageService
     Task<IReadOnlyList<ImageArtifact>> GetImagesAsync(VaultEntry entry, CancellationToken ct = default);
 
     /// <summary>
+    /// Lists the image manifest without reading image bytes — the form used to decide which images
+    /// still need description. Returns an empty list when the entry has no images.
+    /// </summary>
+    Task<IReadOnlyList<VaultImage>> GetImageManifestAsync(VaultEntry entry, CancellationToken ct = default);
+
+    /// <summary>
+    /// Persists a description for a single image in the manifest, leaving the other entries and the
+    /// stored image files untouched. This is what makes enrichment idempotent across re-runs: a
+    /// described image is never offered to the enricher again.
+    /// </summary>
+    /// <returns>False when the entry has no manifest or no image with that id.</returns>
+    Task<bool> SetImageDescriptionAsync(VaultEntry entry, string imageId, string description, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets all text content from vault/ directory (refined.md + append-text.md + qa.md).
     /// </summary>
     Task<VaultTextContent> GetAllVaultContentAsync(VaultEntry entry, CancellationToken ct = default);
@@ -155,7 +169,46 @@ public sealed class ImageArtifact
     public string Id { get; init; } = string.Empty;
     public byte[] Data { get; init; } = [];
     public string ContentType { get; init; } = "application/octet-stream";
+
+    /// <summary>
+    /// Description produced by an <see cref="IVaultImageEnricher"/>, once one has succeeded for
+    /// this image. Null while the image is still pending description (or when no enricher is
+    /// registered).
+    /// </summary>
     public string? Description { get; init; }
+
+    /// <summary>
+    /// Alt text or caption carried by the source document, when the reader reports one.
+    /// </summary>
+    public string? AltText { get; init; }
+
     public int Width { get; init; }
     public int Height { get; init; }
+}
+
+/// <summary>
+/// A stored image as recorded in the vault's image manifest, without its bytes — the listing form
+/// used to decide which images still need description.
+/// </summary>
+public sealed class VaultImage
+{
+    /// <summary>Stable image identifier within the document (e.g. <c>img_000</c>).</summary>
+    public required string Id { get; init; }
+
+    /// <summary>Absolute path to the stored image file.</summary>
+    public required string FilePath { get; init; }
+
+    /// <summary>File name of the stored image, relative to the entry's images directory.</summary>
+    public required string FileName { get; init; }
+
+    public required string ContentType { get; init; }
+
+    /// <summary>Description produced by an enricher, or null while still pending.</summary>
+    public string? Description { get; init; }
+
+    /// <summary>Alt text carried by the source document, when the reader reported one.</summary>
+    public string? AltText { get; init; }
+
+    /// <summary>True once a description has been persisted for this image.</summary>
+    public bool IsDescribed => !string.IsNullOrWhiteSpace(Description);
 }

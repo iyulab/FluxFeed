@@ -37,6 +37,7 @@ public sealed partial class VaultFactory : IVaultFactory
     private readonly IVectorStore? _sharedVectorStore;
     private readonly IEmbeddingService? _sharedEmbeddingService;
     private readonly IGraphRAGService? _sharedGraphRAGService;
+    private readonly IVaultImageEnricher? _sharedImageEnricher;
 
     public VaultFactory(
         IServiceProvider serviceProvider,
@@ -49,7 +50,8 @@ public sealed partial class VaultFactory : IVaultFactory
         IChunker? chunker = null,
         IVectorStore? vectorStore = null,
         IEmbeddingService? embeddingService = null,
-        IGraphRAGService? graphRAGService = null)
+        IGraphRAGService? graphRAGService = null,
+        IVaultImageEnricher? imageEnricher = null)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
@@ -65,6 +67,7 @@ public sealed partial class VaultFactory : IVaultFactory
         _sharedVectorStore = vectorStore;
         _sharedEmbeddingService = embeddingService;
         _sharedGraphRAGService = graphRAGService;
+        _sharedImageEnricher = imageEnricher;
     }
 
     public IVault GetOrCreate(string tenantId)
@@ -215,7 +218,8 @@ public sealed partial class VaultFactory : IVaultFactory
             _sharedVectorStore,
             _sharedEmbeddingService,
             hybridSearch: null,
-            graphRAGService: _sharedGraphRAGService);
+            graphRAGService: _sharedGraphRAGService,
+            imageEnricher: _sharedImageEnricher);
 
         // Create VaultManager with mixed shared/tenant-specific services
         var managerLogger = _loggerFactory.CreateLogger<VaultManager>();

@@ -177,6 +177,61 @@ public class VaultStorageServiceImageTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task StoreImagesAsync_ReExtractionOfSameImage_KeepsItsDescription()
+    {
+        // A description is keyed to the picture, not to the run that extracted it. Re-memorize
+        // re-extracts identical images; dropping descriptions here would make enrichment pay again
+        // on every single memorize.
+        var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
+        var image = new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" };
+
+        await _storage.StoreImagesAsync(entry, [image], default);
+        await _storage.SetImageDescriptionAsync(entry, "img_000", "A revenue chart.", default);
+
+        // Same image comes back from a fresh extraction, with no description of its own.
+        await _storage.StoreImagesAsync(entry, [image], default);
+
+        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        manifest.Should().ContainSingle().Which.Description.Should().Be("A revenue chart.");
+    }
+
+    [Fact]
+    public async Task StoreImagesAsync_ImageContentChanged_DropsTheStaleDescription()
+    {
+        // Same id, different picture (the source document was edited) — the old description is now
+        // about something that is no longer there, so it must not survive.
+        var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
+
+        await _storage.StoreImagesAsync(entry,
+            [new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" }], default);
+        await _storage.SetImageDescriptionAsync(entry, "img_000", "A revenue chart.", default);
+
+        await _storage.StoreImagesAsync(entry,
+            [new ImageArtifact { Id = "img_000", Data = [9, 9, 9, 9], ContentType = "image/png" }], default);
+
+        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        manifest.Should().ContainSingle().Which.IsDescribed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SetImageDescriptionAsync_UnknownImage_ReturnsFalse()
+    {
+        var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
+        await _storage.StoreImagesAsync(entry,
+            [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], default);
+
+        (await _storage.SetImageDescriptionAsync(entry, "img_999", "nope", default)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetImageManifestAsync_NoImages_ReturnsEmpty()
+    {
+        var entry = VaultEntry.Create(CreateDocument("plain.txt", "body"), _vaultDir);
+
+        (await _storage.GetImageManifestAsync(entry, default)).Should().BeEmpty();
+    }
+
     private string CreateDocument(string fileName, string content)
     {
         var path = Path.Combine(_testDir, fileName);

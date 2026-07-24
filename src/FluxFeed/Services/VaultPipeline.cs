@@ -87,6 +87,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private readonly IEmbeddingService? _embeddingService;
     private readonly IHybridSearchService? _hybridSearch;
     private readonly IGraphRAGService? _graphRAGService;
+    private readonly IVaultImageEnricher? _imageEnricher;
+
+    /// <summary>
+    /// Value of the <c>chunk_kind</c> metadata tag on a chunk that holds an image description
+    /// rather than document text.
+    /// </summary>
+    public const string ImageDescriptionChunkKind = "image_description";
 
     /// <summary>
     /// Whether a GraphRAG service is wired into this pipeline. When false, a memorize call with
@@ -105,7 +112,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IVectorStore? vectorStore = null,
         IEmbeddingService? embeddingService = null,
         IHybridSearchService? hybridSearch = null,
-        IGraphRAGService? graphRAGService = null)
+        IGraphRAGService? graphRAGService = null,
+        IVaultImageEnricher? imageEnricher = null)
     {
         _git = git ?? throw new ArgumentNullException(nameof(git));
         _hasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
@@ -118,6 +126,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         _embeddingService = embeddingService;
         _hybridSearch = hybridSearch;
         _graphRAGService = graphRAGService;
+        _imageEnricher = imageEnricher;
     }
 
     public async Task<MemorizeResult> MemorizeAsync(VaultEntry entry, MemorizeOptions? options = null, CancellationToken ct = default)
@@ -159,9 +168,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // Step 3: Extract content from source file → extracted.md
             await ExtractAsync(entry, ct);
 
-            // Step 3.5: Check for empty content — skip pipeline for empty/whitespace files
+            // Step 3.5: Describe extracted images (no-op without a registered enricher)
             var extractedContent = await _storage.GetExtractedContentAsync(entry, ct);
-            if (string.IsNullOrWhiteSpace(extractedContent))
+            var describedImages = await EnrichImagesAsync(entry, extractedContent, ct);
+
+            // Step 3.6: Nothing indexable — no text and no described image. An image-only document
+            // whose images were described is NOT empty: the descriptions are its content.
+            if (string.IsNullOrWhiteSpace(extractedContent) && describedImages == 0)
             {
                 LogNoContentToIndex(_logger, entry.SourcePath);
 
@@ -245,6 +258,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // Remove existing chunks from vector store before re-indexing
             await RemoveAsync(entry, ct);
 
+            // Retry any image that is still without a description. Already-described images cost
+            // nothing here — the enricher is not called for them.
+            await EnrichImagesAsync(entry, await _storage.GetExtractedContentAsync(entry, ct), ct);
+
             // Chunk and index vault content
             var result = await ChunkAndIndexAsync(entry, options, ct);
 
@@ -295,17 +312,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
             extractionHints = result.Hints;
             extractionWarnings = result.Warnings;
 
-            // Store images if any - preserve original IDs from FileFlux
+            // Store images if any - identity and alt text come from the extractor as-is.
             if (result.Images?.Count > 0)
             {
-                var images = result.Images.Select(kvp => new ImageArtifact
-                {
-                    // Extract ID from key (e.g., "img_000.png" → "img_000")
-                    Id = Path.GetFileNameWithoutExtension(kvp.Key),
-                    Data = kvp.Value,
-                    ContentType = GuessContentType(kvp.Key)
-                });
-                await _storage.StoreImagesAsync(entry, images, ct);
+                await _storage.StoreImagesAsync(entry, result.Images, ct);
             }
         }
         else
@@ -329,16 +339,19 @@ public sealed partial class VaultPipeline : IVaultPipeline
     {
         LogRefiningContent(_logger, entry.SourcePath);
 
-        // Get extracted content
-        var extractedContent = await _storage.GetExtractedContentAsync(entry, ct);
-        if (string.IsNullOrWhiteSpace(extractedContent))
+        // Distinguish "extract has not run" from "extracted, but the document carries no text".
+        // The latter is legitimate for an image-only document: its content lives in the image
+        // descriptions produced by EnrichImagesAsync, which are indexed as their own chunks rather
+        // than injected into refined.md (see BuildImageChunks).
+        if (!entry.ExtractedExists)
         {
             throw new InvalidOperationException($"No extracted content found at {entry.ExtractedMdPath}. Run extract first.");
         }
 
-        // For now, refined content is the same as extracted content
-        // In the future, this is where LLM refinement and image description injection happens
-        // via IImageDescriptionService (implemented by consumer apps)
+        var extractedContent = await _storage.GetExtractedContentAsync(entry, ct) ?? string.Empty;
+
+        // For now, refined content is the same as extracted content.
+        // In the future, this is where LLM refinement of the text happens.
         var refinedContent = extractedContent;
 
         // Store refined content (git-tracked)
@@ -349,6 +362,99 @@ public sealed partial class VaultPipeline : IVaultPipeline
         entry.SaveMetadata();
 
         LogRefined(_logger, refinedContent.Length, entry.RefinedMdPath);
+    }
+
+    /// <summary>
+    /// Offers every stored image that has no description yet to the registered
+    /// <see cref="IVaultImageEnricher"/> and persists what comes back, one image at a time.
+    /// <para>
+    /// The pipeline owns the policy the consumer would otherwise have to rebuild: already-described
+    /// images are never offered again (idempotent across memorize and refresh), a failing image
+    /// neither aborts the run nor poisons its siblings, and images that failed stay pending so the
+    /// next run retries exactly those. Without a registered enricher this is a no-op.
+    /// </para>
+    /// </summary>
+    /// <returns>The number of images that carry a description after this call.</returns>
+    private async Task<int> EnrichImagesAsync(VaultEntry entry, string? documentText, CancellationToken ct)
+    {
+        var images = await _storage.GetImageManifestAsync(entry, ct);
+        if (images.Count == 0)
+            return 0;
+
+        var described = images.Count(i => i.IsDescribed);
+
+        if (_imageEnricher == null)
+            return described;
+
+        var pending = images.Where(i => !i.IsDescribed).ToList();
+        if (pending.Count == 0)
+            return described;
+
+        LogEnrichingImages(_logger, pending.Count, entry.SourcePath);
+
+        var failed = 0;
+        foreach (var image in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            string? description;
+            try
+            {
+                description = await _imageEnricher.DescribeAsync(new VaultImageDescriptionRequest
+                {
+                    Image = image,
+                    SourcePath = entry.SourcePath,
+                    DocumentText = string.IsNullOrWhiteSpace(documentText) ? null : documentText
+                }, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // One image failing must not cost the document its other descriptions, nor the
+                // memorize itself. It simply stays pending for the next run.
+                LogImageEnrichmentFailed(_logger, ex, image.Id, entry.SourcePath);
+                failed++;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(description))
+            {
+                failed++;
+                continue;
+            }
+
+            await _storage.SetImageDescriptionAsync(entry, image.Id, description, ct);
+            described++;
+        }
+
+        LogEnrichedImages(_logger, described, failed, entry.SourcePath);
+        return described;
+    }
+
+    /// <summary>
+    /// Turns described images into indexable chunks. Each description is its own chunk carrying
+    /// <c>image_id</c> / <c>image_file</c> / <c>chunk_kind</c> metadata, so a consumer can attach the
+    /// source image to a citation by reading metadata — no marker is ever written into the body text
+    /// and therefore none has to be stripped back out on the way to a user.
+    /// </summary>
+    private async Task<IReadOnlyList<VaultChunk>> BuildImageChunksAsync(VaultEntry entry, CancellationToken ct)
+    {
+        var images = await _storage.GetImageManifestAsync(entry, ct);
+
+        return images
+            .Where(image => image.IsDescribed)
+            .Select(image => new VaultChunk(
+                image.Description!,
+                new Dictionary<string, object>
+                {
+                    ["chunk_kind"] = ImageDescriptionChunkKind,
+                    ["image_id"] = image.Id,
+                    ["image_file"] = image.FileName
+                }))
+            .ToList();
     }
 
     public async Task RemoveAsync(VaultEntry entry, CancellationToken ct = default)
@@ -392,8 +498,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <summary>
     /// Applies the standard chunk provenance metadata (source path, filepath hash, file name) and,
     /// when the vault is tenant-scoped, the <c>vault_id</c> tag used for tenant-bulk purge.
+    /// <paramref name="extraMetadata"/> carries per-chunk provenance that is not uniform across the
+    /// document — currently the image tags on an image-description chunk.
     /// </summary>
-    private void ApplyChunkMetadata(DocumentChunk chunk, VaultEntry entry)
+    private void ApplyChunkMetadata(
+        DocumentChunk chunk,
+        VaultEntry entry,
+        IReadOnlyDictionary<string, object>? extraMetadata = null)
     {
         chunk.Metadata ??= new Dictionary<string, object>();
         chunk.Metadata["source_path"] = entry.SourcePath;
@@ -401,6 +512,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
         chunk.Metadata["file_name"] = entry.FileName;
         if (!string.IsNullOrEmpty(_options.VaultId))
             chunk.Metadata["vault_id"] = _options.VaultId;
+
+        if (extraMetadata == null)
+            return;
+
+        foreach (var (key, value) in extraMetadata)
+            chunk.Metadata[key] = value;
     }
 
     public async Task<VaultPipelineSearchResponse> SearchAsync(
@@ -560,16 +677,25 @@ public sealed partial class VaultPipeline : IVaultPipeline
         var vaultContent = await _storage.GetAllVaultContentAsync(entry, ct);
         var combinedContent = vaultContent.GetCombinedContent();
 
-        if (string.IsNullOrWhiteSpace(combinedContent))
+        // Described images are content in their own right — an image-only document has no text but
+        // is not empty. They are appended after the text chunks so text chunk indices (and with
+        // them the resumable checkpoint) stay stable.
+        var imageChunks = await BuildImageChunksAsync(entry, ct);
+
+        if (string.IsNullOrWhiteSpace(combinedContent) && imageChunks.Count == 0)
         {
             LogNoContentToIndex(_logger, entry.SourcePath);
             return (0, 0);
         }
 
         // Chunk the content
-        IReadOnlyList<string> chunks;
+        IReadOnlyList<string> chunks = [];
 
-        if (_chunker != null)
+        if (string.IsNullOrWhiteSpace(combinedContent))
+        {
+            // Image-only document: nothing to chunk, the descriptions carry the meaning.
+        }
+        else if (_chunker != null)
         {
             // Resolve per-format strategy override from FormatStrategies
             var effectiveStrategy = options.Strategy;
@@ -597,22 +723,31 @@ public sealed partial class VaultPipeline : IVaultPipeline
             chunks = ChunkFallback(combinedContent, options.MaxChunkSize);
         }
 
-        LogCreatedChunks(_logger, chunks.Count, combinedContent.Length);
+        var allChunks = chunks
+            .Select(text => new VaultChunk(text, null))
+            .Concat(imageChunks)
+            .ToList();
+
+        LogCreatedChunks(_logger, allChunks.Count, combinedContent.Length);
+        if (imageChunks.Count > 0)
+        {
+            LogCreatedImageChunks(_logger, imageChunks.Count, entry.SourcePath);
+        }
 
         // Index to vector store
         if (_vectorStore != null && _embeddingService != null)
         {
-            await IndexChunksAsync(entry, chunks, options, ct);
+            await IndexChunksAsync(entry, allChunks, options, ct);
         }
         else
         {
             LogNoVectorStoreSkipIndexing(_logger);
         }
 
-        return (chunks.Count, combinedContent.Length);
+        return (allChunks.Count, combinedContent.Length);
     }
 
-    private async Task IndexChunksAsync(VaultEntry entry, IReadOnlyList<string> chunks, MemorizeOptions options, CancellationToken ct)
+    private async Task IndexChunksAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, MemorizeOptions options, CancellationToken ct)
     {
         // Branch: when CheckpointCallback is set (job-queue path), use per-chunk processing
         // for crash-resilient resume. Otherwise, use the existing batch path (faster for the
@@ -672,12 +807,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// Used by direct callers of MemorizeAsync (no checkpoint hooks).
     /// </summary>
     /// <returns>The embedded chunks that were stored, for downstream GraphRAG indexing.</returns>
-    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksBatchAsync(VaultEntry entry, IReadOnlyList<string> chunks, CancellationToken ct)
+    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksBatchAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, CancellationToken ct)
     {
         var documentId = entry.FilepathHash;
 
         // Generate embeddings
-        var embeddings = await _embeddingService!.GenerateEmbeddingsBatchAsync(chunks, ct);
+        var embeddings = await _embeddingService!.GenerateEmbeddingsBatchAsync(chunks.Select(c => c.Content).ToList(), ct);
         var embeddingList = embeddings.ToList();
 
         if (embeddingList.Count != chunks.Count)
@@ -692,13 +827,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
         {
             var chunk = DocumentChunk.Create(
                 documentId: documentId,
-                content: chunks[i],
+                content: chunks[i].Content,
                 chunkIndex: i,
                 totalChunks: chunks.Count);
 
             chunk.SetEmbedding(embeddingList[i]);
 
-            ApplyChunkMetadata(chunk, entry);
+            ApplyChunkMetadata(chunk, entry, chunks[i].Metadata);
 
             documentChunks.Add(chunk);
         }
@@ -725,7 +860,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// </returns>
     private async Task<IReadOnlyList<DocumentChunk>> IndexChunksResumableAsync(
         VaultEntry entry,
-        IReadOnlyList<string> chunks,
+        IReadOnlyList<VaultChunk> chunks,
         int startFromChunk,
         Func<int, CancellationToken, Task> checkpointCallback,
         CancellationToken ct)
@@ -746,18 +881,18 @@ public sealed partial class VaultPipeline : IVaultPipeline
             }
 
             // Embed single chunk
-            var embedding = await _embeddingService!.GenerateEmbeddingAsync(chunks[i], ct);
+            var embedding = await _embeddingService!.GenerateEmbeddingAsync(chunks[i].Content, ct);
 
             // Build DocumentChunk
             var chunk = DocumentChunk.Create(
                 documentId: documentId,
-                content: chunks[i],
+                content: chunks[i].Content,
                 chunkIndex: i,
                 totalChunks: chunks.Count);
 
             chunk.SetEmbedding(embedding);
 
-            ApplyChunkMetadata(chunk, entry);
+            ApplyChunkMetadata(chunk, entry, chunks[i].Metadata);
 
             // Store single chunk (1-element batch — uses the same transactional path).
             // On commit success, the chunk row is durably in vector_chunks before we update the checkpoint.
@@ -885,21 +1020,6 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return chunks;
     }
 
-    private static string GuessContentType(string fileName)
-    {
-        var ext = Path.GetExtension(fileName).ToLowerInvariant();
-        return ext switch
-        {
-            ".png" => "image/png",
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".gif" => "image/gif",
-            ".webp" => "image/webp",
-            ".bmp" => "image/bmp",
-            ".svg" => "image/svg+xml",
-            _ => "application/octet-stream"
-        };
-    }
-
     #region LoggerMessage Definitions
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting memorize for {SourcePath}")]
@@ -944,6 +1064,14 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogNoContentToIndex(ILogger logger, string sourcePath);
     [LoggerMessage(Level = LogLevel.Debug, Message = "Created {ChunkCount} chunks from {ContentLength} chars")]
     private static partial void LogCreatedChunks(ILogger logger, int chunkCount, int contentLength);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Created {ChunkCount} image description chunks for {SourcePath}")]
+    private static partial void LogCreatedImageChunks(ILogger logger, int chunkCount, string sourcePath);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Describing {PendingCount} extracted images for {SourcePath}")]
+    private static partial void LogEnrichingImages(ILogger logger, int pendingCount, string sourcePath);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Image descriptions for {SourcePath}: {DescribedCount} available, {FailedCount} still pending")]
+    private static partial void LogEnrichedImages(ILogger logger, int describedCount, int failedCount, string sourcePath);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Enricher failed for image {ImageId} of {SourcePath}; it stays pending for the next run")]
+    private static partial void LogImageEnrichmentFailed(ILogger logger, Exception exception, string imageId, string sourcePath);
     [LoggerMessage(Level = LogLevel.Warning, Message = "No vector store or embedding service configured, skipping indexing")]
     private static partial void LogNoVectorStoreSkipIndexing(ILogger logger);
     [LoggerMessage(Level = LogLevel.Information, Message = "Indexed {Count} chunks for {DocumentId}")]
@@ -961,6 +1089,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
 }
 
 /// <summary>
+/// A unit of content on its way to the index, with any provenance metadata that applies to this
+/// chunk alone. Document text chunks carry none; an image-description chunk carries its image tags.
+/// </summary>
+internal sealed record VaultChunk(string Content, IReadOnlyDictionary<string, object>? Metadata);
+
+/// <summary>
 /// Interface for content extraction (FileFlux integration).
 /// </summary>
 public interface IExtractor
@@ -974,7 +1108,13 @@ public interface IExtractor
 public sealed class ExtractionResult
 {
     public string Content { get; init; } = "";
-    public Dictionary<string, byte[]>? Images { get; init; }
+
+    /// <summary>
+    /// Images the extractor pulled out of the document, with their identity and any alt text the
+    /// source format carried. The pipeline stores them in the vault and, when an
+    /// <see cref="IVaultImageEnricher"/> is registered, offers them for description.
+    /// </summary>
+    public IReadOnlyList<ImageArtifact>? Images { get; init; }
 
     /// <summary>
     /// Structured diagnostics reported by the extractor, passed through opaquely

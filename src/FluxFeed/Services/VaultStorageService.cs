@@ -116,6 +116,14 @@ public sealed partial class VaultStorageService : IVaultStorageService
     {
         Directory.CreateDirectory(entry.ImagesPath);
 
+        // Descriptions are expensive to produce and are keyed to the image, not to the run that
+        // extracted it. A re-memorize re-extracts the same images, so carry a previous description
+        // forward when the image is byte-identical — otherwise re-extraction would silently discard
+        // every description and make enrichment pay again on every memorize.
+        var previous = (await ReadManifestAsync(entry, ct) ?? [])
+            .Where(item => !string.IsNullOrWhiteSpace(item.Description))
+            .ToDictionary(item => item.Id, StringComparer.Ordinal);
+
         var manifest = new List<ImageManifestEntry>();
         var index = 0;
 
@@ -126,6 +134,14 @@ public sealed partial class VaultStorageService : IVaultStorageService
             var fileName = $"{image.Id}{extension}";
             var filePath = Path.Combine(entry.ImagesPath, fileName);
 
+            var carriedDescription = image.Description;
+            if (carriedDescription == null &&
+                previous.TryGetValue(image.Id, out var prior) &&
+                await IsSameStoredImageAsync(filePath, image.Data, ct))
+            {
+                carriedDescription = prior.Description;
+            }
+
             await File.WriteAllBytesAsync(filePath, image.Data, ct);
 
             manifest.Add(new ImageManifestEntry
@@ -133,7 +149,8 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 Id = image.Id,
                 FileName = fileName,
                 ContentType = image.ContentType,
-                Description = image.Description,
+                Description = carriedDescription,
+                AltText = image.AltText,
                 Width = image.Width,
                 Height = image.Height,
                 Size = image.Data.Length
@@ -173,6 +190,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                     Data = data,
                     ContentType = item.ContentType,
                     Description = item.Description,
+                    AltText = item.AltText,
                     Width = item.Width,
                     Height = item.Height
                 });
@@ -180,6 +198,66 @@ public sealed partial class VaultStorageService : IVaultStorageService
         }
 
         return images;
+    }
+
+    public async Task<IReadOnlyList<VaultImage>> GetImageManifestAsync(VaultEntry entry, CancellationToken ct = default)
+    {
+        var manifest = await ReadManifestAsync(entry, ct);
+        if (manifest == null)
+            return [];
+
+        return manifest
+            .Where(item => File.Exists(Path.Combine(entry.ImagesPath, item.FileName)))
+            .Select(item => new VaultImage
+            {
+                Id = item.Id,
+                FileName = item.FileName,
+                FilePath = Path.Combine(entry.ImagesPath, item.FileName),
+                ContentType = item.ContentType,
+                Description = item.Description,
+                AltText = item.AltText
+            })
+            .ToList();
+    }
+
+    public async Task<bool> SetImageDescriptionAsync(VaultEntry entry, string imageId, string description, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(imageId);
+
+        var manifest = await ReadManifestAsync(entry, ct);
+        var target = manifest?.FirstOrDefault(item => item.Id == imageId);
+        if (target == null)
+            return false;
+
+        target.Description = description;
+
+        var json = JsonSerializer.Serialize(manifest, JsonOptions);
+        await File.WriteAllTextAsync(entry.ImagesManifestPath, json, ct);
+
+        LogStoredImageDescription(_logger, imageId, entry.Id);
+        return true;
+    }
+
+    /// <summary>
+    /// True when the file already on disk is byte-identical to the freshly extracted image — the
+    /// condition under which a description written for it is still about the same picture.
+    /// </summary>
+    private static async Task<bool> IsSameStoredImageAsync(string filePath, byte[] data, CancellationToken ct)
+    {
+        if (!File.Exists(filePath))
+            return false;
+
+        var existing = await File.ReadAllBytesAsync(filePath, ct);
+        return existing.AsSpan().SequenceEqual(data);
+    }
+
+    private async Task<List<ImageManifestEntry>?> ReadManifestAsync(VaultEntry entry, CancellationToken ct)
+    {
+        if (!File.Exists(entry.ImagesManifestPath))
+            return null;
+
+        var json = await File.ReadAllTextAsync(entry.ImagesManifestPath, ct);
+        return JsonSerializer.Deserialize<List<ImageManifestEntry>>(json, JsonOptions);
     }
 
     public async Task<VaultTextContent> GetAllVaultContentAsync(VaultEntry entry, CancellationToken ct = default)
@@ -328,6 +406,9 @@ public sealed partial class VaultStorageService : IVaultStorageService
     [LoggerMessage(Level = LogLevel.Debug, Message = "Stored {Count} images for entry {EntryId}")]
     private static partial void LogStoredImages(ILogger logger, int count, Guid entryId);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Stored description for image {ImageId} of entry {EntryId}")]
+    private static partial void LogStoredImageDescription(ILogger logger, string imageId, Guid entryId);
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Stored append-text for entry {EntryId}")]
     private static partial void LogStoredAppendText(ILogger logger, Guid entryId);
 
@@ -350,7 +431,9 @@ public sealed partial class VaultStorageService : IVaultStorageService
         public string Id { get; init; } = string.Empty;
         public string FileName { get; init; } = string.Empty;
         public string ContentType { get; init; } = string.Empty;
-        public string? Description { get; init; }
+        // Settable: enrichment fills this in per image, long after the manifest was written.
+        public string? Description { get; set; }
+        public string? AltText { get; init; }
         public int Width { get; init; }
         public int Height { get; init; }
         public long Size { get; init; }

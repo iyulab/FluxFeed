@@ -1,6 +1,7 @@
 using System.Globalization;
 using FileFlux;
 using FileFlux.Core;
+using FluxFeed.Interfaces;
 using FluxFeed.Services;
 using Microsoft.Extensions.Logging;
 
@@ -52,19 +53,23 @@ public sealed partial class FileFluxExtractor : IExtractor
                 : string.Empty;
 
             // Extract images from RawContent if available
-            Dictionary<string, byte[]>? images = null;
+            List<ImageArtifact>? images = null;
             if (result.Raw?.Images?.Count > 0)
             {
-                images = [];
                 foreach (var (img, idx) in result.Raw.Images.Select((img, idx) => (img, idx)))
                 {
-                    if (img.Data is { Length: > 0 })
+                    if (img.Data is not { Length: > 0 })
+                        continue;
+
+                    images ??= [];
+                    images.Add(new ImageArtifact
                     {
-                        var baseName = !string.IsNullOrEmpty(img.Id) ? img.Id : $"img_{idx:D3}";
-                        var extension = GetExtensionFromContentType(img.MimeType);
-                        var key = $"{baseName}{extension}";
-                        images[key] = img.Data;
-                    }
+                        Id = !string.IsNullOrEmpty(img.Id) ? img.Id : $"img_{idx:D3}",
+                        Data = img.Data,
+                        ContentType = img.MimeType ?? "image/png",
+                        // Alt text / caption when the format carries one (HTML alt, Office alt text).
+                        AltText = string.IsNullOrWhiteSpace(img.Caption) ? null : img.Caption
+                    });
                 }
             }
 
@@ -80,7 +85,7 @@ public sealed partial class FileFluxExtractor : IExtractor
             return new ExtractionResult
             {
                 Content = content,
-                Images = images?.Count > 0 ? images : null,
+                Images = images,
                 Hints = hints,
                 Warnings = warnings
             };
@@ -156,20 +161,4 @@ public sealed partial class FileFluxExtractor : IExtractor
 
         return formatted.Length > 0 || value is string;
     }
-
-    /// <summary>
-    /// Get file extension from content type.
-    /// </summary>
-    private static string GetExtensionFromContentType(string? contentType) => contentType?.ToLowerInvariant() switch
-    {
-        "image/png" => ".png",
-        "image/jpeg" => ".jpg",
-        "image/gif" => ".gif",
-        "image/webp" => ".webp",
-        "image/bmp" => ".bmp",
-        "image/svg+xml" => ".svg",
-        "image/tiff" => ".tiff",
-        "image/x-icon" or "image/vnd.microsoft.icon" => ".ico",
-        _ => ".png"  // Default to PNG for unknown types
-    };
 }

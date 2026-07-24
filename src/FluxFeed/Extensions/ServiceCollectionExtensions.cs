@@ -94,6 +94,9 @@ public static class ServiceCollectionExtensions
     /// - IExtractor: For content extraction from source files
     /// - IChunker: For content chunking
     /// - IMemorizer: For chunk indexing/memorization
+    /// Optionally:
+    /// - IVaultImageEnricher: To have extracted images described and indexed. Without it images are
+    ///   still extracted and stored, they are simply not described.
     /// </remarks>
     public static IServiceCollection AddFileVaultWithPipeline(
         this IServiceCollection services,
