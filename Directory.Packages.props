@@ -4,7 +4,10 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="FluxIndex.Core" Version="0.17.0" />
-    <PackageVersion Include="FileFlux" Version="0.10.6" />
+    <!-- 0.14.0+ is load-bearing: structured extraction diagnostics
+         (RawContent.Hints["extraction_failure_reason"] = no_text_layer / blank_page)
+         only exist from 0.13.0/0.14.0 and are propagated to VaultEntry. -->
+    <PackageVersion Include="FileFlux" Version="0.14.0" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.8" />
     <!-- Explicit lift: Microsoft.Data.Sqlite 10.0.8 pulls SQLitePCLRaw 2.1.11
          (NU1903 high, GHSA-2m69-gcr7-jv3q); upstream 2.1.12 stable landed 2026-07-09. -->

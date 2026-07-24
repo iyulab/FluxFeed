@@ -107,6 +107,23 @@ public sealed class VaultEntry
     public EmbeddingIdentity? EmbeddedIdentity { get; private set; }
 
     /// <summary>
+    /// Structured diagnostics reported by the extractor for the last extraction, passed through
+    /// opaquely (the vault does not interpret keys or values). With the FileFlux extractor these are
+    /// <c>RawContent.Hints</c> with scalar values — notably
+    /// <c>extraction_failure_reason</c> = <c>no_text_layer</c> (image-only/scanned document) or
+    /// <c>blank_page</c>, which explain a legitimate 0-chunk outcome that would otherwise look like
+    /// a silent success. Null when the extractor reported none; replaced on every re-extraction.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ExtractionHints { get; private set; }
+
+    /// <summary>
+    /// Human-readable extraction warnings reported by the extractor for the last extraction
+    /// (e.g. "image-only/scanned document ... requires OCR"). Distinct from <see cref="LastError"/>,
+    /// which is reserved for the exception path. Null when none; replaced on every re-extraction.
+    /// </summary>
+    public IReadOnlyList<string>? ExtractionWarnings { get; private set; }
+
+    /// <summary>
     /// Current synchronization status with source file and vector store.
     /// </summary>
     public SyncStatus SyncStatus { get; private set; }
@@ -188,6 +205,8 @@ public sealed class VaultEntry
                 ChunkCount = meta.ChunkCount,
                 EmbeddedDimension = meta.EmbeddedDimension,
                 EmbeddedIdentity = meta.EmbeddedIdentity,
+                ExtractionHints = meta.ExtractionHints is { Count: > 0 } ? meta.ExtractionHints : null,
+                ExtractionWarnings = meta.ExtractionWarnings is { Count: > 0 } ? meta.ExtractionWarnings : null,
                 SyncStatus = meta.SyncStatus,
                 LastSyncCheckAt = meta.LastSyncCheckAt,
                 RemovalPhase = meta.RemovalPhase
@@ -214,14 +233,27 @@ public sealed class VaultEntry
     }
 
     /// <summary>
-    /// Marks the entry as extracted with the given content hash.
+    /// Marks the entry as extracted with the given content hash, recording any structured
+    /// diagnostics the extractor reported.
     /// </summary>
-    public void MarkExtracted(ContentHash contentHash)
+    /// <param name="contentHash">Content hash of the source file at extraction time.</param>
+    /// <param name="extractionHints">
+    /// Extractor diagnostics, stored opaquely (see <see cref="ExtractionHints"/>).
+    /// Passing null clears diagnostics from a previous extraction — they always describe the
+    /// <em>latest</em> extraction, never a stale one.
+    /// </param>
+    /// <param name="extractionWarnings">Extractor warnings (see <see cref="ExtractionWarnings"/>).</param>
+    public void MarkExtracted(
+        ContentHash contentHash,
+        IReadOnlyDictionary<string, string>? extractionHints = null,
+        IReadOnlyList<string>? extractionWarnings = null)
     {
         Stage = ProcessingStage.Extracted;
         SourceContentHash = contentHash;
         LastProcessedAt = DateTimeOffset.UtcNow;
         LastError = null;
+        ExtractionHints = extractionHints is { Count: > 0 } ? extractionHints : null;
+        ExtractionWarnings = extractionWarnings is { Count: > 0 } ? extractionWarnings : null;
     }
 
     /// <summary>
@@ -309,6 +341,9 @@ public sealed class VaultEntry
         RetryCount = 0;
         SyncStatus = SyncStatus.InSync;
         RemovalPhase = null;
+        // Diagnostics describe a completed extraction; nothing has been extracted at Source stage.
+        ExtractionHints = null;
+        ExtractionWarnings = null;
     }
 
     /// <summary>
@@ -407,6 +442,8 @@ public sealed class VaultEntry
             ChunkCount = ChunkCount,
             EmbeddedDimension = EmbeddedDimension,
             EmbeddedIdentity = EmbeddedIdentity,
+            ExtractionHints = ExtractionHints?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            ExtractionWarnings = ExtractionWarnings?.ToList(),
             SyncStatus = SyncStatus,
             LastSyncCheckAt = LastSyncCheckAt,
             RemovalPhase = RemovalPhase
@@ -510,6 +547,10 @@ public sealed class VaultEntry
         public int ChunkCount { get; set; }
         public int? EmbeddedDimension { get; set; }
         public EmbeddingIdentity? EmbeddedIdentity { get; set; }
+
+        // Extraction diagnostics (opaque pass-through from the extractor).
+        public Dictionary<string, string>? ExtractionHints { get; set; }
+        public List<string>? ExtractionWarnings { get; set; }
 
         // SyncStatus fields
         public SyncStatus SyncStatus { get; set; }

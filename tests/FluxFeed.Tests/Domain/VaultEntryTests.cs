@@ -524,6 +524,95 @@ public class VaultEntryTests : IDisposable
         loaded.RetryCount.Should().Be(1);
     }
 
+    [Fact]
+    public void MarkExtracted_WithDiagnostics_SurvivesMetadataRoundTrip()
+    {
+        // Arrange — the scanned-PDF case: no text, but a structured reason instead of an exception.
+        var sourcePath = Path.Combine(_testDir, "scan.pdf");
+        File.WriteAllText(sourcePath, "%PDF-1.7");
+        var entry = VaultEntry.Create(sourcePath, _testDir);
+        var hash = ContentHash.FromHex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+
+        // Act
+        entry.MarkExtracted(
+            hash,
+            new Dictionary<string, string> { ["extraction_failure_reason"] = "no_text_layer" },
+            ["image-only/scanned document; OCR required"]);
+        entry.SaveMetadata();
+        var loaded = VaultEntry.Load(entry.EntryPath, _testDir);
+
+        // Assert
+        loaded.Should().NotBeNull();
+        loaded!.ExtractionHints.Should().NotBeNull();
+        loaded.ExtractionHints!["extraction_failure_reason"].Should().Be("no_text_layer");
+        loaded.ExtractionWarnings.Should().ContainSingle()
+            .Which.Should().Contain("OCR required");
+        // Diagnostics are distinct from the exception channel.
+        loaded.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public void MarkExtracted_WithoutDiagnostics_ClearsPreviousOnes()
+    {
+        // Diagnostics always describe the latest extraction — a re-extraction that reports none
+        // (e.g. the source file was replaced with a text-bearing version) must not keep stale ones.
+        var entry = CreateTestEntry();
+        var hash = ContentHash.FromHex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        entry.MarkExtracted(hash, new Dictionary<string, string> { ["extraction_failure_reason"] = "blank_page" }, ["blank"]);
+
+        entry.MarkExtracted(hash);
+
+        entry.ExtractionHints.Should().BeNull();
+        entry.ExtractionWarnings.Should().BeNull();
+    }
+
+    [Fact]
+    public void MarkMemorized_PreservesExtractionDiagnostics()
+    {
+        // The 0-chunk path (empty extracted content) still runs through MarkMemorized; the reason
+        // for the 0 chunks must survive it, otherwise the entry reads as a silent success.
+        var entry = CreateTestEntry();
+        var hash = ContentHash.FromHex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        entry.MarkExtracted(hash, new Dictionary<string, string> { ["extraction_failure_reason"] = "no_text_layer" }, ["scanned"]);
+
+        entry.MarkMemorized(0);
+
+        entry.ChunkCount.Should().Be(0);
+        entry.ExtractionHints!["extraction_failure_reason"].Should().Be("no_text_layer");
+        entry.ExtractionWarnings.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void ResetToSource_ClearsExtractionDiagnostics()
+    {
+        var entry = CreateTestEntry();
+        var hash = ContentHash.FromHex("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        entry.MarkExtracted(hash, new Dictionary<string, string> { ["extraction_failure_reason"] = "blank_page" }, ["blank"]);
+
+        entry.ResetToSource();
+
+        entry.ExtractionHints.Should().BeNull();
+        entry.ExtractionWarnings.Should().BeNull();
+    }
+
+    [Fact]
+    public void Load_LegacyMetadataWithoutDiagnostics_YieldsNullFields()
+    {
+        // Entries written before diagnostics existed must load without a schema migration.
+        var sourcePath = Path.Combine(_testDir, "legacy.txt");
+        File.WriteAllText(sourcePath, "old");
+        var entry = VaultEntry.Create(sourcePath, _testDir);
+        entry.MarkMemorized(3);
+        entry.SaveMetadata();
+
+        var json = File.ReadAllText(entry.MetaPath);
+        json.Should().NotContain("\"ExtractionHints\": {");
+
+        var loaded = VaultEntry.Load(entry.EntryPath, _testDir);
+        loaded!.ExtractionHints.Should().BeNull();
+        loaded.ExtractionWarnings.Should().BeNull();
+    }
+
     private VaultEntry CreateTestEntry()
     {
         var sourcePath = Path.Combine(_testDir, $"test_{Guid.NewGuid():N}.txt");

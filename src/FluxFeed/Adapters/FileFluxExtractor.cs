@@ -1,3 +1,4 @@
+using System.Globalization;
 using FileFlux;
 using FileFlux.Core;
 using FluxFeed.Services;
@@ -67,12 +68,21 @@ public sealed partial class FileFluxExtractor : IExtractor
                 }
             }
 
+            var hints = ProjectScalarHints(result.Raw?.Hints);
+            var warnings = result.Raw?.Warnings is { Count: > 0 } w ? w.ToArray() : null;
+
             LogExtracted(_logger, content.Length, images?.Count ?? 0, sourcePath);
+            if (hints != null || warnings != null)
+            {
+                LogExtractionDiagnostics(_logger, hints?.Count ?? 0, warnings?.Length ?? 0, sourcePath);
+            }
 
             return new ExtractionResult
             {
                 Content = content,
-                Images = images?.Count > 0 ? images : null
+                Images = images?.Count > 0 ? images : null,
+                Hints = hints,
+                Warnings = warnings
             };
         }
         catch (Exception ex)
@@ -93,7 +103,59 @@ public sealed partial class FileFluxExtractor : IExtractor
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to extract content from {SourcePath}")]
     private static partial void LogExtractionFailed(ILogger logger, Exception exception, string sourcePath);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Extraction reported {HintCount} hints and {WarningCount} warnings for {SourcePath}")]
+    private static partial void LogExtractionDiagnostics(ILogger logger, int hintCount, int warningCount, string sourcePath);
+
     #endregion
+
+    /// <summary>
+    /// Projects FileFlux's <c>RawContent.Hints</c> (an untyped <c>Dictionary&lt;string, object&gt;</c>)
+    /// onto the persistable string map carried by <see cref="ExtractionResult.Hints"/>.
+    /// <para>
+    /// Keys are passed through opaquely — FluxFeed never interprets FileFlux vocabulary. Values are
+    /// filtered by <b>type</b>, not by key: only scalars survive. Reader-internal structural values
+    /// (e.g. <c>PageRanges</c>, a <c>Dictionary&lt;int, (int, int)&gt;</c>) would stringify to a bare
+    /// type name, so they are dropped rather than persisted as noise in meta.json. A type rule keeps
+    /// this free of vocabulary drift as FileFlux adds hint keys.
+    /// </para>
+    /// </summary>
+    private static Dictionary<string, string>? ProjectScalarHints(Dictionary<string, object>? hints)
+    {
+        if (hints is not { Count: > 0 })
+            return null;
+
+        Dictionary<string, string>? projected = null;
+        foreach (var (key, value) in hints)
+        {
+            if (!TryFormatScalar(value, out var formatted))
+                continue;
+
+            projected ??= [];
+            projected[key] = formatted;
+        }
+
+        return projected;
+    }
+
+    private static bool TryFormatScalar(object? value, out string formatted)
+    {
+        formatted = value switch
+        {
+            string s => s,
+            bool b => b ? "true" : "false",
+            byte or sbyte or short or ushort or int or uint or long or ulong
+                or float or double or decimal or char
+                => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+            DateTime dt => dt.ToString("O", CultureInfo.InvariantCulture),
+            DateTimeOffset dto => dto.ToString("O", CultureInfo.InvariantCulture),
+            TimeSpan ts => ts.ToString("c", CultureInfo.InvariantCulture),
+            Guid g => g.ToString(),
+            Enum e => e.ToString(),
+            _ => string.Empty
+        };
+
+        return formatted.Length > 0 || value is string;
+    }
 
     /// <summary>
     /// Get file extension from content type.

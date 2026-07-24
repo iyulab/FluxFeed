@@ -285,11 +285,15 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         // Extract content
         string extractedContent;
+        IReadOnlyDictionary<string, string>? extractionHints = null;
+        IReadOnlyList<string>? extractionWarnings = null;
 
         if (_extractor != null)
         {
             var result = await _extractor.ExtractAsync(entry.SourcePath, ct);
             extractedContent = result.Content;
+            extractionHints = result.Hints;
+            extractionWarnings = result.Warnings;
 
             // Store images if any - preserve original IDs from FileFlux
             if (result.Images?.Count > 0)
@@ -312,8 +316,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // Store raw extracted content (not git-tracked)
         await _storage.StoreExtractedContentAsync(entry, extractedContent, ct);
 
-        // Update entry to Extracted stage
-        entry.MarkExtracted(contentHash);
+        // Update entry to Extracted stage, carrying the extractor's structured diagnostics so a
+        // legitimate 0-chunk outcome (scanned/blank document) is explainable downstream instead of
+        // looking like a silent success.
+        entry.MarkExtracted(contentHash, extractionHints, extractionWarnings);
         entry.SaveMetadata();
 
         LogExtracted(_logger, extractedContent.Length, entry.ExtractedMdPath);
@@ -969,6 +975,21 @@ public sealed class ExtractionResult
 {
     public string Content { get; init; } = "";
     public Dictionary<string, byte[]>? Images { get; init; }
+
+    /// <summary>
+    /// Structured diagnostics reported by the extractor, passed through opaquely
+    /// (the vault does not interpret keys or values). For the FileFlux extractor these are
+    /// <c>RawContent.Hints</c> with scalar values, e.g.
+    /// <c>extraction_failure_reason = no_text_layer</c> for an image-only/scanned PDF.
+    /// Null or empty when the extractor reported none.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Hints { get; init; }
+
+    /// <summary>
+    /// Human-readable extraction warnings reported by the extractor, passed through verbatim
+    /// (e.g. "image-only/scanned document ... requires OCR"). Null or empty when none.
+    /// </summary>
+    public IReadOnlyList<string>? Warnings { get; init; }
 }
 
 /// <summary>
