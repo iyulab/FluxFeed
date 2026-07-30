@@ -66,7 +66,10 @@ public sealed partial class FileFluxExtractor : IExtractor
                     {
                         Id = !string.IsNullOrEmpty(img.Id) ? img.Id : $"img_{idx:D3}",
                         Data = img.Data,
-                        ContentType = img.MimeType ?? "image/png",
+                        // No format guess here: an unrecognized MIME type must surface as
+                        // "we don't know" so consumers can decide, not be silently mislabeled
+                        // as a format the bytes may not actually be.
+                        ContentType = img.MimeType ?? "application/octet-stream",
                         // Alt text / caption when the format carries one (HTML alt, Office alt text).
                         AltText = string.IsNullOrWhiteSpace(img.Caption) ? null : img.Caption
                     });

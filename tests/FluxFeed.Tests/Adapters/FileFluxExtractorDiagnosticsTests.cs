@@ -142,7 +142,8 @@ public class FileFluxExtractorDiagnosticsTests
 
         var second = result.Images[1];
         second.Id.Should().Be("img_001", "an unnamed image still needs a stable id, indexed by position");
-        second.ContentType.Should().Be("image/png", "unknown mime type falls back to png");
+        second.ContentType.Should().Be("application/octet-stream",
+            "an unknown mime type must surface as unknown, not be fabricated as a format the bytes may not be");
         second.AltText.Should().BeNull("no caption means no alt text, not an empty one");
     }
 
