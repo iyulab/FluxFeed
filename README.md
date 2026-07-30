@@ -54,7 +54,9 @@ if (entry.FirstError is not null)
 
 - 재시도가 자기 이유로 실패하면 `LastError`는 덮이지만 `FirstError`는 남는다. 최초 실패가 추출기의 진단을
   싣고 있으므로, 그것이 지워지면 원본 파일 없이 진단할 방법이 사라진다.
-- 성공 단계에 도달하거나 `ResetToSource()` 하면 둘 다 지워진다 — 항상 **현재 에피소드**만 서술한다.
+- `FirstError`는 `LastError`와 **같은 생애를 갖는다** — 처리 단계가 진행되거나(`Extracted`/`Refined`/`Memorized`)
+  `ResetToSource()` 하면 둘 다 지워진다. 반대로 **sync 상태 전이는 어느 쪽도 지우지 않는다**(`MarkInSync` 포함).
+  따라서 `FirstError != null`을 "지금 고장난 엔트리"로 읽지 말 것 — 그 판정은 `Stage`/`SyncStatus`로 한다.
 - 이전 버전이 쓴 `meta.json`은 `LastError`를 `FirstError`로 승계한다(한 번만 실패한 엔트리에서는 같은 값).
 - `ChangeDetectionResult`에도 같은 두 필드가 실린다.
 

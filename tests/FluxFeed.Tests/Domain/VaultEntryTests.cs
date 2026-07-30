@@ -679,7 +679,9 @@ public class VaultEntryTests : IDisposable
         entry.SaveMetadata();
 
         var json = File.ReadAllText(entry.MetaPath);
+        json.Should().Contain("\"FirstError\"", "otherwise the rewrite below is a no-op and this test proves nothing");
         File.WriteAllText(entry.MetaPath, json.Replace("\"FirstError\"", "\"RetiredField\"", StringComparison.Ordinal));
+        File.ReadAllText(entry.MetaPath).Should().NotContain("\"FirstError\"");
 
         var loaded = VaultEntry.Load(entry.EntryPath, _testDir);
 
