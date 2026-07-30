@@ -173,6 +173,10 @@ public sealed partial class VaultManager : IVault
         var orphansDetected = 0;
         var orphansQueued = 0;
         var errors = new List<SyncError>();
+        // ScanFolderAsync now runs its own reverse pass per watched folder (below); track what it
+        // already surfaced so the cross-location sweep after the loop does not re-detect and
+        // re-queue the same orphan a second time.
+        var orphansSeenInFolderScan = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Scan all watched folders
         var folders = _watchedFolders.Values.ToList();
@@ -214,6 +218,7 @@ public sealed partial class VaultManager : IVault
 
                             case ChangeAction.Remove:
                                 orphansDetected++;
+                                orphansSeenInFolderScan.Add(change.FilePath);
                                 if (_options.AutoCleanupOrphans)
                                 {
                                     await _queue.EnqueueRemoveAsync(
@@ -260,8 +265,12 @@ public sealed partial class VaultManager : IVault
             }
         }
 
-        // Also check orphaned entries across all locations
-        var orphanedEntries = await GetOrphanedEntriesAsync(ct);
+        // Also check orphaned entries across all locations (covers entries outside any watched
+        // folder, e.g. a folder that was unwatched after the entry was created). Entries already
+        // surfaced by a folder's own reverse pass above are excluded to avoid double-queuing.
+        var orphanedEntries = (await GetOrphanedEntriesAsync(ct))
+            .Where(e => !orphansSeenInFolderScan.Contains(e.SourcePath))
+            .ToList();
         foreach (var entry in orphanedEntries)
         {
             if (!_options.AutoCleanupOrphans) continue;
@@ -891,6 +900,38 @@ public sealed partial class VaultManager : IVault
             }
         }
 
+        // Reverse pass: Directory.EnumerateFiles above can only ever yield files that still exist,
+        // so a tracked entry whose source was deleted is never visited by the forward loop and
+        // DetermineAction's Remove branch can never fire from it. Surface those entries here by
+        // walking tracked entries instead of disk files, scoped to this folder.
+        var trackedEntries = await ListAsync(ct: ct);
+        foreach (var entry in trackedEntries)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (File.Exists(entry.SourcePath) || !IsWithinScannedFolder(entry.SourcePath, fullPath, isRecursive))
+                continue;
+
+            try
+            {
+                var change = await DetectChangesAsync(entry.SourcePath, ct);
+                if (change.RecommendedAction == ChangeAction.Remove)
+                {
+                    detectedChanges.Add(change);
+                    orphanedCount++;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                errors.Add(new ScanError { FilePath = entry.SourcePath, ErrorMessage = ex.Message });
+                LogFailedToDetectChanges(_logger, ex, entry.SourcePath);
+            }
+        }
+
         sw.Stop();
         LogScannedFolder(_logger, fullPath, newCount, changedCount, existingCount, sw.ElapsedMilliseconds);
 
@@ -907,6 +948,27 @@ public sealed partial class VaultManager : IVault
             Errors = errors,
             Duration = sw.Elapsed
         };
+    }
+
+    /// <summary>
+    /// Whether a (possibly now-deleted) source path falls within the folder being scanned.
+    /// </summary>
+    /// <remarks>
+    /// Compares against the source's parent directory rather than doing a string prefix match on
+    /// the full path, so a folder named "C:\data\A" does not spuriously match a sibling "C:\data\AB".
+    /// </remarks>
+    private static bool IsWithinScannedFolder(string sourcePath, string folderFullPath, bool recursive)
+    {
+        var sourceDirectory = Path.GetDirectoryName(sourcePath);
+        if (string.IsNullOrEmpty(sourceDirectory))
+            return false;
+
+        if (!recursive)
+            return string.Equals(sourceDirectory, folderFullPath, StringComparison.OrdinalIgnoreCase);
+
+        var normalizedFolder = folderFullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return sourceDirectory.Equals(normalizedFolder, StringComparison.OrdinalIgnoreCase) ||
+               sourceDirectory.StartsWith(normalizedFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<ScanResult> ScanFolderAsync(Guid folderId, CancellationToken ct = default)

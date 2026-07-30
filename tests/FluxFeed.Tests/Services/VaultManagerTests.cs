@@ -397,6 +397,51 @@ public class VaultManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task ScanFolderAsync_TrackedEntryWithDeletedSource_SurfacesRemoveAction()
+    {
+        // Arrange — an entry that was memorized and then had its source file deleted. The forward
+        // per-file loop can never observe this (Directory.EnumerateFiles only yields files that
+        // still exist), so discovery has to come from a reverse pass over tracked entries instead.
+        var filePath = CreateTestFile("orphaned.txt", "Hello, World!");
+        CreateEntryWithMetadata(filePath);
+        File.Delete(filePath);
+
+        // Act
+        var result = await _vault.ScanFolderAsync(_testDir);
+
+        // Assert
+        result.OrphanedFilesCount.Should().Be(1);
+        result.DetectedChanges.Should().ContainSingle(c =>
+            c.FilePath == Path.GetFullPath(filePath) && c.RecommendedAction == ChangeAction.Remove);
+    }
+
+    [Fact]
+    public async Task ScanFolderAsync_TrackedEntryWithDeletedSourceOutsideFolder_IsNotSurfaced()
+    {
+        // Arrange — an orphan whose source lived elsewhere must not leak into a scan scoped to a
+        // different folder (folder-scoped scans should not become an implicit global sweep).
+        var outsideDir = Path.Combine(Path.GetTempPath(), "FileVaultTests_Outside_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outsideDir);
+        try
+        {
+            var outsidePath = Path.Combine(outsideDir, "elsewhere.txt");
+            File.WriteAllText(outsidePath, "content");
+            CreateEntryWithMetadata(outsidePath);
+            File.Delete(outsidePath);
+
+            // Act
+            var result = await _vault.ScanFolderAsync(_testDir);
+
+            // Assert
+            result.OrphanedFilesCount.Should().Be(0);
+        }
+        finally
+        {
+            Directory.Delete(outsideDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DetectChangesAsync_NewFile_ReturnsMemorizeAction()
     {
         // Arrange
