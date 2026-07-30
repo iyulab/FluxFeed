@@ -153,4 +153,22 @@ public sealed class VaultPipelineKeywordIndexTests : IDisposable
 
         await _vectorStore.Received(1).DeleteByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task PurgeVectorsAsync_WithKeywordSearchServiceRegistered_DoesNotTouchKeywordIndex()
+    {
+        // IKeywordSearchService has no tag/filter-scoped bulk delete (only per-document, per-chunk,
+        // or clear-everything), so a tenant purge cannot reach only that tenant's keyword-index
+        // rows. This pins the current, honestly-disclosed gap: PurgeVectorsAsync purges the vector
+        // store only. If this starts failing, either the interface gained a filtered delete (update
+        // this pipeline to use it) or the gap regressed silently the other way.
+        var keyword = CreateKeywordMock();
+        var pipeline = CreatePipeline(keyword);
+
+        await pipeline.PurgeVectorsAsync("tenant-x");
+
+        await keyword.DidNotReceiveWithAnyArgs().DeleteByDocumentIdAsync(default!, default);
+        await keyword.DidNotReceiveWithAnyArgs().DeleteChunkAsync(default!, default);
+        await keyword.DidNotReceiveWithAnyArgs().ClearIndexAsync(default);
+    }
 }

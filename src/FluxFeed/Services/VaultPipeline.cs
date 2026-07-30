@@ -493,6 +493,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// vector store is configured). This is the tenant/vault purge primitive used by
     /// <c>IVault.PurgeAsync</c> — it replaces a per-entry delete loop.
     /// </summary>
+    /// <remarks>
+    /// Vector store only. <see cref="IKeywordSearchService"/> exposes no tag/filter-scoped bulk
+    /// delete (only per-document, per-chunk, or clear-the-whole-index), so a purge cannot reach
+    /// only one tenant's keyword-index rows. When a keyword service is registered, this logs a
+    /// warning rather than claim a purge it cannot perform.
+    /// </remarks>
     public async Task<int> PurgeVectorsAsync(string vaultId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(vaultId);
@@ -505,6 +511,16 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         var deleted = await _vectorStore.DeleteByFilterAsync(
             new Dictionary<string, object> { ["vault_id"] = vaultId }, ct);
+
+        // IKeywordSearchService has no filter/tag-based bulk delete (only per-document,
+        // per-chunk, or clear-everything) - a tenant purge cannot reach only this tenant's rows
+        // there. This was a no-op gap before the keyword leg was populated (nothing to purge);
+        // now that MemorizeAsync writes chunks there too, it is a real asymmetry: this method's
+        // name promises "this tenant's data is gone" but leaves keyword-index rows behind.
+        if (_keywordSearchService != null)
+        {
+            LogPurgeDoesNotCoverKeywordIndex(_logger, vaultId);
+        }
 
         LogRemovedChunks(_logger, $"vault_id={vaultId}");
         return deleted;
@@ -1123,6 +1139,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Indexed {Count} chunks to keyword index for {DocumentId}")]
     private static partial void LogIndexedKeywordChunks(ILogger logger, int count, string documentId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Purge for vault_id {VaultId} removed vector store entries only; IKeywordSearchService has no tenant-scoped bulk delete, so keyword index rows for this tenant remain")]
+    private static partial void LogPurgeDoesNotCoverKeywordIndex(ILogger logger, string vaultId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Building GraphRAG index for {DocumentId} from {ChunkCount} chunks")]
     private static partial void LogBuildingGraphRagIndex(ILogger logger, string documentId, int chunkCount);
