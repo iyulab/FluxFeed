@@ -37,6 +37,7 @@ public sealed partial class VaultFactory : IVaultFactory
     private readonly IVectorStore? _sharedVectorStore;
     private readonly IEmbeddingService? _sharedEmbeddingService;
     private readonly IGraphRAGService? _sharedGraphRAGService;
+    private readonly IKeywordSearchService? _sharedKeywordSearchService;
     private readonly IVaultImageEnricher? _sharedImageEnricher;
 
     public VaultFactory(
@@ -51,6 +52,7 @@ public sealed partial class VaultFactory : IVaultFactory
         IVectorStore? vectorStore = null,
         IEmbeddingService? embeddingService = null,
         IGraphRAGService? graphRAGService = null,
+        IKeywordSearchService? keywordSearchService = null,
         IVaultImageEnricher? imageEnricher = null)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
@@ -67,6 +69,7 @@ public sealed partial class VaultFactory : IVaultFactory
         _sharedVectorStore = vectorStore;
         _sharedEmbeddingService = embeddingService;
         _sharedGraphRAGService = graphRAGService;
+        _sharedKeywordSearchService = keywordSearchService;
         _sharedImageEnricher = imageEnricher;
     }
 
@@ -219,6 +222,7 @@ public sealed partial class VaultFactory : IVaultFactory
             _sharedEmbeddingService,
             hybridSearch: null,
             graphRAGService: _sharedGraphRAGService,
+            keywordSearchService: _sharedKeywordSearchService,
             imageEnricher: _sharedImageEnricher);
 
         // Create VaultManager with mixed shared/tenant-specific services

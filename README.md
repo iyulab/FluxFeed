@@ -92,4 +92,18 @@ services.AddSingleton<IVaultImageEnricher, VisionEnricher>();
 - **이미지-only 문서** — 텍스트 레이어가 없는 스캔·도표 문서는 종전에 0청크로 끝났으나, 설명이 있으면 그 설명이 곧 내용으로 인덱싱된다. (텍스트도 없고 설명도 없으면 종전대로 0청크.)
 - `request.DocumentText`는 원문서 추출 텍스트이며, 텍스트 레이어가 없으면 null이다.
 
+## Keyword index (hybrid search)
+
+파이프라인은 벡터 스토어·GraphRAG와 같은 지점에서 청크를 인덱싱한다. DI 컨테이너에 `IKeywordSearchService`가
+등록되어 있으면(FluxIndex SDK가 기본으로 등록하는 in-memory BM25 폴백이든, PostgreSQL/SQLite 같은 영속
+백엔드든) 같은 청크가 키워드 인덱스에도 적재되어 하이브리드 검색의 세 번째 다리가 채워진다 — FluxIndex의
+자체 `Indexer` 경로가 아니라 이 ingestion 파이프라인으로 적재하는 구성에서는, 이 배선 없이는 키워드
+인덱스가 항상 비어 있다(벡터 단독 검색과 사실상 동일).
+
+- **미등록 시 종전과 동일** — 벡터·GraphRAG 인덱싱만 수행된다 (하위 호환).
+- **GraphRAG과 달리 옵션 게이트가 없다** — 등록 자체가 신호다. 서비스가 있으면 항상 인덱싱하고, 없으면
+  항상 스킵한다(벡터 스토어 적재와 같은 규약).
+- **제거도 대칭** — `RemoveAsync`는 등록된 모든 백엔드(벡터 스토어·키워드 인덱스)에서 문서를 지운다.
+- `VaultPipeline.SupportsKeywordIndex`로 배선 여부를 확인할 수 있다.
+
 > 상세 표면·경계는 [CHARTER.md](CHARTER.md) 참조.

@@ -87,6 +87,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private readonly IEmbeddingService? _embeddingService;
     private readonly IHybridSearchService? _hybridSearch;
     private readonly IGraphRAGService? _graphRAGService;
+    private readonly IKeywordSearchService? _keywordSearchService;
     private readonly IVaultImageEnricher? _imageEnricher;
 
     /// <summary>
@@ -101,6 +102,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// </summary>
     public bool SupportsGraphRAG => _graphRAGService != null;
 
+    /// <summary>
+    /// Whether a keyword search service is wired into this pipeline. When true, every chunk this
+    /// pipeline writes to the vector store is also written to the keyword index, keeping the two
+    /// backends in sync for hybrid retrieval.
+    /// </summary>
+    public bool SupportsKeywordIndex => _keywordSearchService != null;
+
     public VaultPipeline(
         IGitService git,
         IContentHasher hasher,
@@ -113,6 +121,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IEmbeddingService? embeddingService = null,
         IHybridSearchService? hybridSearch = null,
         IGraphRAGService? graphRAGService = null,
+        IKeywordSearchService? keywordSearchService = null,
         IVaultImageEnricher? imageEnricher = null)
     {
         _git = git ?? throw new ArgumentNullException(nameof(git));
@@ -126,6 +135,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         _embeddingService = embeddingService;
         _hybridSearch = hybridSearch;
         _graphRAGService = graphRAGService;
+        _keywordSearchService = keywordSearchService;
         _imageEnricher = imageEnricher;
     }
 
@@ -459,15 +469,20 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     public async Task RemoveAsync(VaultEntry entry, CancellationToken ct = default)
     {
-        if (_vectorStore == null)
+        if (_vectorStore == null && _keywordSearchService == null)
         {
             LogNoVectorStoreSkipRemoval(_logger);
             return;
         }
 
-        // Delete by document ID (filepath hash)
+        // Delete by document ID (filepath hash) from every backend this entry was written to.
         var documentId = entry.FilepathHash;
-        await _vectorStore.DeleteByDocumentIdAsync(documentId, ct);
+
+        if (_vectorStore != null)
+            await _vectorStore.DeleteByDocumentIdAsync(documentId, ct);
+
+        if (_keywordSearchService != null)
+            await _keywordSearchService.DeleteByDocumentIdAsync(documentId, ct);
 
         LogRemovedChunks(_logger, documentId);
     }
@@ -762,9 +777,35 @@ public sealed partial class VaultPipeline : IVaultPipeline
             indexedChunks = await IndexChunksBatchAsync(entry, chunks, ct);
         }
 
+        // Keyword indexing — the third search backend alongside vector and graph. Unconditional
+        // (like vector storage) rather than option-gated like GraphRAG: it is a core leg of hybrid
+        // retrieval, not an optional enrichment, so "a keyword service is registered" is itself the
+        // signal to use it.
+        await IndexKeywordsIfConfiguredAsync(entry, indexedChunks, ct);
+
         // GraphRAG indexing — keeps the FileVault memorize path at parity with the SDK direct-index
         // path (Indexer.IndexAsync), which builds the entity graph after vector-store ingestion.
         await BuildGraphRagIfEnabledAsync(entry, indexedChunks, options, ct);
+    }
+
+    /// <summary>
+    /// Writes the just-indexed chunks to the keyword index when one is registered. Without this,
+    /// an ingestion-only pipeline like this one never populates the keyword leg of hybrid search —
+    /// only FluxIndex's own <c>Indexer</c> does, per <c>INativeHybridSearch</c>'s documented
+    /// population-gap warning.
+    /// </summary>
+    private async Task IndexKeywordsIfConfiguredAsync(
+        VaultEntry entry,
+        IReadOnlyList<DocumentChunk> indexedChunks,
+        CancellationToken ct)
+    {
+        if (_keywordSearchService == null || indexedChunks.Count == 0)
+        {
+            return;
+        }
+
+        await _keywordSearchService.IndexChunksAsync(indexedChunks, ct);
+        LogIndexedKeywordChunks(_logger, indexedChunks.Count, entry.FilepathHash);
     }
 
     /// <summary>
@@ -1079,6 +1120,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Indexed {Processed} chunks (resumed; skipped {Skipped} already-committed) for {DocumentId}")]
     private static partial void LogIndexedChunksResumable(ILogger logger, int processed, int skipped, string documentId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Indexed {Count} chunks to keyword index for {DocumentId}")]
+    private static partial void LogIndexedKeywordChunks(ILogger logger, int count, string documentId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Building GraphRAG index for {DocumentId} from {ChunkCount} chunks")]
     private static partial void LogBuildingGraphRagIndex(ILogger logger, string documentId, int chunkCount);
