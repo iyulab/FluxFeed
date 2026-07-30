@@ -36,6 +36,7 @@ public sealed partial class VaultFactory : IVaultFactory
     private readonly IChunker? _sharedChunker;
     private readonly IVectorStore? _sharedVectorStore;
     private readonly IEmbeddingService? _sharedEmbeddingService;
+    private readonly IHybridSearchService? _sharedHybridSearch;
     private readonly IGraphRAGService? _sharedGraphRAGService;
     private readonly IKeywordSearchService? _sharedKeywordSearchService;
     private readonly IVaultImageEnricher? _sharedImageEnricher;
@@ -51,6 +52,7 @@ public sealed partial class VaultFactory : IVaultFactory
         IChunker? chunker = null,
         IVectorStore? vectorStore = null,
         IEmbeddingService? embeddingService = null,
+        IHybridSearchService? hybridSearch = null,
         IGraphRAGService? graphRAGService = null,
         IKeywordSearchService? keywordSearchService = null,
         IVaultImageEnricher? imageEnricher = null)
@@ -68,6 +70,7 @@ public sealed partial class VaultFactory : IVaultFactory
         _sharedChunker = chunker;
         _sharedVectorStore = vectorStore;
         _sharedEmbeddingService = embeddingService;
+        _sharedHybridSearch = hybridSearch;
         _sharedGraphRAGService = graphRAGService;
         _sharedKeywordSearchService = keywordSearchService;
         _sharedImageEnricher = imageEnricher;
@@ -220,7 +223,7 @@ public sealed partial class VaultFactory : IVaultFactory
             _sharedChunker,
             _sharedVectorStore,
             _sharedEmbeddingService,
-            hybridSearch: null,
+            hybridSearch: _sharedHybridSearch,
             graphRAGService: _sharedGraphRAGService,
             keywordSearchService: _sharedKeywordSearchService,
             imageEnricher: _sharedImageEnricher);
