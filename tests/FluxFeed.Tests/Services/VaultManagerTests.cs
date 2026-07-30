@@ -250,9 +250,11 @@ public class VaultManagerTests : IDisposable
     [Fact]
     public async Task RefreshAsync_ExistingEntry_EnqueuesRefreshJob()
     {
-        // Arrange - Create entry with metadata on disk (must be at Extracted stage)
+        // Arrange - refresh re-indexes refined content, so that content must exist. This test used to
+        // stop at the Extracted stage, which the pipeline would then reject.
         var filePath = CreateTestFile("test.txt", "Hello, World!");
         var entry = CreateEntryWithMetadataAtStage(filePath, ProcessingStage.Extracted);
+        WriteRefinedContent(entry);
 
         // Act
         var result = await _vault.RefreshAsync(filePath);
@@ -486,6 +488,32 @@ public class VaultManagerTests : IDisposable
     {
         return VaultJob.Create(filepathHash, filePath, jobType);
     }
+
+    /// <summary>
+    /// Writes refined.md, the artifact a refresh re-indexes. No <see cref="ProcessingStage"/> implies
+    /// it exists, so tests that need a refreshable entry have to create it explicitly.
+    /// </summary>
+    private static void WriteRefinedContent(VaultEntry entry)
+    {
+        Directory.CreateDirectory(entry.VaultPath);
+        File.WriteAllText(entry.RefinedMdPath, "# refined\n\nrefined body\n");
+    }
+
+    /// <summary>
+    /// Creates an entry that extracted successfully and then failed, mirroring the field shape: the
+    /// failure reason is recorded, and the vault directory exists with tracked files in it.
+    /// </summary>
+    private VaultEntry CreateFailedEntry(string filePath, string errorMessage)
+    {
+        var entry = CreateEntryWithMetadataAtStage(filePath, ProcessingStage.Extracted);
+        entry.MarkError(errorMessage);
+        entry.SaveMetadata();
+        return entry;
+    }
+
+    private void GivenModifiedVaultFiles(params string[] files) =>
+        _gitServiceMock.StatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new GitStatus { ModifiedFiles = [.. files] });
 
     [Fact]
     public async Task RemoveAsync_BatchWithMultipleExistingEntries_QueuesEach()
@@ -828,6 +856,105 @@ public class VaultManagerTests : IDisposable
         result.Should().NotBeNull();
         result.IsSuccess.Should().BeFalse();
         result.ErrorMessage.Should().Contain("boom");
+    }
+
+    #endregion
+
+    #region Refresh feasibility
+
+    // A refresh that the pipeline is guaranteed to reject must never be recommended: the job is
+    // requeued on every scan, never succeeds, and each attempt replaces the entry's error with the
+    // rejection — destroying the original diagnosis.
+
+    [Fact]
+    public async Task DetectChangesAsync_VaultModifiedWithoutRefinedContent_RecommendsMemorize()
+    {
+        // Arrange - a memorize that finds no indexable content skips refine, so the entry reaches
+        // Memorized with no refined.md. Nothing about the stage reveals that.
+        var filePath = CreateTestFile("no-content.pdf", "scanned, no text layer");
+        var entry = CreateEntryWithMetadataAtStage(filePath, ProcessingStage.Memorized);
+        entry.RefinedExists.Should().BeFalse("this is the state the empty-content path leaves behind");
+        GivenModifiedVaultFiles("append-text.md");
+
+        // Act
+        var change = await _vault.DetectChangesAsync(filePath);
+
+        // Assert
+        change.VaultChanged.Should().BeTrue();
+        change.RecommendedAction.Should().Be(ChangeAction.Memorize,
+            "memorize re-extracts, which is what the rejection message prescribes");
+    }
+
+    [Fact]
+    public async Task DetectChangesAsync_VaultModifiedWithRefinedContent_RecommendsRefresh()
+    {
+        // Arrange - the control: when a refresh can succeed, it is still the right recommendation.
+        var filePath = CreateTestFile("refreshable.txt", "body");
+        var entry = CreateEntryWithMetadataAtStage(filePath, ProcessingStage.Memorized);
+        WriteRefinedContent(entry);
+        GivenModifiedVaultFiles("qa.md");
+
+        // Act
+        var change = await _vault.DetectChangesAsync(filePath);
+
+        // Assert
+        change.RecommendedAction.Should().Be(ChangeAction.Refresh);
+    }
+
+    [Fact]
+    public async Task DetectChangesAsync_VaultModifiedOnFailedEntry_RecommendsMemorizeSoItCanRecover()
+    {
+        // Arrange - Error sorts above every progress stage, so an ordered comparison reads a failed
+        // entry as the most advanced one. It has no refined content and cannot be refreshed.
+        var filePath = CreateTestFile("failed.pdf", "broken");
+        CreateFailedEntry(filePath, "Extraction failed: ... [extraction_error_kind=PdfParse]");
+        GivenModifiedVaultFiles("append-text.md");
+
+        // Act
+        var change = await _vault.DetectChangesAsync(filePath);
+
+        // Assert
+        change.VaultChanged.Should().BeTrue("a failed entry can still own modified vault files");
+        change.RecommendedAction.Should().Be(ChangeAction.Memorize);
+        change.RecommendedAction.Should().NotBe(ChangeAction.Refresh,
+            "refresh would fail forever without ever recovering");
+    }
+
+    [Fact]
+    public async Task DetectChangesAsync_FailedEntry_ReportsTheOriginalCauseAlongsideTheLatest()
+    {
+        // Arrange - the first failure carries the extractor's diagnosis; a later one usually reports a
+        // downstream consequence. Consumers need the former to diagnose without the source file.
+        var filePath = CreateTestFile("first-error.pdf", "broken");
+        var entry = CreateFailedEntry(filePath, "Extraction failed: ... [extraction_error_kind=PdfParse]");
+        entry.MarkError("No refined content found at ... Run memorize first.");
+        entry.SaveMetadata();
+        GivenModifiedVaultFiles();
+
+        // Act
+        var change = await _vault.DetectChangesAsync(filePath);
+
+        // Assert
+        change.FirstError.Should().Contain("extraction_error_kind=PdfParse");
+        change.LastError.Should().Contain("Run memorize first");
+    }
+
+    [Fact]
+    public async Task RefreshAsync_EntryWithoutRefinedContent_ThrowsAndSaysToMemorize()
+    {
+        // Arrange - the guard used to accept anything at or past Extracted, which the pipeline then
+        // rejected. Guard and pipeline now enforce the same precondition.
+        var filePath = CreateTestFile("guard.pdf", "scanned");
+        CreateEntryWithMetadataAtStage(filePath, ProcessingStage.Memorized);
+
+        // Act
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _vault.RefreshAsync(filePath));
+
+        // Assert
+        ex.Message.Should().Contain("Run memorize first");
+        await _queueServiceMock.DidNotReceive().EnqueueRefreshAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     #endregion

@@ -84,6 +84,18 @@ public sealed class VaultEntry
     public string? LastError { get; private set; }
 
     /// <summary>
+    /// The error that started the current failure episode, preserved even as <see cref="LastError"/>
+    /// is overwritten by subsequent failures.
+    /// <para>
+    /// A retry that fails for a different reason than the original would otherwise erase the only
+    /// record of why processing first broke — and the original reason is the one that carries the
+    /// extractor's diagnosis (e.g. a parse-failure classification). Cleared whenever the entry
+    /// reaches a successful stage or is reset, so it always describes the current episode.
+    /// </para>
+    /// </summary>
+    public string? FirstError { get; private set; }
+
+    /// <summary>
     /// Number of retry attempts for the current operation.
     /// Reset to 0 on successful processing.
     /// </summary>
@@ -201,6 +213,9 @@ public sealed class VaultEntry
                 CreatedAt = meta.CreatedAt,
                 LastProcessedAt = meta.LastProcessedAt,
                 LastError = meta.LastError,
+                // Entries written before this field existed fall back to the last error, which is
+                // the first one for any entry that has only failed once.
+                FirstError = meta.FirstError ?? meta.LastError,
                 RetryCount = meta.RetryCount,
                 ChunkCount = meta.ChunkCount,
                 EmbeddedDimension = meta.EmbeddedDimension,
@@ -252,6 +267,7 @@ public sealed class VaultEntry
         SourceContentHash = contentHash;
         LastProcessedAt = DateTimeOffset.UtcNow;
         LastError = null;
+        FirstError = null;
         ExtractionHints = extractionHints is { Count: > 0 } ? extractionHints : null;
         ExtractionWarnings = extractionWarnings is { Count: > 0 } ? extractionWarnings : null;
     }
@@ -264,6 +280,7 @@ public sealed class VaultEntry
         Stage = ProcessingStage.Refined;
         LastProcessedAt = DateTimeOffset.UtcNow;
         LastError = null;
+        FirstError = null;
     }
 
     /// <summary>
@@ -276,6 +293,7 @@ public sealed class VaultEntry
         EmbeddedDimension = embeddedDimension;
         LastProcessedAt = DateTimeOffset.UtcNow;
         LastError = null;
+        FirstError = null;
         RetryCount = 0;
     }
 
@@ -290,6 +308,7 @@ public sealed class VaultEntry
         EmbeddedIdentity = identity;
         LastProcessedAt = DateTimeOffset.UtcNow;
         LastError = null;
+        FirstError = null;
         RetryCount = 0;
     }
 
@@ -310,6 +329,9 @@ public sealed class VaultEntry
     {
         Stage = ProcessingStage.Error;
         LastError = errorMessage;
+        // Keep the reason this episode started: a later failure often reports a downstream
+        // consequence, and overwriting would leave no record of the original cause.
+        FirstError ??= errorMessage;
         RetryCount++;
         LastProcessedAt = DateTimeOffset.UtcNow;
     }
@@ -338,6 +360,7 @@ public sealed class VaultEntry
         Stage = ProcessingStage.Source;
         ChunkCount = 0;
         LastError = null;
+        FirstError = null;
         RetryCount = 0;
         SyncStatus = SyncStatus.InSync;
         RemovalPhase = null;
@@ -418,6 +441,7 @@ public sealed class VaultEntry
     {
         SyncStatus = SyncStatus.Error;
         LastError = errorMessage;
+        FirstError ??= errorMessage;
         LastSyncCheckAt = DateTimeOffset.UtcNow;
     }
 
@@ -438,6 +462,7 @@ public sealed class VaultEntry
             CreatedAt = CreatedAt,
             LastProcessedAt = LastProcessedAt,
             LastError = LastError,
+            FirstError = FirstError,
             RetryCount = RetryCount,
             ChunkCount = ChunkCount,
             EmbeddedDimension = EmbeddedDimension,
@@ -543,6 +568,7 @@ public sealed class VaultEntry
         public DateTimeOffset CreatedAt { get; set; }
         public DateTimeOffset? LastProcessedAt { get; set; }
         public string? LastError { get; set; }
+        public string? FirstError { get; set; }
         public int RetryCount { get; set; }
         public int ChunkCount { get; set; }
         public int? EmbeddedDimension { get; set; }

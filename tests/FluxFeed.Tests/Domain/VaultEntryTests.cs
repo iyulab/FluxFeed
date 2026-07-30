@@ -613,6 +613,79 @@ public class VaultEntryTests : IDisposable
         loaded.ExtractionWarnings.Should().BeNull();
     }
 
+    [Fact]
+    public void MarkError_RepeatedFailures_KeepTheFirstCause()
+    {
+        // The first failure carries the extractor's diagnosis; later ones typically report a
+        // downstream consequence of being stuck. Overwriting leaves no record of the real cause.
+        var entry = CreateTestEntry();
+
+        entry.MarkError("Extraction failed: ... [extraction_error_kind=PdfParse]");
+        entry.MarkError("No refined content found at ... Run memorize first.");
+        entry.MarkError("No refined content found at ... Run memorize first.");
+
+        entry.FirstError.Should().Contain("extraction_error_kind=PdfParse");
+        entry.LastError.Should().Contain("Run memorize first");
+    }
+
+    [Fact]
+    public void MarkError_AfterSuccess_StartsANewEpisode()
+    {
+        // FirstError describes the current failure episode only — a stale one from a previous episode
+        // would misattribute the next failure.
+        var entry = CreateTestEntry();
+        entry.MarkError("Old failure");
+
+        entry.MarkMemorized(3);
+        entry.FirstError.Should().BeNull();
+
+        entry.MarkError("New failure");
+        entry.FirstError.Should().Be("New failure");
+    }
+
+    [Fact]
+    public void ResetToSource_ClearsBothErrors()
+    {
+        var entry = CreateTestEntry();
+        entry.MarkError("Something broke");
+
+        entry.ResetToSource();
+
+        entry.FirstError.Should().BeNull();
+        entry.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public void FirstError_SurvivesDiskRoundtrip()
+    {
+        var entry = CreateTestEntry();
+        entry.MarkError("Extraction failed: ... [extraction_error_kind=Corrupted]");
+        entry.MarkError("No refined content found at ... Run memorize first.");
+        entry.SaveMetadata();
+
+        var loaded = VaultEntry.Load(entry.EntryPath, _testDir);
+
+        loaded!.FirstError.Should().Contain("extraction_error_kind=Corrupted");
+        loaded.LastError.Should().Contain("Run memorize first");
+    }
+
+    [Fact]
+    public void Load_LegacyMetadataWithoutFirstError_FallsBackToLastError()
+    {
+        // Entries written before the field existed have failed at least once with the error they
+        // recorded, so that error is also the first one.
+        var entry = CreateTestEntry();
+        entry.MarkError("Extraction failed: ... [extraction_error_kind=PdfParse]");
+        entry.SaveMetadata();
+
+        var json = File.ReadAllText(entry.MetaPath);
+        File.WriteAllText(entry.MetaPath, json.Replace("\"FirstError\"", "\"RetiredField\"", StringComparison.Ordinal));
+
+        var loaded = VaultEntry.Load(entry.EntryPath, _testDir);
+
+        loaded!.FirstError.Should().Contain("extraction_error_kind=PdfParse");
+    }
+
     private VaultEntry CreateTestEntry()
     {
         var sourcePath = Path.Combine(_testDir, $"test_{Guid.NewGuid():N}.txt");

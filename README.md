@@ -40,6 +40,35 @@ if (entry.ExtractionHints?.TryGetValue("extraction_failure_reason", out var reas
 - **항상 최신 추출분** — 재추출 시 교체되고, 진단 없이 추출되면 이전 값은 지워진다. 예외 경로 전용인 `LastError`와는 별개 채널이다.
 - FileFlux **0.14.0+** 필요 (`no_text_layer`/`blank_page` 세분 라벨의 출처).
 
+## Failure diagnostics
+
+실패 사유는 두 필드로 나뉜다. **`LastError`는 마지막 실패, `FirstError`는 그 실패 에피소드를 시작한 실패**다.
+
+```csharp
+if (entry.FirstError is not null)
+{
+    // FirstError: 최초 원인 (추출기 분류가 실려 있는 쪽)
+    // LastError:  가장 최근 실패 — 재시도가 다른 이유로 실패했다면 다르다
+}
+```
+
+- 재시도가 자기 이유로 실패하면 `LastError`는 덮이지만 `FirstError`는 남는다. 최초 실패가 추출기의 진단을
+  싣고 있으므로, 그것이 지워지면 원본 파일 없이 진단할 방법이 사라진다.
+- 성공 단계에 도달하거나 `ResetToSource()` 하면 둘 다 지워진다 — 항상 **현재 에피소드**만 서술한다.
+- 이전 버전이 쓴 `meta.json`은 `LastError`를 `FirstError`로 승계한다(한 번만 실패한 엔트리에서는 같은 값).
+- `ChangeDetectionResult`에도 같은 두 필드가 실린다.
+
+## Refresh 전제
+
+`refresh`는 **refined 콘텐츠를 재인덱싱**하며 재추출하지 않는다. 따라서 전제는 refined 콘텐츠의 존재이고,
+**`ProcessingStage`는 그것을 함의하지 않는다** — 인덱싱할 내용이 없던 memorize는 refine 단계를 건너뛰므로
+`Memorized`인데 refined가 없는 엔트리가 정상적으로 생기고, `Error`는 어떤 산출물이 남았는지 말해주지 않는다.
+
+- `RefreshAsync`는 refined 콘텐츠가 없으면 거부한다(메시지가 `memorize`를 지시한다). 이 전제는
+  가드와 파이프라인이 **같은 값**을 쓴다.
+- `DetectChangesAsync`는 refresh가 성공할 수 없는 엔트리에 `Refresh`를 추천하지 않고 **`Memorize`로 낮춘다.**
+  memorize는 재추출하므로 실패했거나 빈 엔트리가 **스스로 회복**할 수 있다.
+
 ## Image enrichment
 
 문서에서 추출된 이미지는 파이프라인이 vault에 저장한다. 소비앱이 **설명 생성기만** 등록하면 그 설명이 인덱싱까지 이어진다 — 호출 시점·멱등·재시도·본문 반영·출처 노출은 파이프라인이 소유한다.

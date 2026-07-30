@@ -317,6 +317,13 @@ public sealed class ChangeDetectionResult
     /// Last error message if any.
     /// </summary>
     public string? LastError { get; init; }
+
+    /// <summary>
+    /// The error that started the current failure episode. Differs from <see cref="LastError"/> once
+    /// a retry has failed for its own reason, and it is the one that carries the original diagnosis
+    /// (see <see cref="Domain.Entities.VaultEntry.FirstError"/>).
+    /// </summary>
+    public string? FirstError { get; init; }
 }
 
 /// <summary>

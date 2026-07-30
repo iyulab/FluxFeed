@@ -133,8 +133,14 @@ public sealed partial class VaultManager : IVault
         if (entry == null)
             throw new InvalidOperationException($"No vault entry exists for: {fullPath}. Use MemorizeAsync first.");
 
-        if (entry.Stage < ProcessingStage.Extracted)
-            throw new InvalidOperationException($"Entry must be at least Extracted to refresh. Current stage: {entry.Stage}");
+        // Refresh re-indexes refined content without re-extracting, so refined.md is the real
+        // precondition — the same one VaultPipeline.RefreshAsync enforces. Guarding on Stage instead
+        // let entries through that the pipeline then rejected: Stage does not imply refined.md
+        // exists (a memorize that found no content skips refine, and Error says nothing about which
+        // artifacts survive).
+        if (!entry.RefinedExists)
+            throw new InvalidOperationException(
+                $"No refined content found at {entry.RefinedMdPath}. Run memorize first. Current stage: {entry.Stage}");
 
         if (_options.EnableBackgroundProcessing)
         {
@@ -322,7 +328,11 @@ public sealed partial class VaultManager : IVault
         // Check vault changes (git status)
         var vaultChanged = false;
         var modifiedVaultFiles = new List<string>();
-        if (entryExists && entry!.Stage >= ProcessingStage.Extracted)
+        // Any entry past Source may own tracked vault files — including a failed one, which is how
+        // a modified vault directory can be observed on an Error entry. Ordered comparison against
+        // Extracted used to answer this, but Error sorts above the progress stages, so it silently
+        // read as "most advanced" rather than "progress unknown".
+        if (entryExists && entry!.Stage != ProcessingStage.Source)
         {
             var gitStatus = await _git.StatusAsync(entry.VaultPath, ct);
             if (gitStatus.ModifiedFiles.Count > 0)
@@ -333,7 +343,8 @@ public sealed partial class VaultManager : IVault
         }
 
         // Determine recommended action
-        var action = DetermineAction(entryExists, sourceExists, sourceChanged, vaultChanged);
+        var action = DetermineAction(entryExists, sourceExists, sourceChanged, vaultChanged,
+            canRefresh: entry?.RefinedExists ?? false);
 
         // Update entry's SyncStatus based on detection results
         if (entry != null)
@@ -401,11 +412,18 @@ public sealed partial class VaultManager : IVault
             Stage = entry?.Stage,
             SyncStatus = entry?.SyncStatus,
             ChunkCount = entry?.ChunkCount,
-            LastError = entry?.LastError
+            LastError = entry?.LastError,
+            FirstError = entry?.FirstError
         };
     }
 
-    private static ChangeAction DetermineAction(bool entryExists, bool sourceExists, bool sourceChanged, bool vaultChanged)
+    /// <param name="canRefresh">
+    /// Whether a refresh could actually succeed for this entry (refined content present). Recommending
+    /// a refresh that the pipeline is guaranteed to reject produces work that can never complete, and
+    /// each failed attempt overwrites the entry's error with the rejection instead of its real cause.
+    /// </param>
+    private static ChangeAction DetermineAction(
+        bool entryExists, bool sourceExists, bool sourceChanged, bool vaultChanged, bool canRefresh)
     {
         if (!sourceExists)
             return entryExists ? ChangeAction.Remove : ChangeAction.None;
@@ -417,7 +435,9 @@ public sealed partial class VaultManager : IVault
             return ChangeAction.Memorize;
 
         if (vaultChanged)
-            return ChangeAction.Refresh;
+            // Memorize is what the rejection message itself prescribes ("Run memorize first"), and it
+            // re-extracts, so an entry that failed or produced no content can recover on its own.
+            return canRefresh ? ChangeAction.Refresh : ChangeAction.Memorize;
 
         return ChangeAction.None;
     }
