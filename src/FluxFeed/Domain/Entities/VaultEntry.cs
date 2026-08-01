@@ -622,11 +622,6 @@ public sealed class VaultEntry
     public string QaPath => Path.Combine(VaultPath, "qa.md");
 
     /// <summary>
-    /// Path to .gitignore in the entry directory.
-    /// </summary>
-    public string GitignorePath => Path.Combine(EntryPath, ".gitignore");
-
-    /// <summary>
     /// Checks if the source file still exists.
     /// </summary>
     public bool SourceExists => File.Exists(SourcePath);

@@ -22,17 +22,6 @@ public sealed partial class VaultStorageService : IVaultStorageService
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    /// <summary>
-    /// Content of .gitignore file in entry directory.
-    /// Excludes meta.json, images/, and extracted.md from git tracking.
-    /// </summary>
-    private const string GitignoreContent = """
-        # FileVault gitignore - only vault/ directory is tracked
-        meta.json
-        images/
-        extracted.md
-        """;
-
     public VaultStorageService(
         ILogger<VaultStorageService> logger,
         IGitService gitService,
@@ -58,9 +47,6 @@ public sealed partial class VaultStorageService : IVaultStorageService
         // Create vault subdirectory
         Directory.CreateDirectory(entry.VaultPath);
 
-        // Create .gitignore to exclude meta.json and images/
-        await CreateGitignoreAsync(entry, ct);
-
         // Initialize git in vault/ subdirectory (non-fatal — vault works without git)
         try
         {
@@ -75,11 +61,6 @@ public sealed partial class VaultStorageService : IVaultStorageService
         entry.SaveMetadata();
 
         LogInitializedEntry(_logger, entry.EntryPath);
-    }
-
-    public async Task CreateGitignoreAsync(VaultEntry entry, CancellationToken ct = default)
-    {
-        await File.WriteAllTextAsync(entry.GitignorePath, GitignoreContent, ct);
     }
 
     public async Task StoreExtractedContentAsync(VaultEntry entry, string content, CancellationToken ct = default)

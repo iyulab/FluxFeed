@@ -25,7 +25,7 @@ public interface IVaultStorageService
 
     /// <summary>
     /// Initializes the vault directory structure for an entry.
-    /// Creates: entry dir, vault/ subdir, .gitignore, and initializes git in vault/.
+    /// Creates: entry dir, vault/ subdir, entry metadata, and initializes git in vault/.
     /// </summary>
     Task InitializeEntryAsync(VaultEntry entry, CancellationToken ct = default);
 
@@ -107,11 +107,6 @@ public interface IVaultStorageService
     /// Lists all entry directories in the vault.
     /// </summary>
     IEnumerable<string> ListEntryDirectories();
-
-    /// <summary>
-    /// Creates the .gitignore file in the entry directory to exclude meta.json and images/.
-    /// </summary>
-    Task CreateGitignoreAsync(VaultEntry entry, CancellationToken ct = default);
 }
 
 /// <summary>
