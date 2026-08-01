@@ -1052,6 +1052,23 @@ public class VaultManagerTests : IDisposable
         VaultEntry.LoadByHash(entry.FilepathHash, _vaultDir).Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task ListAsync_AndListUnreadableAsync_TogetherAccountForEveryEntry()
+    {
+        // Arrange - a caller building a repair view compares the two lists, so an entry must appear
+        // in exactly one of them. Anything skipped by both is invisible again.
+        CreateEntryWithMetadataAtStage(CreateTestFile("first.md", "content"), ProcessingStage.Memorized);
+        CreateEntryWithMetadataAtStage(CreateTestFile("second.md", "content"), ProcessingStage.Memorized);
+        CorruptRecordFor(CreateTestFile("damaged.md", "content"));
+
+        // Act
+        var readable = await _vault.ListAsync();
+        var unreadable = await _vault.ListUnreadableAsync();
+
+        // Assert
+        (readable.Count + unreadable.Count).Should().Be(Directory.GetDirectories(_vaultDir).Length);
+    }
+
     private string CorruptRecordFor(string filePath)
     {
         var entry = VaultEntry.Create(filePath, _vaultDir);

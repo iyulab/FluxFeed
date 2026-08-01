@@ -491,8 +491,12 @@ public sealed partial class VaultManager : IVault
                     entries.Add(entry);
                 }
             }
-            catch (Exception ex)
+            catch (VaultRecordUnreadableException ex)
             {
+                // Keyed on the same signal as ListUnreadableAsync so the two agree by construction:
+                // an entry appears in exactly one of them. A broader catch here would swallow
+                // genuine IO faults into a listing that silently got shorter — the very failure
+                // this reporting exists to end.
                 LogFailedToLoadEntry(_logger, ex, dir);
             }
         }

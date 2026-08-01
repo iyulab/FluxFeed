@@ -77,6 +77,9 @@ IReadOnlyList<string> damaged = await vault.ListUnreadableAsync();
 
 - `ListAsync()`는 읽을 수 없는 레코드를 건너뛰되 **경고 로그를 남긴다**. 그 엔트리를 화면에 표시하거나
   복구를 제안하려면 `ListUnreadableAsync()`가 돌려주는 엔트리 디렉터리 경로를 쓴다.
+- 두 목록은 **같은 신호를 기준으로 나뉜다** — 엔트리는 정확히 한쪽에만 나타난다. 따라서
+  `ListAsync().Count + ListUnreadableAsync().Count`가 전체 엔트리 수다. 그 밖의 IO 오류는
+  삼켜지지 않고 전파된다(목록이 조용히 짧아지는 것이 바로 이 보고 기능이 없애려는 실패다).
 - memorize/refresh처럼 **레코드를 어차피 다시 쓰는 경로**는 읽을 수 없는 레코드를 보고한 뒤 새로 만든다.
   실패시키면 그 엔트리가 영구히 묶이기 때문이다. 단, 재생성된 레코드는 이력이 비어 있다.
 
