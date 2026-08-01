@@ -508,6 +508,46 @@ public sealed class VaultEntry
         finally
         {
             DeleteIfPresent(tempPath);
+            SweepAbandonedReplacements(EntryPath);
+        }
+    }
+
+    /// <summary>
+    /// How long a replacement leftover is treated as possibly in flight. A replacement completes in
+    /// microseconds, so anything older has been abandoned; the margin only has to exceed a stalled
+    /// swap, not a stalled process.
+    /// </summary>
+    private static readonly TimeSpan AbandonedReplacementAge = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Removes scratch copies the platform's atomic replacement left behind.
+    /// </summary>
+    /// <remarks>
+    /// The replacement keeps the outgoing record under a scratch name while it swaps, and abandons
+    /// that name when it cannot clean up — a reader holding the outgoing record open is enough.
+    /// Without this the entry directory grows a stale copy of the record per abandoned swap.
+    ///
+    /// Only leftovers old enough that no swap could still be using them are removed: a replacement
+    /// that fails partway rolls back onto its scratch copy, so deleting a live one would destroy
+    /// the record it was protecting. The scratch name is a platform detail, so a platform that
+    /// names them differently simply finds nothing to sweep — nothing depends on the match.
+    /// </remarks>
+    private static void SweepAbandonedReplacements(string entryPath)
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow - AbandonedReplacementAge;
+            foreach (var leftover in Directory.EnumerateFiles(entryPath, "meta.json~RF*.TMP"))
+            {
+                if (File.GetLastWriteTimeUtc(leftover) < cutoff)
+                {
+                    DeleteIfPresent(leftover);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Housekeeping must never fail the write it rode in on.
         }
     }
 

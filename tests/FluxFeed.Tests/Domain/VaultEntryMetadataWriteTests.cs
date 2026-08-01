@@ -109,6 +109,48 @@ public class VaultEntryMetadataWriteTests : IDisposable
             .BeEmpty("a failed publish must not leave its temporary file behind");
     }
 
+    [Fact]
+    public void SaveMetadata_RemovesAbandonedReplacementLeftovers()
+    {
+        // Arrange - the platform's atomic replacement keeps the outgoing record under a scratch
+        // name while it swaps, and abandons that name if it cannot clean up (a reader holding the
+        // outgoing record open is enough). Left alone these accumulate in the entry directory,
+        // each holding a stale copy of the record.
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "report.md"), _testDir);
+        entry.SaveMetadata();
+
+        var abandoned = Path.Combine(entry.EntryPath, "meta.json~RF1234abc.TMP");
+        File.WriteAllText(abandoned, "{ stale record }");
+        File.SetLastWriteTimeUtc(abandoned, DateTime.UtcNow.AddHours(-1));
+
+        // Act
+        entry.SaveMetadata();
+
+        // Assert
+        File.Exists(abandoned).Should().BeFalse(
+            "a leftover no write could still be using is the writer's to clean up");
+    }
+
+    [Fact]
+    public void SaveMetadata_KeepsReplacementLeftoversThatMayStillBeInFlight()
+    {
+        // Arrange - a leftover that was just written may belong to a replacement running right
+        // now. Deleting it would destroy the only copy of the outgoing record if that replacement
+        // then had to roll back, so recent ones are left alone.
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "report.md"), _testDir);
+        entry.SaveMetadata();
+
+        var inFlight = Path.Combine(entry.EntryPath, "meta.json~RF5678def.TMP");
+        File.WriteAllText(inFlight, "{ outgoing record }");
+
+        // Act
+        entry.SaveMetadata();
+
+        // Assert
+        File.Exists(inFlight).Should().BeTrue(
+            "a replacement in progress may still need to roll back onto its scratch copy");
+    }
+
     /// <summary>
     /// Drops one indent character. Indented JSON has whitespace to spare, so the result stays
     /// valid while reproducing the one-character length difference that a timestamp's trailing
