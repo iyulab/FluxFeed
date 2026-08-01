@@ -188,6 +188,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
             {
                 LogNoContentToIndex(_logger, entry.SourcePath);
 
+                // This path returns before ChunkAndIndexAsync, so it carries the same
+                // replace-on-index obligation itself: the entry is about to report 0 chunks, and
+                // rows left behind from an earlier non-empty memorize would keep answering
+                // searches for content the document no longer has.
+                await RemoveAsync(entry, ct);
+
                 string? emptyCommitHash = null;
                 if (!options.SkipCommit)
                 {
@@ -264,9 +270,6 @@ public sealed partial class VaultPipeline : IVaultPipeline
             {
                 throw new InvalidOperationException($"No refined content found at {entry.RefinedMdPath}. Run memorize first.");
             }
-
-            // Remove existing chunks from vector store before re-indexing
-            await RemoveAsync(entry, ct);
 
             // Retry any image that is still without a description. Already-described images cost
             // nothing here — the enricher is not called for them.
@@ -704,6 +707,22 @@ public sealed partial class VaultPipeline : IVaultPipeline
         MemorizeOptions options,
         CancellationToken ct)
     {
+        // Indexing a document REPLACES every row previously written for it. Both callers reach
+        // the backends through here, so the removal belongs here rather than at either call site:
+        // when it lived in RefreshAsync alone, re-memorizing an already-indexed file appended a
+        // second copy of every chunk instead of replacing it, and each subsequent memorize added
+        // another - search then returned the same chunk N times and spent the caller's result
+        // budget on repeats. Entry metadata already replaced (ChunkCount is overwritten, not
+        // summed), so only the vector/keyword rows were leaking.
+        //
+        // Removing here rather than at the start of MemorizeAsync keeps the window in which the
+        // document is unsearchable to the indexing step alone - extraction and refinement, which
+        // dominate a memorize, still run against the previous rows.
+        //
+        // It runs before the no-content check on purpose: a document whose content is gone must
+        // lose its rows, not keep serving the text it no longer has.
+        await RemoveAsync(entry, ct);
+
         // Get all vault content (refined.md + append-text.md + qa.md)
         var vaultContent = await _storage.GetAllVaultContentAsync(entry, ct);
         var combinedContent = vaultContent.GetCombinedContent();

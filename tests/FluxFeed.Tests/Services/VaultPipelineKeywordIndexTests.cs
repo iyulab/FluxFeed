@@ -138,6 +138,10 @@ public sealed class VaultPipelineKeywordIndexTests : IDisposable
         var pipeline = CreatePipeline(keyword);
         var (_, entry) = await MemorizeFileAsync(pipeline, new MemorizeOptions { MaxChunkSize = 200 });
 
+        // Indexing replaces the entry's rows, so memorize itself deletes once. Count from here so
+        // this stays a claim about RemoveAsync rather than about how the arrange step indexes.
+        keyword.ClearReceivedCalls();
+
         await pipeline.RemoveAsync(entry);
 
         await keyword.Received(1).DeleteByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>());
@@ -148,6 +152,9 @@ public sealed class VaultPipelineKeywordIndexTests : IDisposable
     {
         var pipeline = CreatePipeline(keywordSearch: null);
         var (_, entry) = await MemorizeFileAsync(pipeline, new MemorizeOptions { MaxChunkSize = 200 });
+
+        // See above: memorize deletes once as part of replacing the entry's rows.
+        _vectorStore.ClearReceivedCalls();
 
         await pipeline.RemoveAsync(entry);
 
