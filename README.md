@@ -60,6 +60,16 @@ if (entry.FirstError is not null)
 - 이전 버전이 쓴 `meta.json`은 `LastError`를 `FirstError`로 승계한다(한 번만 실패한 엔트리에서는 같은 값).
 - `ChangeDetectionResult`에도 같은 두 필드가 실린다.
 
+## 엔트리 레이아웃
+
+엔트리 디렉터리에는 **작업 산출물**(레코드·추출 텍스트·이미지)이 들어가고, **git이 추적하는 저장소는
+그 아래 `vault/`** 하나다. 작업 산출물은 저장소 바깥이라 무시 규칙의 대상이 아니며, 따라서 엔트리
+수준에 ignore 파일을 두지 않는다 — 저장소 바깥의 ignore 파일은 git이 읽지 않는다.
+
+> **0.8.0 breaking** — 위 이유로 효과가 없던 `VaultEntry.GitignorePath`와
+> `IVaultStorageService.CreateGitignoreAsync`가 제거됐다. 대체 API는 없다(생성하던 파일 자체가
+> 무의미했다). 호출부가 있으면 지우면 된다.
+
 ## Damaged records
 
 엔트리 레코드(`meta.json`)는 **임시 파일에 쓴 뒤 제자리 교체**된다. 동시 writer가 있어도 어느 레코드가
