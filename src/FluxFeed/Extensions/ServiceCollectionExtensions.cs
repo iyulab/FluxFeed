@@ -83,17 +83,20 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Adds FileVault with custom extractor/chunker/memorizer integration.
-    /// Use this when integrating with FileFlux or other processing libraries.
+    /// Adds FileVault with custom extractor/chunker integration.
+    /// Use this when integrating with a processing library other than FileFlux.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configureOptions">Optional configuration action for FileVaultOptions.</param>
     /// <returns>The service collection for chaining.</returns>
     /// <remarks>
-    /// Before calling this method, register your implementations:
+    /// Identical to <see cref="AddFileVault"/> — the pipeline picks up whatever integration services
+    /// are present in the container, so there is nothing extra to register here. Before calling,
+    /// register your implementations:
     /// - IExtractor: For content extraction from source files
     /// - IChunker: For content chunking
-    /// - IMemorizer: For chunk indexing/memorization
+    /// - IVectorStore + IEmbeddingService: For chunk indexing (the pipeline indexes directly; there
+    ///   is no separate memorizer abstraction to implement)
     /// Optionally:
     /// - IVaultImageEnricher: To have extracted images described and indexed. Without it images are
     ///   still extracted and stored, they are simply not described.
