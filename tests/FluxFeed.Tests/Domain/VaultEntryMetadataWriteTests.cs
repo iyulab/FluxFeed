@@ -105,7 +105,10 @@ public class VaultEntryMetadataWriteTests : IDisposable
         save.Should().Throw<Exception>()
             .Which.Should().Match(ex => ex is IOException || ex is UnauthorizedAccessException);
 
-        Directory.GetFiles(entry.EntryPath, "*.tmp").Should()
+        // Scoped to the writer's own naming: the platform matches "*.tmp" case-insensitively and
+        // would also catch the scratch copies its atomic replacement leaves behind.
+        Directory.GetFiles(entry.EntryPath, "meta.json.*.tmp")
+            .Where(p => p.EndsWith(".tmp", StringComparison.Ordinal)).Should()
             .BeEmpty("a failed publish must not leave its temporary file behind");
     }
 
