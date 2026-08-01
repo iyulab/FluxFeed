@@ -90,13 +90,13 @@ public class VaultEntryMetadataWriteTests : IDisposable
     [Fact]
     public void SaveMetadata_WhenTheRecordCannotBePublished_FailsLoudlyAndLeavesNoTemporaryFile()
     {
-        // Arrange - a holder that shares nothing keeps the record from being replaced for good,
-        // which is the one case the bounded retry cannot clear.
-        var entry = VaultEntry.Create(Path.Combine(_testDir, "locked.md"), _testDir);
-        entry.SaveMetadata();
-
-        using var exclusiveHolder = new FileStream(
-            entry.MetaPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        // Arrange - a directory occupying the record's name blocks the publish permanently on every
+        // platform, which is the one case the bounded retry cannot clear. (Sharing modes are not a
+        // portable way to arrange this: they are advisory outside Windows, so a lock-based
+        // arrangement would let the publish succeed and assert nothing.)
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "blocked.md"), _testDir);
+        Directory.CreateDirectory(entry.EntryPath);
+        Directory.CreateDirectory(entry.MetaPath);
 
         // Act
         var save = () => entry.SaveMetadata();
@@ -107,6 +107,33 @@ public class VaultEntryMetadataWriteTests : IDisposable
 
         // Scoped to the writer's own naming: the platform matches "*.tmp" case-insensitively and
         // would also catch the scratch copies its atomic replacement leaves behind.
+        Directory.GetFiles(entry.EntryPath, "meta.json.*.tmp")
+            .Where(p => p.EndsWith(".tmp", StringComparison.Ordinal)).Should()
+            .BeEmpty("a failed publish must not leave its temporary file behind");
+    }
+
+    [Fact]
+    public void SaveMetadata_WhenAHolderSharesNothing_FailsLoudly()
+    {
+        // Exclusive sharing is only enforced on Windows; elsewhere it is advisory and the publish
+        // would simply succeed, so this covers the platform where the arrangement means something.
+        // The portable statement of the same invariant is the test above.
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "locked.md"), _testDir);
+        entry.SaveMetadata();
+
+        using var exclusiveHolder = new FileStream(
+            entry.MetaPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        var save = () => entry.SaveMetadata();
+
+        save.Should().Throw<Exception>()
+            .Which.Should().Match(ex => ex is IOException || ex is UnauthorizedAccessException);
+
         Directory.GetFiles(entry.EntryPath, "meta.json.*.tmp")
             .Where(p => p.EndsWith(".tmp", StringComparison.Ordinal)).Should()
             .BeEmpty("a failed publish must not leave its temporary file behind");
