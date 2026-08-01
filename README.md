@@ -1,146 +1,286 @@
 # FluxFeed
 
-문서 파이프라인 표면(④b) — 수집·파싱·정제를 묶어 FluxIndex(④a)에 적재(feed)한다. FluxIndex에 비대칭 의존(④b는 ④a 필요, ④a는 ④b 불필요).
+> Document ingestion pipeline for .NET — track files, extract and chunk them, feed them to a vector index.
+
+[![CI](https://github.com/iyulab/FluxFeed/actions/workflows/ci.yml/badge.svg)](https://github.com/iyulab/FluxFeed/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/FluxFeed.svg)](https://www.nuget.org/packages/FluxFeed)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-purple)](https://dotnet.microsoft.com/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+## Overview
+
+FluxFeed turns a folder of documents into an always-current search index. It watches the files,
+extracts and chunks them with [FileFlux](https://github.com/iyulab/FileFlux), and indexes the chunks
+into [FluxIndex](https://github.com/iyulab/FluxIndex) — then keeps the index in step as files change,
+move, or disappear.
+
+FluxFeed owns ingestion only. Embedding, retrieval and ranking belong to FluxIndex, and the
+dependency is one-way: FluxFeed → FluxIndex.
+
+Each tracked file gets a **vault entry** — a small git-backed directory holding the extracted text
+plus any notes you add by hand. Re-indexing is therefore cheap and auditable: you can diff a
+document's extracted content, see its commit history, and edit it without touching the original.
+
+## Features
+
+- **File-source vault** — per-file git-tracked directory (`refined.md`, `append-text.md`, `qa.md`)
+- **Change detection** — content hash for source changes, git status for vault edits
+- **Folder watching** — real-time `FileSystemWatcher` with debounce and glob include/exclude patterns
+- **Background queue** — bounded concurrency, automatic retry, pause/resume, SQLite-persisted
+- **Multi-tenant** — isolated vaults via `IVaultFactory`, with single-call vector purge per tenant
+- **Extraction diagnostics** — a legitimate zero-chunk result (scanned PDF, blank page) says so
+- **Damage-aware records** — records are swapped in atomically, and an unreadable one is reported rather than dropped from listings
+- **Image enrichment** — plug in a vision model and extracted images become indexed content
+- **Hybrid-ready** — chunks are written to the keyword index alongside the vector store when one is registered
+
+## Installation
+
+```bash
+dotnet add package FluxFeed
+```
 
 ## Quick Start
 
 ```csharp
-// 파일-소스 vault: FileFlux 추출/청킹 + FluxIndex 적재
-services.AddFileVaultFactoryWithFluxIndex(o => o.VaultBasePath = "./data");
+using FluxFeed.Extensions;
+using FluxFeed.Interfaces;
+using FluxIndex.Core.Application.Interfaces;  // IEmbeddingService
+using FluxIndex.Storage.SQLite;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+
+// 1. FluxIndex side — a vector store and an embedding service must be registered.
+services.AddSQLiteVecVectorStore(o =>
+{
+    o.DatabasePath = "fluxindex.db";
+    o.VectorDimension = 1536;
+});
+services.AddSingleton<IEmbeddingService, MyEmbeddingService>();  // bring your own
+
+// 2. FluxFeed side — vault + FileFlux extraction/chunking + FluxIndex indexing.
+services.AddFileVaultWithFluxIndex(o => o.VaultBasePath = "./data/.vault");
+
+var provider = services.BuildServiceProvider();
+
+using var scope = provider.CreateScope();
+var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+
+// Index a file and wait for the pipeline to finish.
+var entry = await vault.MemorizeAsync("./docs/handbook.pdf", waitForCompletion: true);
+Console.WriteLine($"{entry.Stage} · {entry.ChunkCount} chunks");
+
+// Watch a folder; new and changed files are queued automatically.
+await vault.AddWatchedFolderAsync("./docs", autoMemorize: true);
+
+// Search, optionally scoped to a path.
+var results = await vault.SearchAsync("vacation policy", VaultSearchOptions.ForFolder("./docs"));
 ```
+
+`IVault` is scoped — resolve it from a scope, or inject it into a scoped service, rather than from
+the root provider.
+
+### Registration entry points
+
+| Method | Registers |
+|---|---|
+| `AddFileVault` | Vault, queue, watcher only — bring your own `IExtractor`/`IChunker` |
+| `AddFileVaultWithFileFlux` | The above + FileFlux extraction and chunking |
+| `AddFileVaultWithFluxIndex` | The above + FluxIndex indexing (recommended default) |
+| `AddFileVaultFactory*` | Same three, but tenant-scoped via `IVaultFactory` instead of a single `IVault` |
+
+FileFlux services are registered only if you have not registered them yourself, so a prior
+`AddFileFlux(ServiceLifetime.Singleton)` keeps its lifetime.
+
+## How it works
+
+An entry moves through four stages, or lands on `Error`:
+
+```
+Source → Extracted → Refined → Memorized
+```
+
+`Refined` is skipped when there is nothing to refine, and `Stale` marks an entry whose vectors went
+missing — the integrity check sets it, and re-memorizing restores search.
+
+`MemorizeAsync` runs the whole pipeline (re-extracting the source). `RefreshAsync` re-indexes the
+refined content without re-extracting — use it after hand-editing `append-text.md` or `qa.md`.
+
+Each entry lives under the vault base path, keyed by a hash of its absolute file path:
+
+```
+.vault/{filepath-hash}/
+├── meta.json          (not git-tracked)
+├── images/            (not git-tracked)
+│   └── manifest.json
+└── vault/             (git-tracked)
+    ├── refined.md     extracted + refined content
+    ├── append-text.md your additions
+    └── qa.md          your Q&A
+```
+
+Because `vault/` is a git repository, `DiffAsync` and `LogAsync` report exactly what changed and when.
+
+Note what is *not* in that repository: the entry record, the raw extracted text and the images are
+work products sitting above it. They are outside the repository rather than ignored by it — which is
+why there is no ignore file at the entry level, where git would never read one.
+
+> **Breaking in 0.8.0** — `VaultEntry.GitignorePath` and `IVaultStorageService.CreateGitignoreAsync`
+> were removed for that reason. There is no replacement; the file they produced had no effect under
+> any condition, so calls to them can simply be deleted.
 
 ## File selection patterns
 
-`FileVaultOptions.DefaultIncludePatterns` / `DefaultExcludePatterns`는 **discovery 경로에만** 실효한다:
+`FileVaultOptions.DefaultIncludePatterns` / `DefaultExcludePatterns` apply to **discovery paths only**:
 
-| 경로 | 패턴 적용 |
-|------|-----------|
-| `ScanFolderAsync` / `SyncAsync` | ✅ 패턴 밖 파일은 감지·큐잉 전에 skip |
-| 폴더 워처 이벤트 | ✅ (폴더별 패턴이 기본값보다 우선) |
-| 명시적 `MemorizeAsync` / `RefreshAsync` | ❌ 의도적 미적용 — 명시 호출은 명시 의도이며, 조용히 skip하면 호출자 오류가 숨는다 |
+| Path | Patterns applied |
+|---|---|
+| `ScanFolderAsync` / `SyncAsync` | Yes — non-matching files are skipped before change detection |
+| Folder-watcher events | Yes — per-folder patterns override the defaults |
+| Explicit `MemorizeAsync` / `RefreshAsync` | No — an explicit call is an explicit intent; silently skipping it would hide a caller's mistake |
 
-exclude가 include보다 우선하며, include가 빈 리스트면 "전부 포함"이다.
+Exclusion wins over inclusion, and an empty include list means "include everything".
 
-## Extraction diagnostics
+## Diagnostics
 
-추출기가 보고한 구조화 진단은 `VaultEntry`에 그대로 실려 `meta.json`에 영속된다. 스캔 PDF처럼 **정당한 0청크**가 "조용한 성공"으로 보이지 않게 하는 것이 목적이다.
+A document that yields zero chunks is not necessarily a failure, and a failure is not necessarily
+described by its most recent error. Both cases are reported explicitly rather than left to inference.
 
 ```csharp
-var entry = await vault.MemorizeAsync(path, waitForCompletion: true);  // Stage=Memorized, ChunkCount=0
+var entry = await vault.MemorizeAsync(path, waitForCompletion: true);
 
 if (entry.ExtractionHints?.TryGetValue("extraction_failure_reason", out var reason) == true)
 {
-    // reason: "no_text_layer" (이미지-only/스캔 문서) | "blank_page" (빈 문서)
-    // entry.ExtractionWarnings: 사람이 읽는 설명 (예: "... requires OCR")
+    // "no_text_layer" (image-only/scanned) | "blank_page" (empty document)
+    // entry.ExtractionWarnings carries the human-readable explanation.
 }
 ```
 
-- **불투명 패스스루** — 키/값은 추출기(FileFlux `RawContent.Hints`/`Warnings`) 어휘 그대로다. FluxFeed는 해석하지 않는다.
-- **스칼라만 영속** — 값이 문자열·불리언·수치·날짜류인 힌트만 저장한다. 리더 내부 구조값(예: `PageRanges`)은 타입명으로 문자열화되어 `meta.json`을 오염시키므로 제외한다. 키가 아니라 **값 타입** 기준이라 FileFlux가 힌트를 추가해도 드리프트가 없다.
-- **항상 최신 추출분** — 재추출 시 교체되고, 진단 없이 추출되면 이전 값은 지워진다. 예외 경로 전용인 `LastError`와는 별개 채널이다.
-- FileFlux **0.14.0+** 필요 (`no_text_layer`/`blank_page` 세분 라벨의 출처).
-
-## Failure diagnostics
-
-실패 사유는 두 필드로 나뉜다. **`LastError`는 마지막 실패, `FirstError`는 그 실패 에피소드를 시작한 실패**다.
-
-```csharp
-if (entry.FirstError is not null)
-{
-    // FirstError: 최초 원인 (추출기 분류가 실려 있는 쪽)
-    // LastError:  가장 최근 실패 — 재시도가 다른 이유로 실패했다면 다르다
-}
-```
-
-- 재시도가 자기 이유로 실패하면 `LastError`는 덮이지만 `FirstError`는 남는다. 최초 실패가 추출기의 진단을
-  싣고 있으므로, 그것이 지워지면 원본 파일 없이 진단할 방법이 사라진다.
-- `FirstError`는 `LastError`와 **같은 생애를 갖는다** — 처리 단계가 진행되거나(`Extracted`/`Refined`/`Memorized`)
-  `ResetToSource()` 하면 둘 다 지워진다. 반대로 **sync 상태 전이는 어느 쪽도 지우지 않는다**(`MarkInSync` 포함).
-  따라서 `FirstError != null`을 "지금 고장난 엔트리"로 읽지 말 것 — 그 판정은 `Stage`/`SyncStatus`로 한다.
-- 이전 버전이 쓴 `meta.json`은 `LastError`를 `FirstError`로 승계한다(한 번만 실패한 엔트리에서는 같은 값).
-- `ChangeDetectionResult`에도 같은 두 필드가 실린다.
-
-## 엔트리 레이아웃
-
-엔트리 디렉터리에는 **작업 산출물**(레코드·추출 텍스트·이미지)이 들어가고, **git이 추적하는 저장소는
-그 아래 `vault/`** 하나다. 작업 산출물은 저장소 바깥이라 무시 규칙의 대상이 아니며, 따라서 엔트리
-수준에 ignore 파일을 두지 않는다 — 저장소 바깥의 ignore 파일은 git이 읽지 않는다.
-
-> **0.8.0 breaking** — 위 이유로 효과가 없던 `VaultEntry.GitignorePath`와
-> `IVaultStorageService.CreateGitignoreAsync`가 제거됐다. 대체 API는 없다(생성하던 파일 자체가
-> 무의미했다). 호출부가 있으면 지우면 된다.
+- **Extraction hints are an opaque pass-through.** Keys and values are the extractor's own vocabulary
+  (FileFlux `RawContent.Hints` / `Warnings`); FluxFeed persists them to `meta.json` without
+  interpreting them. Only scalar values are stored, so new hints flow through without drift.
+  They always describe the *latest* extraction, and are cleared when one reports none.
+- **`FirstError` vs `LastError`.** `FirstError` is the failure that started the current episode and
+  usually carries the extractor's diagnosis; `LastError` is the most recent one. A retry failing for
+  its own reason overwrites the latter but not the former. Both clear on a successful stage or reset,
+  and neither is cleared by sync-status transitions — so use `Stage`/`SyncStatus`, not
+  `FirstError != null`, to decide whether an entry is currently broken.
+- **Refresh has a precondition.** It needs refined content to exist, which `ProcessingStage` does not
+  imply — a memorize with nothing to index skips the refine step, so a `Memorized` entry legitimately
+  may have none. `RefreshAsync` rejects those, and `DetectChangesAsync` recommends `Memorize`
+  instead, since re-extraction lets a failed or empty entry recover on its own.
 
 ## Damaged records
 
-엔트리 레코드(`meta.json`)는 **임시 파일에 쓴 뒤 제자리 교체**된다. 동시 writer가 있어도 어느 레코드가
-이길지만 정해지고 둘이 섞이지 않으며, 중단된 쓰기가 반쪽 레코드를 남기지 않는다.
+An entry record (`meta.json`) is written to a scratch file and swapped into place. Concurrent writers
+therefore only decide which record wins — they never interleave — and an interrupted write never
+leaves half a record behind.
 
-읽을 수 없는 레코드는 **없는 레코드와 구분된다**.
+An unreadable record is distinguished from an absent one:
 
 ```csharp
-// 없음 → null. 존재하지만 읽을 수 없음 → VaultRecordUnreadableException
+// absent → null; present but unreadable → VaultRecordUnreadableException
 var entry = VaultEntry.LoadByHash(hash, vaultBasePath);
 
-// 목록에서 빠진 레코드를 복구 대상으로 노출한다
+// entry directories missing from the listing, exposed so they can be repaired
 IReadOnlyList<string> damaged = await vault.ListUnreadableAsync();
 ```
 
-- `ListAsync()`는 읽을 수 없는 레코드를 건너뛰되 **경고 로그를 남긴다**. 그 엔트리를 화면에 표시하거나
-  복구를 제안하려면 `ListUnreadableAsync()`가 돌려주는 엔트리 디렉터리 경로를 쓴다.
-- 두 목록은 **같은 신호를 기준으로 나뉜다** — 엔트리는 정확히 한쪽에만 나타난다. 따라서
-  `ListAsync().Count + ListUnreadableAsync().Count`가 전체 엔트리 수다. 그 밖의 IO 오류는
-  삼켜지지 않고 전파된다(목록이 조용히 짧아지는 것이 바로 이 보고 기능이 없애려는 실패다).
-- 제자리 교체는 나가는 레코드를 **스크래치 이름으로 옆에 둔 채** 바꾼다. 그 스크래치 파일을 플랫폼이
-  치우지 못하면(읽는 쪽이 레코드를 붙들고 있으면 충분히 발생한다) 엔트리 디렉터리에 남으므로,
-  **다음 쓰기가 치운다** — 단 진행 중인 교체가 되돌아갈 대상을 지우지 않도록 충분히 오래된 것만.
-  따라서 방금 끝난 동시 쓰기 직후에는 잠깐 보일 수 있고, 무한히 쌓이지는 않는다.
-- memorize/refresh처럼 **레코드를 어차피 다시 쓰는 경로**는 읽을 수 없는 레코드를 보고한 뒤 새로 만든다.
-  실패시키면 그 엔트리가 영구히 묶이기 때문이다. 단, 재생성된 레코드는 이력이 비어 있다.
+- `ListAsync()` skips unreadable records but logs a warning. To display those entries or offer to
+  repair them, use the paths returned by `ListUnreadableAsync()`.
+- The two listings split on the same signal, so an entry appears in exactly one of them and their
+  counts sum to the total. Any other IO error propagates rather than being swallowed — a listing that
+  quietly gets shorter is the failure this reporting exists to eliminate.
+- The swap sets the outgoing record aside under a scratch name. When the platform cannot clear that
+  scratch file — likely enough while a reader holds the record open — it stays in the entry directory
+  and the next write removes it, but only once it is old enough that no in-flight swap still needs it
+  to roll back to. One may briefly be visible right after a concurrent write; they do not accumulate.
+- Paths that rewrite the record anyway (memorize, refresh) report an unreadable record and then
+  recreate it rather than failing, which would strand the entry permanently. A recreated record
+  starts with no history.
 
-## Refresh 전제
+## Optional integrations
 
-`refresh`는 **refined 콘텐츠를 재인덱싱**하며 재추출하지 않는다. 따라서 전제는 refined 콘텐츠의 존재이고,
-**`ProcessingStage`는 그것을 함의하지 않는다** — 인덱싱할 내용이 없던 memorize는 refine 단계를 건너뛰므로
-`Memorized`인데 refined가 없는 엔트리가 정상적으로 생기고, `Error`는 어떤 산출물이 남았는지 말해주지 않는다.
+Each of these is enabled by registering a service. Register nothing and the pipeline behaves as if
+the feature did not exist.
 
-- `RefreshAsync`는 refined 콘텐츠가 없으면 거부한다(메시지가 `memorize`를 지시한다). 이 전제는
-  가드와 파이프라인이 **같은 값**을 쓴다.
-- `DetectChangesAsync`는 refresh가 성공할 수 없는 엔트리에 `Refresh`를 추천하지 않고 **`Memorize`로 낮춘다.**
-  memorize는 재추출하므로 실패했거나 빈 엔트리가 **스스로 회복**할 수 있다.
+### Image enrichment — `IVaultImageEnricher`
 
-## Image enrichment
-
-문서에서 추출된 이미지는 파이프라인이 vault에 저장한다. 소비앱이 **설명 생성기만** 등록하면 그 설명이 인덱싱까지 이어진다 — 호출 시점·멱등·재시도·본문 반영·출처 노출은 파이프라인이 소유한다.
+Images extracted from documents are always stored. Register a describer and those descriptions get
+indexed too, which is what makes scanned or diagram-only documents searchable at all.
 
 ```csharp
 public sealed class VisionEnricher : IVaultImageEnricher
 {
     public async Task<string?> DescribeAsync(VaultImageDescriptionRequest request, CancellationToken ct)
         => await _vision.CaptionAsync(request.Image.FilePath, request.DocumentText, ct);
-        // null 반환 = 이번엔 실패 → 파이프라인이 다음 실행에 재시도
+        // returning null means "not this time" — the pipeline retries that image on the next run
 }
 
 services.AddSingleton<IVaultImageEnricher, VisionEnricher>();
 ```
 
-- **미등록 시 종전과 동일** — 이미지는 저장되지만 설명되지 않는다 (하위 호환).
-- **멱등** — 설명은 이미지 단위로 영속된다. 재-memorize 시 이미 설명된 이미지는 생성기를 재호출하지 않는다(이미지가 바이트 동일한 한). 실패한 이미지만 다음 실행에서 재시도되며, 한 이미지의 실패가 다른 이미지나 memorize 자체를 중단시키지 않는다.
-- **출처는 메타데이터로** — 설명은 **전용 청크**로 인덱싱되고 `chunk_kind="image_description"` · `image_id` · `image_file` 메타데이터를 갖는다. 본문에 마커를 심지 않으므로 사용자에게 보여줄 때 걷어낼 것도 없다.
-- **이미지-only 문서** — 텍스트 레이어가 없는 스캔·도표 문서는 종전에 0청크로 끝났으나, 설명이 있으면 그 설명이 곧 내용으로 인덱싱된다. (텍스트도 없고 설명도 없으면 종전대로 0청크.)
-- `request.DocumentText`는 원문서 추출 텍스트이며, 텍스트 레이어가 없으면 null이다.
+Descriptions are persisted per image, so re-memorizing does not re-describe images that already
+succeeded, and one image's failure aborts neither the others nor the memorize. Each description is
+indexed as its own chunk tagged `chunk_kind="image_description"` with `image_id` / `image_file`
+metadata — no markers are injected into the document text.
 
-## Keyword index (hybrid search)
+### Keyword index — `IKeywordSearchService`
 
-파이프라인은 벡터 스토어·GraphRAG와 같은 지점에서 청크를 인덱싱한다. DI 컨테이너에 `IKeywordSearchService`가
-등록되어 있으면(FluxIndex SDK가 기본으로 등록하는 in-memory BM25 폴백이든, PostgreSQL/SQLite 같은 영속
-백엔드든) 같은 청크가 키워드 인덱스에도 적재되어 하이브리드 검색의 세 번째 다리가 채워진다 — FluxIndex의
-자체 `Indexer` 경로가 아니라 이 ingestion 파이프라인으로 적재하는 구성에서는, 이 배선 없이는 키워드
-인덱스가 항상 비어 있다(벡터 단독 검색과 사실상 동일).
+When one is registered, every chunk written to the vector store is written to the keyword index as
+well, and `RemoveAsync` deletes from both. Without it the keyword index stays empty and hybrid search
+degenerates to vector-only. Check `VaultPipeline.SupportsKeywordIndex` to confirm the wiring.
 
-- **미등록 시 종전과 동일** — 벡터·GraphRAG 인덱싱만 수행된다 (하위 호환).
-- **GraphRAG과 달리 옵션 게이트가 없다** — 등록 자체가 신호다. 서비스가 있으면 항상 인덱싱하고, 없으면
-  항상 스킵한다(벡터 스토어 적재와 같은 규약).
-- **제거도 대칭** — `RemoveAsync`는 등록된 모든 백엔드(벡터 스토어·키워드 인덱스)에서 문서를 지운다.
-- `VaultPipeline.SupportsKeywordIndex`로 배선 여부를 확인할 수 있다.
+### Hybrid search — `IHybridSearchService`
 
-> 상세 표면·경계는 [CHARTER.md](CHARTER.md) 참조.
+`VaultSearchOptions.SearchStrategy = VaultSearchStrategy.Hybrid` is honored only when this service is
+registered. Otherwise the query runs as vector search and says so via
+`VaultSearchResult.ExecutedStrategy` — compare it against `RequestedStrategy` rather than assuming
+the request was honored.
+
+## Multi-tenant
+
+`AddFileVaultFactoryWithFluxIndex` swaps the single `IVault` for an `IVaultFactory`. Each tenant gets
+its own `.vault/` directory and processing queue, while stateless services and the vector store are
+shared.
+
+```csharp
+services.AddFileVaultFactoryWithFluxIndex(o => o.VaultBasePath = "./data");
+
+var vault = factory.GetOrCreate("tenant-a");
+await vault.MemorizeAsync(path);
+
+// Deleting a tenant: one filtered delete removes all of its vectors, no per-entry loop.
+await factory.DisposeAsync("tenant-a", purgeVectors: true);
+```
+
+Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk purge
+(`IVault.PurgeAsync`) possible.
+
+## Configuration
+
+`FileVaultOptions` (bindable from the `FileVault` configuration section):
+
+| Option | Default | Description |
+|---|---|---|
+| `VaultBasePath` | `null` | Vault root. When null, `.vault` next to each source file |
+| `VaultId` | `null` | Tenant id; set by `IVaultFactory`. Required for `PurgeAsync` |
+| `MaxFileSizeMB` | `100` | Larger files are skipped |
+| `EnableRealTimeWatch` | `true` | Folder watching |
+| `DebounceDelayMs` | `500` | Merge window for rapid change events |
+| `EnableBackgroundProcessing` | `true` | Background queue; when false the service idles |
+| `MaxConcurrentProcessing` | `4` | Concurrent file operations |
+| `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` | `true` / `3` / `5000` | Retry policy |
+| `AutoCleanupOrphans` | `false` | Remove entries whose source file is gone, during sync |
+| `Chunking.MaxChunkSize` / `OverlapSize` / `Strategy` | `1024` / `128` / `Intelligent` | Chunking defaults, with per-extension overrides via `Chunking.FormatStrategies` |
+| `DefaultIncludePatterns` / `DefaultExcludePatterns` | common document / temp-file globs | See [File selection patterns](#file-selection-patterns) |
+
+## Requirements
+
+- .NET 10.0
+- FluxIndex.Core 0.17.0+
+- FileFlux 0.16.0+ — the source of the structured extraction diagnostics described above
+
+## License
+
+MIT — see [LICENSE](LICENSE).

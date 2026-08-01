@@ -36,8 +36,8 @@ FluxFeed는 문서 파이프라인 표면(④b) — 수집·파싱·정제를 �
 ## 4. 의존 (Dependencies)
 
 **Internal:**
-- FluxIndex.Core 0.15.0+
-- FileFlux 0.14.0+ (구조화 추출 진단 `no_text_layer`/`blank_page` 패스스루의 출처)
+- FluxIndex.Core 0.17.0+
+- FileFlux 0.16.0+ (구조화 추출 진단 `no_text_layer`/`blank_page` 패스스루의 출처)
 
 **External:**
 - Microsoft.Extensions.Hosting.Abstractions
