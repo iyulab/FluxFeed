@@ -80,6 +80,16 @@ public interface IVault
     Task<IReadOnlyList<VaultEntry>> ListAsync(ProcessingStage? stageFilter = null, CancellationToken ct = default);
 
     /// <summary>
+    /// Lists the entry directories whose metadata record exists but cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// These entries are absent from <see cref="ListAsync"/> because there is nothing readable to
+    /// return for them. Without this, a damaged record is indistinguishable from an entry that was
+    /// never added, and no caller can offer to repair or discard it.
+    /// </remarks>
+    Task<IReadOnlyList<string>> ListUnreadableAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Removes a vault entry and its associated data.
     /// Also removes chunks from vector store.
     /// </summary>

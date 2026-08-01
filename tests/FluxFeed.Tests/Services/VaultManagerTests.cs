@@ -1003,4 +1003,62 @@ public class VaultManagerTests : IDisposable
     }
 
     #endregion
+
+    #region Unreadable records
+
+    [Fact]
+    public async Task ListAsync_WhenOneRecordIsUnreadable_StillReturnsTheReadableEntries()
+    {
+        // Arrange
+        var readable = CreateTestFile("readable.md", "content");
+        CreateEntryWithMetadataAtStage(readable, ProcessingStage.Memorized);
+        CorruptRecordFor(CreateTestFile("unreadable.md", "content"));
+
+        // Act
+        var entries = await _vault.ListAsync();
+
+        // Assert - one damaged record must not take the rest of the listing with it.
+        entries.Should().ContainSingle()
+            .Which.SourcePath.Should().Be(Path.GetFullPath(readable));
+    }
+
+    [Fact]
+    public async Task ListUnreadableAsync_ReportsTheEntryDirectoryThatCannotBeRead()
+    {
+        // Arrange
+        CreateEntryWithMetadataAtStage(CreateTestFile("readable.md", "content"), ProcessingStage.Memorized);
+        var damagedEntryPath = CorruptRecordFor(CreateTestFile("unreadable.md", "content"));
+
+        // Act
+        var unreadable = await _vault.ListUnreadableAsync();
+
+        // Assert - a caller can only offer repair for what it has been told about.
+        unreadable.Should().ContainSingle().Which.Should().Be(damagedEntryPath);
+    }
+
+    [Fact]
+    public async Task MemorizeAsync_WhenTheExistingRecordIsUnreadable_RebuildsItInsteadOfFailing()
+    {
+        // Arrange - rewriting the record is what memorize is about to do anyway, so an unreadable
+        // one is repairable here rather than fatal.
+        var filePath = CreateTestFile("rebuild.md", "content");
+        CorruptRecordFor(filePath);
+
+        // Act
+        var entry = await _vault.MemorizeAsync(filePath);
+
+        // Assert
+        entry.SourcePath.Should().Be(Path.GetFullPath(filePath));
+        VaultEntry.LoadByHash(entry.FilepathHash, _vaultDir).Should().NotBeNull();
+    }
+
+    private string CorruptRecordFor(string filePath)
+    {
+        var entry = VaultEntry.Create(filePath, _vaultDir);
+        entry.SaveMetadata();
+        File.WriteAllText(entry.MetaPath, "{ this is not a record");
+        return entry.EntryPath;
+    }
+
+    #endregion
 }

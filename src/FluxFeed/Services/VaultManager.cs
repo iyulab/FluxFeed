@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
+using FluxFeed.Domain.Exceptions;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using Microsoft.Extensions.Logging;
@@ -499,6 +500,31 @@ public sealed partial class VaultManager : IVault
         return Task.FromResult<IReadOnlyList<VaultEntry>>(entries);
     }
 
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> ListUnreadableAsync(CancellationToken ct = default)
+    {
+        var unreadable = new List<string>();
+
+        if (!Directory.Exists(_storage.BasePath))
+            return Task.FromResult<IReadOnlyList<string>>(unreadable);
+
+        foreach (var dir in Directory.GetDirectories(_storage.BasePath))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                VaultEntry.LoadByHash(Path.GetFileName(dir), _storage.BasePath);
+            }
+            catch (VaultRecordUnreadableException)
+            {
+                unreadable.Add(dir);
+            }
+        }
+
+        return Task.FromResult<IReadOnlyList<string>>(unreadable);
+    }
+
     public async Task RemoveAsync(string filePath, CancellationToken ct = default)
     {
         var fullPath = Path.GetFullPath(filePath);
@@ -551,7 +577,7 @@ public sealed partial class VaultManager : IVault
     private async Task<VaultEntry> GetOrCreateEntryAsync(string fullPath, CancellationToken ct)
     {
         var filepathHash = FilepathHasher.ComputeHash(fullPath);
-        var existing = VaultEntry.LoadByHash(filepathHash, _storage.BasePath);
+        var existing = LoadForRewrite(filepathHash);
 
         if (existing != null)
         {
@@ -580,6 +606,27 @@ public sealed partial class VaultManager : IVault
 
         LogCreatedEntry(_logger, fullPath, entry.EntryPath);
         return entry;
+    }
+
+    /// <summary>
+    /// Loads an entry on behalf of a caller that is about to rewrite its record.
+    /// </summary>
+    /// <remarks>
+    /// An unreadable record is reported and then treated as absent here. Rewriting is precisely
+    /// what repairs it, so failing instead would leave the entry permanently stuck — but it must
+    /// not be discarded quietly, because the rebuilt record starts from an empty history.
+    /// </remarks>
+    private VaultEntry? LoadForRewrite(string filepathHash)
+    {
+        try
+        {
+            return VaultEntry.LoadByHash(filepathHash, _storage.BasePath);
+        }
+        catch (VaultRecordUnreadableException ex)
+        {
+            LogRebuildingUnreadableRecord(_logger, ex, ex.RecordPath);
+            return null;
+        }
     }
 
     #endregion
@@ -642,14 +689,25 @@ public sealed partial class VaultManager : IVault
                 continue;
             }
 
-            // Detect changes
-            var changes = await DetectChangesAsync(entry.SourcePath, ct);
-            if (changes.SourceChanged)
+            // Detect changes. The listing above already skipped records it could not read, so this
+            // only fires if one became unreadable mid-sweep — report it and keep the rest of the
+            // status intact rather than failing the whole query over a single entry.
+            ChangeDetectionResult? changes = null;
+            try
+            {
+                changes = await DetectChangesAsync(entry.SourcePath, ct);
+            }
+            catch (VaultRecordUnreadableException ex)
+            {
+                LogFailedToDetectChanges(_logger, ex, entry.SourcePath);
+            }
+
+            if (changes?.SourceChanged == true)
             {
                 changedSourceCount++;
                 changedEntries.Add(entry);
             }
-            else if (changes.VaultChanged)
+            else if (changes?.VaultChanged == true)
             {
                 changedVaultCount++;
                 changedEntries.Add(entry);
@@ -1234,6 +1292,9 @@ public sealed partial class VaultManager : IVault
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load vault entry from {Path}")]
     private static partial void LogFailedToLoadEntry(ILogger logger, Exception exception, string path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Vault record unreadable, rebuilding it from scratch: {Path}")]
+    private static partial void LogRebuildingUnreadableRecord(ILogger logger, Exception exception, string path);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "No entry found for {FilePath}")]
     private static partial void LogNoEntryFound(ILogger logger, string filePath);

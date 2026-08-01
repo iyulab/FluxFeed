@@ -1,5 +1,6 @@
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
+using FluxFeed.Domain.Exceptions;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using Microsoft.Extensions.DependencyInjection;
@@ -113,8 +114,9 @@ public sealed partial class VaultBackgroundService : BackgroundService
         {
             LogProcessingJob(_logger, job.JobType, job.Id, job.FilePath);
 
-            // Load or create entry
-            var entry = VaultEntry.LoadByHash(job.FilepathHash, _storage.BasePath)
+            // Load or create entry. A record that cannot be read is reported and then rebuilt:
+            // this job is about to rewrite it anyway, so failing would leave the entry stuck.
+            var entry = LoadForRewrite(job.FilepathHash)
                         ?? VaultEntry.Create(job.FilePath, _storage.BasePath);
 
             // Use scope to access scoped services like IVaultPipeline
@@ -231,6 +233,40 @@ public sealed partial class VaultBackgroundService : BackgroundService
     }
 
     /// <summary>
+    /// Loads an entry for a job that is about to rewrite its record: an unreadable record is
+    /// reported and then rebuilt rather than failing the job.
+    /// </summary>
+    private VaultEntry? LoadForRewrite(string filepathHash)
+    {
+        try
+        {
+            return VaultEntry.LoadByHash(filepathHash, _storage.BasePath);
+        }
+        catch (VaultRecordUnreadableException ex)
+        {
+            LogRebuildingUnreadableRecord(_logger, ex, ex.RecordPath);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Loads an entry during a sweep over every record: an unreadable one is reported and skipped
+    /// so the remaining entries are still visited.
+    /// </summary>
+    private VaultEntry? LoadForRecovery(string filepathHash)
+    {
+        try
+        {
+            return VaultEntry.LoadByHash(filepathHash, _storage.BasePath);
+        }
+        catch (VaultRecordUnreadableException ex)
+        {
+            LogSkippingUnreadableRecord(_logger, ex, ex.RecordPath);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Recovers entries that are in partial removal state from previous runs.
     /// Should be called during startup after RecoverStuckJobsAsync.
     /// </summary>
@@ -245,7 +281,10 @@ public sealed partial class VaultBackgroundService : BackgroundService
             ct.ThrowIfCancellationRequested();
 
             var dirName = Path.GetFileName(dir);
-            var entry = VaultEntry.LoadByHash(dirName, _storage.BasePath);
+            // One unreadable record must not stop the remaining entries from being recovered, but
+            // it is reported rather than skipped in silence — a record that cannot be read is also
+            // one this pass can never visit again.
+            var entry = LoadForRecovery(dirName);
 
             if (entry == null)
                 continue;
@@ -373,6 +412,12 @@ public sealed partial class VaultBackgroundService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Vault background service stopping...")]
     private static partial void LogServiceStopping(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Vault record unreadable, rebuilding it from scratch: {Path}")]
+    private static partial void LogRebuildingUnreadableRecord(ILogger logger, Exception exception, string path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Vault record unreadable, skipping it during recovery: {Path}")]
+    private static partial void LogSkippingUnreadableRecord(ILogger logger, Exception exception, string path);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Timeout waiting for active jobs to complete")]
     private static partial void LogTimeoutWaiting(ILogger logger);

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluxIndex.Core.Domain.ValueObjects;
 using FluxFeed.Domain.Enums;
+using FluxFeed.Domain.Exceptions;
 using FluxFeed.Domain.ValueObjects;
 using FluxFeed.Services;
 
@@ -179,6 +180,12 @@ public sealed class VaultEntry
     /// <summary>
     /// Loads an existing vault entry from disk.
     /// </summary>
+    /// <returns>The entry, or null when no record exists for it.</returns>
+    /// <exception cref="VaultRecordUnreadableException">
+    /// The record exists but cannot be read back. This is reported rather than folded into a null
+    /// result: an entry that silently disappears from every listing gives a caller nothing to act
+    /// on, while a reported fault can be repaired or discarded.
+    /// </exception>
     public static VaultEntry? Load(string entryPath, string vaultBasePath)
     {
         var metaPath = Path.Combine(entryPath, "meta.json");
@@ -198,7 +205,7 @@ public sealed class VaultEntry
             }
             var meta = JsonSerializer.Deserialize<EntryMetadata>(json, s_readJsonOptions);
             if (meta == null)
-                return null;
+                throw new VaultRecordUnreadableException(metaPath);
 
             var entry = new VaultEntry
             {
@@ -229,9 +236,15 @@ public sealed class VaultEntry
 
             return entry;
         }
-        catch
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
+            // The record was removed between the existence check and the read. That is an absent
+            // entry, not a damaged one.
             return null;
+        }
+        catch (Exception ex) when (ex is not VaultRecordUnreadableException)
+        {
+            throw new VaultRecordUnreadableException(metaPath, ex);
         }
     }
 
@@ -476,11 +489,89 @@ public sealed class VaultEntry
 
         var json = JsonSerializer.Serialize(meta, s_writeJsonOptions);
 
-        // FileShare.Delete mirrors the read path so a concurrent removal does not hard-fail
-        // against an in-flight metadata write.
-        using var fs = new FileStream(MetaPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-        using var writer = new StreamWriter(fs);
-        writer.Write(json);
+        // Writing in place truncates only when the file is opened, so two overlapping writers can
+        // leave the tail of the longer serialization behind and produce a record that no longer
+        // parses. Writing to a private temporary file and moving it into place makes each write
+        // all-or-nothing: overlapping writers can only decide which record wins, never blend two.
+        // It also means an interrupted write cannot leave a half-written record on disk.
+        var tempPath = $"{MetaPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var fs = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(fs))
+            {
+                writer.Write(json);
+            }
+
+            PublishRecord(tempPath, MetaPath);
+        }
+        finally
+        {
+            DeleteIfPresent(tempPath);
+        }
+    }
+
+    /// <summary>
+    /// Number of attempts to move a freshly written record into place. A sharing violation here is
+    /// always momentary — another writer publishing its own record, or an external holder such as
+    /// an indexer or backup agent — so a short bounded retry is enough.
+    /// </summary>
+    private const int PublishAttempts = 10;
+
+    /// <summary>
+    /// Moves a freshly written record over the live one so readers see either the old record or
+    /// the new one, never a blend of both.
+    /// </summary>
+    private static void PublishRecord(string tempPath, string metaPath)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                if (File.Exists(metaPath))
+                {
+                    // Replace tolerates a destination that is still open elsewhere, which a plain
+                    // overwriting move does not — readers hold the record open with
+                    // FileShare.Delete precisely so a rewrite can proceed underneath them.
+                    File.Replace(tempPath, metaPath, destinationBackupFileName: null);
+                }
+                else
+                {
+                    // First write: there is nothing to replace. A concurrent writer may still win
+                    // the race to create it, which surfaces as an IOException and is retried.
+                    File.Move(tempPath, metaPath);
+                }
+
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < PublishAttempts)
+            {
+                Thread.Sleep(attempt);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes a leftover temporary file without masking the outcome of the write that produced it.
+    /// </summary>
+    private static void DeleteIfPresent(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // A stray temporary file is not worth replacing the caller's exception with.
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     // === Path Properties ===

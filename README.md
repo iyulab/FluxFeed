@@ -60,6 +60,26 @@ if (entry.FirstError is not null)
 - 이전 버전이 쓴 `meta.json`은 `LastError`를 `FirstError`로 승계한다(한 번만 실패한 엔트리에서는 같은 값).
 - `ChangeDetectionResult`에도 같은 두 필드가 실린다.
 
+## Damaged records
+
+엔트리 레코드(`meta.json`)는 **임시 파일에 쓴 뒤 제자리 교체**된다. 동시 writer가 있어도 어느 레코드가
+이길지만 정해지고 둘이 섞이지 않으며, 중단된 쓰기가 반쪽 레코드를 남기지 않는다.
+
+읽을 수 없는 레코드는 **없는 레코드와 구분된다**.
+
+```csharp
+// 없음 → null. 존재하지만 읽을 수 없음 → VaultRecordUnreadableException
+var entry = VaultEntry.LoadByHash(hash, vaultBasePath);
+
+// 목록에서 빠진 레코드를 복구 대상으로 노출한다
+IReadOnlyList<string> damaged = await vault.ListUnreadableAsync();
+```
+
+- `ListAsync()`는 읽을 수 없는 레코드를 건너뛰되 **경고 로그를 남긴다**. 그 엔트리를 화면에 표시하거나
+  복구를 제안하려면 `ListUnreadableAsync()`가 돌려주는 엔트리 디렉터리 경로를 쓴다.
+- memorize/refresh처럼 **레코드를 어차피 다시 쓰는 경로**는 읽을 수 없는 레코드를 보고한 뒤 새로 만든다.
+  실패시키면 그 엔트리가 영구히 묶이기 때문이다. 단, 재생성된 레코드는 이력이 비어 있다.
+
 ## Refresh 전제
 
 `refresh`는 **refined 콘텐츠를 재인덱싱**하며 재추출하지 않는다. 따라서 전제는 refined 콘텐츠의 존재이고,

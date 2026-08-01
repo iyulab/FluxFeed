@@ -87,7 +87,9 @@ public class VaultBackgroundServiceSignalingTests
     {
         public bool IsPaused { get; set; }
         public event EventHandler<VaultJob>? JobEnqueued;
-        public event EventHandler<VaultJob>? JobCompleted;
+
+        // These tests never observe completion, so the event is implemented without storage.
+        public event EventHandler<VaultJob>? JobCompleted { add { } remove { } }
 
         private int _dequeueCount;
         public int DequeueCount => _dequeueCount;

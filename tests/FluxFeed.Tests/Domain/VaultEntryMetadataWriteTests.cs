@@ -1,0 +1,123 @@
+using FluentAssertions;
+using FluxFeed.Domain.Entities;
+using Xunit;
+
+namespace FluxFeed.Tests.Domain;
+
+/// <summary>
+/// The metadata record is rewritten on a schedule as well as on demand, so two writers can
+/// overlap. An in-place rewrite only truncates when the file is opened, which lets a shorter
+/// serialization leave the tail of a longer one behind and produce a record that no longer parses.
+/// </summary>
+public class VaultEntryMetadataWriteTests : IDisposable
+{
+    private readonly string _testDir;
+
+    public VaultEntryMetadataWriteTests()
+    {
+        _testDir = Path.Combine(Path.GetTempPath(), "VaultEntryMetadataWriteTests_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_testDir);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testDir))
+        {
+            Directory.Delete(_testDir, recursive: true);
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    [Fact]
+    public void SaveMetadata_WhenAnotherWriterHoldsTheRecordOpen_LeavesItParseable()
+    {
+        // Arrange
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "report.md"), _testDir);
+        entry.SaveMetadata();
+        var shorterSerialization = ShortenByOneCharacter(File.ReadAllText(entry.MetaPath));
+
+        // A competing writer opens the record and buffers a serialization one character shorter,
+        // then flushes after the entry has written its own. Both opens precede both flushes, so an
+        // in-place rewrite cannot shrink the file and the longer record's tail survives.
+        var competing = new FileStream(
+            entry.MetaPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+        var competingWriter = new StreamWriter(competing);
+        competingWriter.Write(shorterSerialization);
+
+        // Act
+        entry.SaveMetadata();
+
+        try
+        {
+            competingWriter.Dispose();
+        }
+        catch (IOException)
+        {
+            // A stale writer failing once its target has been replaced is an acceptable outcome —
+            // what matters is the record left on disk.
+        }
+
+        // Assert
+        VaultEntry.LoadByHash(entry.FilepathHash, _testDir)
+            .Should().NotBeNull("a record must stay readable when a concurrent writer overlaps it");
+    }
+
+    [Fact]
+    public async Task SaveMetadata_ConcurrentWritersOfDifferentLengths_NeverLeaveAnUnreadableRecord()
+    {
+        // Arrange
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "notes.md"), _testDir);
+        entry.SaveMetadata();
+
+        var shortRecord = VaultEntry.LoadByHash(entry.FilepathHash, _testDir)!;
+        var longRecord = VaultEntry.LoadByHash(entry.FilepathHash, _testDir)!;
+        shortRecord.MarkError("short");
+        longRecord.MarkError("a considerably longer failure description than the other writer records");
+
+        // Act + Assert
+        for (var round = 0; round < 50; round++)
+        {
+            await Task.WhenAll(
+                Task.Run(shortRecord.SaveMetadata),
+                Task.Run(longRecord.SaveMetadata));
+
+            VaultEntry.LoadByHash(entry.FilepathHash, _testDir)
+                .Should().NotBeNull($"round {round} must not leave an unreadable record");
+        }
+    }
+
+    [Fact]
+    public void SaveMetadata_WhenTheRecordCannotBePublished_FailsLoudlyAndLeavesNoTemporaryFile()
+    {
+        // Arrange - a holder that shares nothing keeps the record from being replaced for good,
+        // which is the one case the bounded retry cannot clear.
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "locked.md"), _testDir);
+        entry.SaveMetadata();
+
+        using var exclusiveHolder = new FileStream(
+            entry.MetaPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        // Act
+        var save = () => entry.SaveMetadata();
+
+        // Assert - a write that cannot land must say so rather than disappear.
+        save.Should().Throw<Exception>()
+            .Which.Should().Match(ex => ex is IOException || ex is UnauthorizedAccessException);
+
+        Directory.GetFiles(entry.EntryPath, "*.tmp").Should()
+            .BeEmpty("a failed publish must not leave its temporary file behind");
+    }
+
+    /// <summary>
+    /// Drops one indent character. Indented JSON has whitespace to spare, so the result stays
+    /// valid while reproducing the one-character length difference that a timestamp's trailing
+    /// fractional-second digit produces in practice.
+    /// </summary>
+    private static string ShortenByOneCharacter(string json)
+    {
+        var indentIndex = json.IndexOf("\n  ", StringComparison.Ordinal);
+        indentIndex.Should().BeGreaterThan(-1, "the serialization is indented");
+        return json.Remove(indentIndex + 1, 1);
+    }
+}
