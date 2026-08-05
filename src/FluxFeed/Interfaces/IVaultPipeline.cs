@@ -10,6 +10,19 @@ namespace FluxFeed.Interfaces;
 public interface IVaultPipeline
 {
     /// <summary>
+    /// Whether a keyword search service is wired into this pipeline. When true, every chunk this
+    /// pipeline writes to the vector store is also written to the keyword index, keeping the two
+    /// backends in sync for hybrid retrieval.
+    /// </summary>
+    bool SupportsKeywordIndex { get; }
+
+    /// <summary>
+    /// Whether a GraphRAG service is wired into this pipeline. When false, a memorize call with
+    /// <see cref="MemorizeOptions.EnableGraphRAG"/> == true will throw.
+    /// </summary>
+    bool SupportsGraphRAG { get; }
+
+    /// <summary>
     /// Full memorize pipeline: extract → refine → chunk → embed → commit.
     /// Used for new files or when source content has changed.
     /// </summary>

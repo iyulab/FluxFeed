@@ -339,4 +339,57 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
 
         enricher.Requests.Should().ContainSingle().Which.DocumentText.Should().BeNull();
     }
+
+    // === Chunk size bound on generated descriptions ===
+    //
+    // Descriptions used to bypass the chunker and become one chunk each, so MaxChunkSize was
+    // unenforced on the one input this pipeline generates rather than reads. A single runaway
+    // description then pushed the document's whole embedding request past the model's context
+    // window, and since indexing replaces rows by deleting first, the document lost its index
+    // rather than merely failing to update.
+
+    [Fact]
+    public async Task MemorizeAsync_RunawayImageDescription_IsSplitToRespectMaxChunkSize()
+    {
+        var entry = CreateEntry("floorplan.pptx");
+        // One paragraph, no newlines - the shape a caption model produces when it enumerates.
+        var runaway = string.Join(", ", Enumerable.Range(301, 400).Select(n => $"room {n}"));
+        var enricher = new RecordingEnricher(_ => runaway);
+
+        var result = await CreatePipeline(
+            new ExtractionResult { Content = string.Empty, Images = [Image("img_018")] },
+            enricher).MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 512 });
+
+        result.Success.Should().BeTrue();
+        runaway.Length.Should().BeGreaterThan(512, "the fixture must exceed the bound to be meaningful");
+
+        _capture.Chunks.Should().HaveCountGreaterThan(1);
+        _capture.Chunks.Should().OnlyContain(c => c.Content.Length <= 512);
+
+        // Provenance survives the split on every piece, or a citation cannot resolve its image.
+        _capture.Chunks.Should().OnlyContain(c =>
+            (string)c.Metadata!["chunk_kind"] == VaultPipeline.ImageDescriptionChunkKind &&
+            (string)c.Metadata["image_id"] == "img_018" &&
+            (string)c.Metadata["image_file"] == "img_018.png");
+
+        // No text is dropped by the split.
+        string.Concat(_capture.Chunks.OrderBy(c => c.ChunkIndex).Select(c => c.Content))
+            .Should().Be(runaway);
+    }
+
+    [Fact]
+    public async Task MemorizeAsync_ShortImageDescription_StillProducesExactlyOneChunk()
+    {
+        // The bound must not fragment descriptions that already fit - non-regression for the
+        // common case, which is what the surrounding tests assert one chunk of.
+        var entry = CreateEntry("figure.pdf");
+        var enricher = new RecordingEnricher(_ => "Monthly revenue trend chart, peaking in March.");
+
+        await CreatePipeline(
+            new ExtractionResult { Content = string.Empty, Images = [Image("img_000")] },
+            enricher).MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 512 });
+
+        _capture.Chunks.Should().ContainSingle()
+            .Which.Content.Should().Be("Monthly revenue trend chart, peaking in March.");
+    }
 }

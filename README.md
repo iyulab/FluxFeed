@@ -225,11 +225,18 @@ succeeded, and one image's failure aborts neither the others nor the memorize. E
 indexed as its own chunk tagged `chunk_kind="image_description"` with `image_id` / `image_file`
 metadata — no markers are injected into the document text.
 
+Descriptions go through the same chunker as the body, so `MaxChunkSize` bounds them too and a long
+description becomes several chunks that each carry the same `image_id` / `image_file`. Returning a
+long description is therefore safe: it cannot push the document's embedding request past the model's
+context window.
+
 ### Keyword index — `IKeywordSearchService`
 
 When one is registered, every chunk written to the vector store is written to the keyword index as
 well, and `RemoveAsync` deletes from both. Without it the keyword index stays empty and hybrid search
-degenerates to vector-only. Check `VaultPipeline.SupportsKeywordIndex` to confirm the wiring.
+degenerates to vector-only. Check `IVaultPipeline.SupportsKeywordIndex` to confirm the wiring —
+it is on the interface, so holding the pipeline as `IVaultPipeline` is enough (`SupportsGraphRAG`
+reports the GraphRAG leg the same way).
 
 ### Hybrid search — `IHybridSearchService`
 

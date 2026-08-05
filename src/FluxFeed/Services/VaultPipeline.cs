@@ -448,26 +448,78 @@ public sealed partial class VaultPipeline : IVaultPipeline
     }
 
     /// <summary>
-    /// Turns described images into indexable chunks. Each description is its own chunk carrying
-    /// <c>image_id</c> / <c>image_file</c> / <c>chunk_kind</c> metadata, so a consumer can attach the
-    /// source image to a citation by reading metadata — no marker is ever written into the body text
-    /// and therefore none has to be stripped back out on the way to a user.
+    /// Turns described images into indexable chunks carrying <c>image_id</c> / <c>image_file</c> /
+    /// <c>chunk_kind</c> metadata, so a consumer can attach the source image to a citation by reading
+    /// metadata — no marker is ever written into the body text and therefore none has to be stripped
+    /// back out on the way to a user.
     /// </summary>
-    private async Task<IReadOnlyList<VaultChunk>> BuildImageChunksAsync(VaultEntry entry, CancellationToken ct)
+    /// <remarks>
+    /// Descriptions go through the same chunker as the body. They used to bypass it and become one
+    /// chunk each, which left <see cref="MemorizeOptions.MaxChunkSize"/> unenforced on the one input
+    /// this pipeline generates rather than reads: a single oversized description made the whole
+    /// document's embedding request exceed the model's context window, and because indexing replaces
+    /// rows by deleting first, the document lost its index instead of merely failing to update.
+    /// <para>
+    /// Bounding the description at the point it is written is not something a consumer can do for us
+    /// — <c>IVaultImageEnricher</c> is a public port, so any implementation may return a long
+    /// description, and some legitimately do (detailed tables, diagrams).
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlyList<VaultChunk>> BuildImageChunksAsync(
+        VaultEntry entry,
+        MemorizeOptions options,
+        CancellationToken ct)
     {
         var images = await _storage.GetImageManifestAsync(entry, ct);
+        var chunks = new List<VaultChunk>();
 
-        return images
-            .Where(image => image.IsDescribed)
-            .Select(image => new VaultChunk(
-                image.Description!,
-                new Dictionary<string, object>
-                {
-                    ["chunk_kind"] = ImageDescriptionChunkKind,
-                    ["image_id"] = image.Id,
-                    ["image_file"] = image.FileName
-                }))
-            .ToList();
+        foreach (var image in images.Where(image => image.IsDescribed))
+        {
+            var description = image.Description!;
+
+            // The per-format strategy override is deliberately not applied here: it is keyed on the
+            // source document's extension, and a description is prose produced by the enricher, not
+            // content in that document's format.
+            IReadOnlyList<string> parts;
+            if (_chunker != null)
+            {
+                parts = await _chunker.ChunkAsync(
+                    description,
+                    new ChunkingOptions
+                    {
+                        MaxChunkSize = options.MaxChunkSize,
+                        OverlapSize = options.OverlapSize,
+                        Strategy = options.Strategy,
+                        Language = options.Language
+                    },
+                    ct);
+            }
+            else
+            {
+                parts = ChunkFallback(description, options.MaxChunkSize);
+            }
+
+            // A chunker that returns nothing for text that is not blank would silently drop the
+            // image, turning an image-only document into an empty one. Fall back rather than lose it.
+            if (parts.Count == 0 && !string.IsNullOrWhiteSpace(description))
+            {
+                parts = ChunkFallback(description, options.MaxChunkSize);
+            }
+
+            foreach (var part in parts)
+            {
+                chunks.Add(new VaultChunk(
+                    part,
+                    new Dictionary<string, object>
+                    {
+                        ["chunk_kind"] = ImageDescriptionChunkKind,
+                        ["image_id"] = image.Id,
+                        ["image_file"] = image.FileName
+                    }));
+            }
+        }
+
+        return chunks;
     }
 
     public async Task RemoveAsync(VaultEntry entry, CancellationToken ct = default)
@@ -730,7 +782,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // Described images are content in their own right — an image-only document has no text but
         // is not empty. They are appended after the text chunks so text chunk indices (and with
         // them the resumable checkpoint) stay stable.
-        var imageChunks = await BuildImageChunksAsync(entry, ct);
+        var imageChunks = await BuildImageChunksAsync(entry, options, ct);
 
         if (string.IsNullOrWhiteSpace(combinedContent) && imageChunks.Count == 0)
         {
@@ -1066,33 +1118,56 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return all;
     }
 
+    /// <summary>
+    /// Splits on line boundaries when it can and inside a line when it must, so the bound holds for
+    /// every input. Grouping by line alone left a single long line as one oversized chunk — text
+    /// with no newlines (a generated image description, a one-paragraph document) passed through
+    /// unbounded, which defeats the purpose of the limit at exactly the input most likely to exceed
+    /// an embedding model's context window.
+    /// </summary>
     private static List<string> ChunkFallback(string content, int maxChunkSize)
     {
+        if (maxChunkSize <= 0)
+        {
+            return [content];
+        }
+
         var chunks = new List<string>();
-        var lines = content.Split('\n');
         var currentChunk = new List<string>();
         var currentLength = 0;
 
-        foreach (var line in lines)
+        void Flush()
         {
-            var lineLength = line.Length;
+            if (currentChunk.Count == 0) return;
+            chunks.Add(string.Join('\n', currentChunk));
+            currentChunk.Clear();
+            currentLength = 0;
+        }
 
-            if (currentLength + lineLength > maxChunkSize && currentChunk.Count > 0)
+        foreach (var line in content.Split('\n'))
+        {
+            // A line that cannot fit in any chunk is emitted on its own, hard-split. Anything
+            // buffered goes out first so ordering is preserved.
+            if (line.Length > maxChunkSize)
             {
-                chunks.Add(string.Join('\n', currentChunk));
-                currentChunk.Clear();
-                currentLength = 0;
+                Flush();
+                for (var offset = 0; offset < line.Length; offset += maxChunkSize)
+                {
+                    chunks.Add(line.Substring(offset, Math.Min(maxChunkSize, line.Length - offset)));
+                }
+                continue;
+            }
+
+            if (currentLength + line.Length > maxChunkSize)
+            {
+                Flush();
             }
 
             currentChunk.Add(line);
-            currentLength += lineLength + 1;
+            currentLength += line.Length + 1;
         }
 
-        if (currentChunk.Count > 0)
-        {
-            chunks.Add(string.Join('\n', currentChunk));
-        }
-
+        Flush();
         return chunks;
     }
 
