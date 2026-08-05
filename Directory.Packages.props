@@ -3,7 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="FluxIndex.Core" Version="0.17.0" />
+    <PackageVersion Include="FluxIndex.Core" Version="0.25.0" />
     <!-- 0.14.0+ is load-bearing: structured extraction diagnostics
          (RawContent.Hints["extraction_failure_reason"] = no_text_layer / blank_page)
          only exist from 0.13.0/0.14.0 and are propagated to VaultEntry. -->

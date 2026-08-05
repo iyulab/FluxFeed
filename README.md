@@ -257,12 +257,17 @@ services.AddFileVaultFactoryWithFluxIndex(o => o.VaultBasePath = "./data");
 var vault = factory.GetOrCreate("tenant-a");
 await vault.MemorizeAsync(path);
 
-// Deleting a tenant: one filtered delete removes all of its vectors, no per-entry loop.
+// Deleting a tenant: one filtered delete per backend removes all of its chunks, no per-entry loop.
 await factory.DisposeAsync("tenant-a", purgeVectors: true);
 ```
 
 Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk purge
 (`IVault.PurgeAsync`) possible.
+
+> **Changed in 0.10.0** — the purge now clears the **keyword index too**. Before this it removed the
+> vectors, logged a warning, and returned success while the tenant's text stayed searchable through
+> keyword and hybrid search. Requires `FluxIndex.Core` 0.25.0+, which added the tag-scoped bulk
+> delete this needs. The returned count is the number of chunks, not a sum across backends.
 
 ## Configuration
 

@@ -68,7 +68,7 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
         catch { /* ignore cleanup errors */ }
     }
 
-    private VaultPipeline CreatePipeline(string? vaultId) =>
+    private VaultPipeline CreatePipeline(string? vaultId, IKeywordSearchService? keywordSearch = null) =>
         new(
             _git,
             new ContentHasher(),
@@ -80,7 +80,8 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
             vectorStore: _vectorStore,
             embeddingService: _embeddingService,
             hybridSearch: null,
-            graphRAGService: null);
+            graphRAGService: null,
+            keywordSearchService: keywordSearch);
 
     [Fact]
     public async Task MemorizeAsync_TagsStoredChunksWithVaultId()
@@ -114,5 +115,61 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
             Arg.Is<Dictionary<string, object>>(f =>
                 f.ContainsKey("vault_id") && (string)f["vault_id"] == TenantId),
             Arg.Any<CancellationToken>());
+    }
+
+    // === Both legs, or the purge is a lie ===
+    //
+    // The keyword index had no tag-scoped bulk delete, so this method cleared the vectors, logged a
+    // warning, and returned success while the tenant's text stayed searchable. A purge that leaves
+    // half the data behind is worse than one that fails: the caller believes the tenant is gone.
+
+    [Fact]
+    public async Task PurgeVectorsAsync_AlsoPurgesTheKeywordIndex()
+    {
+        var keywordSearch = Substitute.For<IKeywordSearchService>();
+        keywordSearch.DeleteByFilterAsync(
+                Arg.Any<IReadOnlyDictionary<string, object>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(3));
+
+        var pipeline = CreatePipeline(TenantId, keywordSearch);
+
+        await pipeline.PurgeVectorsAsync(TenantId);
+
+        await keywordSearch.Received(1).DeleteByFilterAsync(
+            Arg.Is<IReadOnlyDictionary<string, object>>(f =>
+                f.ContainsKey("vault_id") && (string)f["vault_id"] == TenantId),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Both legs hold the same chunks, so summing the two counts would report twice as many chunks
+    /// as ever existed. The vector count is the chunk count.
+    /// </summary>
+    [Fact]
+    public async Task PurgeVectorsAsync_ReportsTheChunkCountOnce_NotTheSumOfBothLegs()
+    {
+        _vectorStore.DeleteByFilterAsync(
+                Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(3));
+
+        var keywordSearch = Substitute.For<IKeywordSearchService>();
+        keywordSearch.DeleteByFilterAsync(
+                Arg.Any<IReadOnlyDictionary<string, object>>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(3));
+
+        var removed = await CreatePipeline(TenantId, keywordSearch).PurgeVectorsAsync(TenantId);
+
+        removed.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task PurgeVectorsAsync_WithoutKeywordService_StillPurgesVectors()
+    {
+        var pipeline = CreatePipeline(TenantId);
+
+        await pipeline.PurgeVectorsAsync(TenantId);
+
+        await _vectorStore.Received(1).DeleteByFilterAsync(
+            Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>());
     }
 }

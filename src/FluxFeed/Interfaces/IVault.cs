@@ -102,11 +102,13 @@ public interface IVault
     Task RemoveAsync(IEnumerable<string> filePaths, CancellationToken ct = default);
 
     /// <summary>
-    /// Bulk-removes every vector belonging to this (tenant-scoped) vault from the shared vector
-    /// store in a single filtered delete, without a per-entry loop. Requires the vault to be
-    /// tenant-scoped (<see cref="FluxFeed.Options.FileVaultOptions.VaultId"/> set); throws otherwise.
-    /// Returns the number of vectors removed. Entry metadata/storage is not touched — callers that
-    /// also drop the vault directory should do so separately.
+    /// Bulk-removes everything belonging to this (tenant-scoped) vault from the shared search
+    /// backends — vectors and, when a keyword index is wired, its rows too — in one filtered delete
+    /// per backend rather than a per-entry loop. Requires the vault to be tenant-scoped
+    /// (<see cref="FluxFeed.Options.FileVaultOptions.VaultId"/> set); throws otherwise.
+    /// Returns the number of chunks removed (both backends hold the same chunks, so this is not a
+    /// sum). Entry metadata/storage is not touched — callers that also drop the vault directory
+    /// should do so separately.
     /// </summary>
     Task<int> PurgeAsync(CancellationToken ct = default);
 
