@@ -241,4 +241,52 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
             "a resumed run adds the missing tail; it neither drops the committed prefix nor duplicates it");
         _vectorRows.Select(c => c.ChunkIndex).Should().OnlyHaveUniqueItems();
     }
+
+    [Fact]
+    public async Task FailedReindex_ReportsWhereItFailedAndHowMuchItWasHandling()
+    {
+        // Before this, the only account of a failure was ErrorMessage -- prose, which changes
+        // between releases and which a caller had to parse to answer operational questions.
+        // The fields say which stage threw, how many chunks were in flight, and what type the
+        // underlying exception was; the message stays for a human to read.
+        var pipeline = CreatePipeline();
+        var entry = await CreateEntryAsync(
+            "report.txt",
+            "First paragraph of the report.\n\nSecond paragraph with more detail.");
+
+        await pipeline.MemorizeAsync(entry, Options());
+        var indexedChunks = _vectorRows.Count;
+
+        _failEmbedding = true;
+        await File.WriteAllTextAsync(entry.SourcePath, "First paragraph revised.\n\nSecond paragraph revised.");
+        var result = await pipeline.MemorizeAsync(entry, Options());
+
+        result.Success.Should().BeFalse();
+        result.Failure.Should().NotBeNull("a failure with no structured detail forces prose parsing");
+        result.Failure!.Stage.Should().Be(IndexingStage.Indexing);
+        result.Failure.ChunkCount.Should().BeGreaterThan(0, "the batch that failed had chunks in it");
+        result.Failure.ContentLength.Should().BeGreaterThan(0);
+        result.Failure.ExceptionType.Should().Be(nameof(InvalidOperationException));
+
+        // And the swap guarantee still holds alongside the reporting.
+        _vectorRows.Should().HaveCount(indexedChunks);
+    }
+
+    [Fact]
+    public async Task SucceedingMemorize_CarriesNoFailureDetail()
+    {
+        // The detail is consumed when a result is built, so a later success -- or a later failure
+        // of a different kind -- cannot inherit the previous one's chunk count.
+        var pipeline = CreatePipeline();
+        var entry = await CreateEntryAsync("clean.txt", "Nothing goes wrong here.");
+
+        _failEmbedding = true;
+        await pipeline.MemorizeAsync(entry, Options());
+
+        _failEmbedding = false;
+        var second = await pipeline.MemorizeAsync(entry, Options());
+
+        second.Success.Should().BeTrue();
+        second.Failure.Should().BeNull();
+    }
 }

@@ -219,12 +219,90 @@ public sealed class MemorizeResult
         CommitHash = commitHash
     };
 
+    /// <summary>
+    /// Structured detail about a failed memorize. Null when the operation succeeded, and null on a
+    /// failure that happened before any indexing stage was identified.
+    /// </summary>
+    /// <remarks>
+    /// <c>ErrorMessage</c> alone made a caller parse prose to answer operational questions —
+    /// "was the document extracted at all, or did it fail while embedding?", "how much was it
+    /// trying to index?" — and prose changes between releases without notice. These fields do not.
+    /// </remarks>
+    public IndexingFailure? Failure { get; init; }
+
     public static MemorizeResult Failed(string errorMessage, TimeSpan duration) => new()
     {
         Success = false,
         ErrorMessage = errorMessage,
         Duration = duration
     };
+
+    /// <summary>
+    /// A failure with the stage and scale attached, so the caller does not have to read the message.
+    /// </summary>
+    public static MemorizeResult Failed(string errorMessage, TimeSpan duration, IndexingFailure failure) => new()
+    {
+        Success = false,
+        ErrorMessage = errorMessage,
+        Duration = duration,
+        Failure = failure
+    };
+}
+
+/// <summary>
+/// Where a memorize failed and how much it was handling, as fields rather than as prose.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This deliberately does NOT name a single failing chunk. Embedding is requested for the whole
+/// batch in one call, so the provider's rejection is not attributable to one chunk without
+/// re-requesting them individually — which would turn a systemic failure (a bad key, a dimension
+/// mismatch) into one extra request per chunk, every time. The batch is the unit that actually
+/// failed, so it is the unit reported.
+/// </para>
+/// <para>
+/// If per-chunk attribution is ever needed, the honest way to get it is a partial-result contract
+/// on the embedding service, not a retry loop here.
+/// </para>
+/// </remarks>
+public sealed class IndexingFailure
+{
+    /// <summary>The stage that threw.</summary>
+    public required IndexingStage Stage { get; init; }
+
+    /// <summary>
+    /// How many chunks the failing operation covered. 0 when the failure happened before chunking.
+    /// </summary>
+    public int ChunkCount { get; init; }
+
+    /// <summary>
+    /// Combined character length of those chunks. Distinguishes "one oversized chunk" from
+    /// "many ordinary ones", which is the first thing an operator wants to know about a provider
+    /// rejection. 0 when the failure happened before chunking.
+    /// </summary>
+    public int ContentLength { get; init; }
+
+    /// <summary>
+    /// Exception type name of the underlying failure, e.g. <c>HttpRequestException</c>. The type is
+    /// stable across releases in a way the message is not.
+    /// </summary>
+    public string? ExceptionType { get; init; }
+}
+
+/// <summary>Stages a memorize can fail in.</summary>
+public enum IndexingStage
+{
+    /// <summary>Reading or extracting the source document.</summary>
+    Extraction = 0,
+
+    /// <summary>Refining extracted content.</summary>
+    Refinement = 1,
+
+    /// <summary>Splitting refined content into chunks.</summary>
+    Chunking = 2,
+
+    /// <summary>Generating embeddings and writing them to the stores.</summary>
+    Indexing = 3
 }
 
 /// <summary>
@@ -261,4 +339,24 @@ public sealed class PipelineSearchResult
     /// Chunk metadata.
     /// </summary>
     public Dictionary<string, object>? Metadata { get; init; }
+}
+
+/// <summary>
+/// Carries <see cref="IndexingFailure"/> from the point the scope is known up to the point the
+/// result is built. The original failure is always the inner exception.
+/// </summary>
+/// <remarks>
+/// This is transport, not a new failure mode. Callers should read
+/// <see cref="MemorizeResult.Failure"/> rather than catch this type.
+/// </remarks>
+public sealed class IndexingFailedException : Exception
+{
+    public IndexingFailedException(IndexingFailure failure, Exception innerException)
+        : base(innerException?.Message ?? "Indexing failed.", innerException)
+    {
+        Failure = failure;
+    }
+
+    /// <summary>Stage and scale of the failure.</summary>
+    public IndexingFailure Failure { get; }
 }

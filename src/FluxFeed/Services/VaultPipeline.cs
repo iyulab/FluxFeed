@@ -252,7 +252,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
             LogMemorizeFailed(_logger, ex, entry.SourcePath);
             entry.MarkError(ex.Message);
             entry.SaveMetadata();
-            return MemorizeResult.Failed(ex.Message, sw.Elapsed);
+            return ex is IndexingFailedException indexingFailure
+                ? MemorizeResult.Failed(indexingFailure.InnerException?.Message ?? ex.Message,
+                                        sw.Elapsed, indexingFailure.Failure)
+                : MemorizeResult.Failed(ex.Message, sw.Elapsed);
         }
     }
 
@@ -302,7 +305,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
             LogRefreshFailed(_logger, ex, entry.SourcePath);
             entry.MarkError(ex.Message);
             entry.SaveMetadata();
-            return MemorizeResult.Failed(ex.Message, sw.Elapsed);
+            return ex is IndexingFailedException indexingFailure
+                ? MemorizeResult.Failed(indexingFailure.InnerException?.Message ?? ex.Message,
+                                        sw.Elapsed, indexingFailure.Failure)
+                : MemorizeResult.Failed(ex.Message, sw.Elapsed);
         }
     }
 
@@ -872,8 +878,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
             {
                 written = await IndexChunksAsync(entry, allChunks, options, ct);
             }
-            catch
+            catch (Exception ex)
             {
+                // The scale of what failed is known HERE and nowhere else — by the time the
+                // exception reaches MemorizeAsync, the chunk list is out of scope and all that
+                // survives is a message. Attaching it now is what lets the caller answer
+                // "how much was it trying to index?" without parsing prose.
                 // Roll the half-written generation back so the previous one is the only one left.
                 // Without this the failure would leave both generations present and search would
                 // return a mix of old chunks and whichever new ones landed before the throw.
@@ -882,7 +892,19 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 // try, and letting its exception escape would replace the real indexing failure
                 // with a cleanup failure - the caller would be told the wrong thing went wrong.
                 await TryRollbackAsync(entry, supersededChunkIds);
-                throw;
+
+                // Carried on the exception rather than in a field: this method's caller is an async
+                // frame above, and mutable state written here does not travel back up to it.
+                // The detail rides with the failure it describes.
+                throw new IndexingFailedException(
+                    new IndexingFailure
+                    {
+                        Stage = IndexingStage.Indexing,
+                        ChunkCount = allChunks.Count,
+                        ContentLength = allChunks.Sum(c => c.Content?.Length ?? 0),
+                        ExceptionType = ex.GetType().Name
+                    },
+                    ex);
             }
 
             // Only now is the previous generation superseded.
