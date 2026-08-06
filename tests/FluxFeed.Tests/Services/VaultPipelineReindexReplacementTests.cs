@@ -69,6 +69,15 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
                 _vectorRows.RemoveAll(c => c.DocumentId == (string)ci[0]);
                 return Task.FromResult(true);
             });
+        // Reading back and deleting by chunk id are modelled too, so the double stands for a store
+        // rather than for one particular way of clearing it. Wiring only DeleteByDocumentIdAsync
+        // made these tests assert the MECHANISM the pipeline happened to use: the row counts below
+        // are the guarantee, and they must hold however the replacement is performed.
+        _vectorStore.GetByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult<IEnumerable<DocumentChunk>>(
+                _vectorRows.Where(c => c.DocumentId == (string)ci[0]).ToList()));
+        _vectorStore.DeleteAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult(_vectorRows.RemoveAll(c => c.Id == (string)ci[0]) > 0));
 
         _embeddingService = Substitute.For<IEmbeddingService>();
         _embeddingService.GenerateEmbeddingsBatchAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
@@ -101,6 +110,12 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
             .Returns(ci =>
             {
                 _keywordRows.RemoveAll(c => c.DocumentId == (string)ci[0]);
+                return Task.CompletedTask;
+            });
+        keyword.DeleteChunkAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                _keywordRows.RemoveAll(c => c.Id == (string)ci[0]);
                 return Task.CompletedTask;
             });
         return keyword;

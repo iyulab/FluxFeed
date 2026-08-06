@@ -549,10 +549,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <c>IVault.PurgeAsync</c> — it replaces a per-entry delete loop.
     /// </summary>
     /// <remarks>
-    /// Vector store only. <see cref="IKeywordSearchService"/> exposes no tag/filter-scoped bulk
-    /// delete (only per-document, per-chunk, or clear-the-whole-index), so a purge cannot reach
-    /// only one tenant's keyword-index rows. When a keyword service is registered, this logs a
-    /// warning rather than claim a purge it cannot perform.
+    /// Both legs are purged. <see cref="IKeywordSearchService"/> gained a filter-scoped bulk delete
+    /// taking the same filter vocabulary as the vector store, so one filter object now reaches a
+    /// tenant's keyword rows too — until then this could only purge vectors and logged a warning
+    /// rather than claim a purge it could not perform.
     /// </remarks>
     public async Task<int> PurgeVectorsAsync(string vaultId, CancellationToken ct = default)
     {
@@ -762,21 +762,42 @@ public sealed partial class VaultPipeline : IVaultPipeline
         MemorizeOptions options,
         CancellationToken ct)
     {
-        // Indexing a document REPLACES every row previously written for it. Both callers reach
-        // the backends through here, so the removal belongs here rather than at either call site:
-        // when it lived in RefreshAsync alone, re-memorizing an already-indexed file appended a
-        // second copy of every chunk instead of replacing it, and each subsequent memorize added
-        // another - search then returned the same chunk N times and spent the caller's result
-        // budget on repeats. Entry metadata already replaced (ChunkCount is overwritten, not
-        // summed), so only the vector/keyword rows were leaking.
+        // Indexing a document REPLACES every row previously written for it, and the replacement is
+        // a SWAP: the previous rows are identified now and deleted only once the new ones are
+        // durably written. Both callers reach the backends through here, so this belongs here
+        // rather than at either call site.
         //
-        // Removing here rather than at the start of MemorizeAsync keeps the window in which the
-        // document is unsearchable to the indexing step alone - extraction and refinement, which
-        // dominate a memorize, still run against the previous rows.
+        // Why not delete first (as this did until 2026-08-06): the delete succeeded, then indexing
+        // threw - an embedding failure on ONE chunk fails the whole batch - and the document was
+        // left with no index at all. It had been searchable before the re-index and was not after,
+        // with nothing in the result reporting a loss rather than a failure. Measured in operation:
+        // a 279-document re-index, one failure, that document went from 8 chunks to 0.
         //
-        // It runs before the no-content check on purpose: a document whose content is gone must
-        // lose its rows, not keep serving the text it no longer has.
-        await RemoveAsync(entry, ct);
+        // Why not simply move the delete after indexing: it must still happen, or re-memorizing an
+        // already-indexed file appends a second copy of every chunk instead of replacing it, and
+        // each subsequent memorize adds another - search then returns the same chunk N times and
+        // spends the caller's result budget on repeats. Capturing the old ids up front and deleting
+        // exactly those keeps that guarantee while making failure non-destructive.
+        //
+        // The trade-off this accepts: between the write and the delete, both generations are
+        // present, so a concurrent search can see a document twice. That window is bounded by the
+        // indexing step, and returning a document twice for a few seconds is recoverable in a way
+        // that returning it zero times is not.
+        //
+        // A RESUMED run is deliberately excluded. StartFromChunkIndex means chunks 0..N are already
+        // committed and this run writes only the tail, so the previous rows are not a superseded
+        // generation - they are this generation's prefix. Deleting them (before OR after) discards
+        // the very rows the resume is built on: the unconditional delete that used to sit here
+        // wiped them, and IndexChunksResumableAsync then skipped rewriting them on the recorded
+        // assumption that they existed, so every host restart mid-indexing silently truncated the
+        // document to its tail.
+        var isResumedRun = options.CheckpointCallback != null && options.StartFromChunkIndex >= 0;
+
+        IReadOnlyList<string> supersededChunkIds = [];
+        if (!isResumedRun)
+        {
+            supersededChunkIds = await GetIndexedChunkIdsAsync(entry, ct);
+        }
 
         // Get all vault content (refined.md + append-text.md + qa.md)
         var vaultContent = await _storage.GetAllVaultContentAsync(entry, ct);
@@ -789,6 +810,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         if (string.IsNullOrWhiteSpace(combinedContent) && imageChunks.Count == 0)
         {
+            // Replacing content with nothing is still a replacement: a document whose content is
+            // gone must lose its rows rather than keep serving text it no longer has. This is the
+            // one path where the swap commits with no new generation to swap to.
+            await DeleteChunksAsync(supersededChunkIds, ct);
             LogNoContentToIndex(_logger, entry.SourcePath);
             return (0, 0);
         }
@@ -842,7 +867,31 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // Index to vector store
         if (_vectorStore != null && _embeddingService != null)
         {
-            await IndexChunksAsync(entry, allChunks, options, ct);
+            IReadOnlyList<DocumentChunk> written;
+            try
+            {
+                written = await IndexChunksAsync(entry, allChunks, options, ct);
+            }
+            catch
+            {
+                // Roll the half-written generation back so the previous one is the only one left.
+                // Without this the failure would leave both generations present and search would
+                // return a mix of old chunks and whichever new ones landed before the throw.
+                //
+                // Rollback is best-effort by construction: if it fails there is nothing further to
+                // try, and letting its exception escape would replace the real indexing failure
+                // with a cleanup failure - the caller would be told the wrong thing went wrong.
+                await TryRollbackAsync(entry, supersededChunkIds);
+                throw;
+            }
+
+            // Only now is the previous generation superseded.
+            await DeleteChunksAsync(supersededChunkIds, ct);
+
+            if (written.Count == 0 && supersededChunkIds.Count > 0)
+            {
+                LogRemovedChunks(_logger, entry.FilepathHash);
+            }
         }
         else
         {
@@ -852,7 +901,75 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return (allChunks.Count, combinedContent.Length);
     }
 
-    private async Task IndexChunksAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, MemorizeOptions options, CancellationToken ct)
+    /// <summary>
+    /// Ids of the rows currently indexed for this entry, captured before a re-index so that the
+    /// previous generation can be dropped after the new one is durably written rather than before.
+    /// Both legs key their rows by the same chunk id, so the vector store's view covers the keyword
+    /// index too — there is no separate enumeration to keep in step with it.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> GetIndexedChunkIdsAsync(VaultEntry entry, CancellationToken ct)
+    {
+        if (_vectorStore == null)
+        {
+            return [];
+        }
+
+        var existing = await _vectorStore.GetByDocumentIdAsync(entry.FilepathHash, ct);
+        return existing.Select(c => c.Id).ToList();
+    }
+
+    /// <summary>
+    /// Deletes the given chunk ids from every backend they were written to. Used for both halves of
+    /// the swap: dropping the superseded generation on success, and dropping the partial one on
+    /// failure.
+    /// </summary>
+    private async Task DeleteChunksAsync(IReadOnlyCollection<string> chunkIds, CancellationToken ct)
+    {
+        if (chunkIds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var chunkId in chunkIds)
+        {
+            if (_vectorStore != null)
+                await _vectorStore.DeleteAsync(chunkId, ct);
+
+            if (_keywordSearchService != null)
+                await _keywordSearchService.DeleteChunkAsync(chunkId, ct);
+        }
+    }
+
+    /// <summary>
+    /// Drops whatever the failed run managed to write, leaving the previous generation as the only
+    /// one indexed. Swallows its own failures on purpose — see the call site.
+    /// </summary>
+    /// <param name="previousGeneration">
+    /// Ids captured before indexing began. These are precisely what must SURVIVE — the rollback is
+    /// "everything present now, minus these". Re-reading is what makes it correct: the resumable
+    /// path stores chunk by chunk and a failure can land anywhere in that loop, so the store's own
+    /// contents are the only reliable account of what the run managed to write.
+    /// </param>
+    private async Task TryRollbackAsync(VaultEntry entry, IReadOnlyList<string> previousGeneration)
+    {
+        try
+        {
+            // CancellationToken.None throughout: a cancelled indexing run is exactly when the
+            // rollback must still happen, and a token that is already cancelled would abort it.
+            var present = await GetIndexedChunkIdsAsync(entry, CancellationToken.None);
+
+            var survivors = new HashSet<string>(previousGeneration, StringComparer.Ordinal);
+            var partial = present.Where(id => !survivors.Contains(id)).ToList();
+
+            await DeleteChunksAsync(partial, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            LogRollbackFailed(_logger, entry.SourcePath, ex);
+        }
+    }
+
+    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, MemorizeOptions options, CancellationToken ct)
     {
         // Branch: when CheckpointCallback is set (job-queue path), use per-chunk processing
         // for crash-resilient resume. Otherwise, use the existing batch path (faster for the
@@ -876,6 +993,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // GraphRAG indexing — keeps the FileVault memorize path at parity with the SDK direct-index
         // path (Indexer.IndexAsync), which builds the entity graph after vector-store ingestion.
         await BuildGraphRagIfEnabledAsync(entry, indexedChunks, options, ct);
+
+        return indexedChunks;
     }
 
     /// <summary>
@@ -1208,6 +1327,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogNoVectorStoreSkipRemoval(ILogger logger);
     [LoggerMessage(Level = LogLevel.Information, Message = "Removed chunks for document {DocumentId}")]
     private static partial void LogRemovedChunks(ILogger logger, string documentId);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Failed to roll back the partial index for {SourcePath}; both the previous and the partial generation may be present")]
+    private static partial void LogRollbackFailed(ILogger logger, string sourcePath, Exception exception);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Vector store or embedding service not configured, cannot search")]
     private static partial void LogNoVectorStoreCannotSearch(ILogger logger);
     [LoggerMessage(Level = LogLevel.Information, Message = "Search for '{Query}' returned {Count} results")]
