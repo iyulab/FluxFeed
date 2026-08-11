@@ -422,6 +422,7 @@ public sealed class QueueStatus
     public int FailedCount { get; init; }
     public bool IsPaused { get; init; }
     public DateTimeOffset? LastProcessedAt { get; init; }
+    public double AverageProcessingTimeMs { get; init; }
 }
 
 /// <summary>

@@ -1068,7 +1068,9 @@ public sealed partial class VaultManager : IVault
             ProcessingCount = stats.ProcessingCount,
             CompletedCount = stats.CompletedCount,
             FailedCount = stats.FailedCount,
-            IsPaused = _queue.IsPaused
+            IsPaused = _queue.IsPaused,
+            LastProcessedAt = stats.LastProcessedAt,
+            AverageProcessingTimeMs = stats.AverageProcessingTimeMs
         };
     }
 

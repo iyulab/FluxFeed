@@ -466,6 +466,27 @@ public class VaultManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task GetQueueStatusAsync_PropagatesLastProcessedAtAndAverageProcessingTime()
+    {
+        // Arrange — regression guard: the mapping from QueueStatistics (internal) to QueueStatus
+        // (public) previously dropped LastProcessedAt and never carried AverageProcessingTimeMs at
+        // all, so both always read as 0/null regardless of what the queue actually recorded.
+        var lastProcessedAt = DateTimeOffset.UtcNow;
+        _queueServiceMock.GetStatisticsAsync(Arg.Any<CancellationToken>()).Returns(new QueueStatistics
+        {
+            LastProcessedAt = lastProcessedAt,
+            AverageProcessingTimeMs = 123.45,
+        });
+
+        // Act
+        var status = await _vault.GetQueueStatusAsync();
+
+        // Assert
+        status.LastProcessedAt.Should().Be(lastProcessedAt);
+        status.AverageProcessingTimeMs.Should().Be(123.45);
+    }
+
+    [Fact]
     public async Task RemoveAsync_ExistingEntry_RemovesFromVectorStore()
     {
         // Arrange - Create entry with metadata on disk
