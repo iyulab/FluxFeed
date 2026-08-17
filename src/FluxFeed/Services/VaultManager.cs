@@ -779,6 +779,31 @@ public sealed partial class VaultManager : IVault
         return await _git.LogAsync(entry.VaultPath, maxCount, ct);
     }
 
+    public async Task<string?> GetContentAtCommitAsync(string filePath, string commitHash, CancellationToken ct = default)
+    {
+        var entry = await GetAsync(filePath, ct);
+        if (entry == null || !Directory.Exists(entry.VaultPath))
+            return null;
+
+        var refined = await _git.ShowFileAsync(entry.VaultPath, commitHash, "refined.md", ct);
+        var appendText = await _git.ShowFileAsync(entry.VaultPath, commitHash, "append-text.md", ct);
+        var qa = await _git.ShowFileAsync(entry.VaultPath, commitHash, "qa.md", ct);
+
+        // The commit itself is unknown to this repo (or git unavailable) only when none of the three
+        // tracked files resolve — an entry can legitimately have never had append-text.md/qa.md.
+        if (refined == null && appendText == null && qa == null)
+            return null;
+
+        var content = new VaultTextContent
+        {
+            RefinedContent = refined,
+            AppendText = appendText,
+            QaContent = qa
+        };
+
+        return content.GetCombinedContent();
+    }
+
     private static long GetDirectorySize(string path)
     {
         var info = new DirectoryInfo(path);

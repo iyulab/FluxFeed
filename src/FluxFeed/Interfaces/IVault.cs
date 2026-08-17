@@ -129,6 +129,23 @@ public interface IVault
     /// </summary>
     Task<IReadOnlyList<GitCommit>> LogAsync(string filePath, int maxCount = 10, CancellationToken ct = default);
 
+    /// <summary>
+    /// Gets the entry's combined text content (the same shape <see cref="ChangeDetectionResult"/>'s
+    /// stage/status pair works against — refined.md + append-text.md + qa.md) as it existed at a
+    /// specific commit from <see cref="LogAsync"/>, without checking anything out or mutating the
+    /// vault. Read-only counterpart to reconstructing a past version: callers that want to actually
+    /// roll back write the returned content through the entry's normal update path (e.g.
+    /// <see cref="RefreshAsync"/>) themselves.
+    /// </summary>
+    /// <param name="filePath">Source file path identifying the entry.</param>
+    /// <param name="commitHash">A commit hash from this entry's <see cref="LogAsync"/> history.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The combined content at that commit, or null when the entry doesn't exist, the commit is
+    /// unknown, or git is unavailable.
+    /// </returns>
+    Task<string?> GetContentAtCommitAsync(string filePath, string commitHash, CancellationToken ct = default);
+
     // === Folder Watching ===
 
     /// <summary>

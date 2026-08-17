@@ -154,6 +154,14 @@ public sealed partial class GitService : IGitService
         LogCheckedOut(_logger, filePath, commitish);
     }
 
+    public async Task<string?> ShowFileAsync(string vaultPath, string commitish, string filePath, CancellationToken ct = default)
+    {
+        if (!CheckGitAvailable() || !IsGitRepository(vaultPath)) return null;
+
+        var (output, exitCode) = await RunGitWithExitCodeAsync(vaultPath, $"show {commitish}:\"{filePath}\"", ct);
+        return exitCode == 0 ? output : null;
+    }
+
     public bool IsGitRepository(string vaultPath)
     {
         return Directory.Exists(Path.Combine(vaultPath, ".git"));
@@ -190,6 +198,12 @@ public sealed partial class GitService : IGitService
     }
 
     private async Task<string> RunGitAsync(string workingDirectory, string arguments, CancellationToken ct)
+    {
+        var (output, _) = await RunGitWithExitCodeAsync(workingDirectory, arguments, ct);
+        return output;
+    }
+
+    private async Task<(string Output, int ExitCode)> RunGitWithExitCodeAsync(string workingDirectory, string arguments, CancellationToken ct)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -235,7 +249,7 @@ public sealed partial class GitService : IGitService
             }
         }
 
-        return output.ToString().Trim();
+        return (output.ToString().Trim(), process.ExitCode);
     }
 
     #region LoggerMessage Definitions

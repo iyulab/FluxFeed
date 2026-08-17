@@ -49,6 +49,14 @@ public interface IGitService
     Task CheckoutFileAsync(string vaultPath, string filePath, string commitish, CancellationToken ct = default);
 
     /// <summary>
+    /// Reads a tracked file's content as it existed at a specific commit, without touching the
+    /// working tree. Returns null when the file did not exist in that commit, the commit is
+    /// unknown, or git is unavailable — distinct from an empty string, which means the file existed
+    /// and was empty.
+    /// </summary>
+    Task<string?> ShowFileAsync(string vaultPath, string commitish, string filePath, CancellationToken ct = default);
+
+    /// <summary>
     /// Checks if the directory is a Git repository.
     /// </summary>
     bool IsGitRepository(string vaultPath);

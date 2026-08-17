@@ -120,6 +120,12 @@ Each entry lives under the vault base path, keyed by a hash of its absolute file
 ```
 
 Because `vault/` is a git repository, `DiffAsync` and `LogAsync` report exactly what changed and when.
+`GetContentAtCommitAsync(filePath, commitHash)` reads the combined content (`refined.md` +
+`append-text.md` + `qa.md`) as it existed at a specific commit from that history — read-only, it does
+not touch the working tree. Returns `null` when the commit is unknown. To actually roll an entry back,
+write the returned content through the entry's normal update path (e.g. `RefreshAsync` after
+overwriting `append-text.md`/`qa.md`) — the library hands back the past content, the caller decides
+how to apply it.
 
 Note what is *not* in that repository: the entry record, the raw extracted text and the images are
 work products sitting above it. They are outside the repository rather than ignored by it — which is

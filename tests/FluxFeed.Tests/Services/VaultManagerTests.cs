@@ -367,6 +367,52 @@ public class VaultManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task GetContentAtCommitAsync_KnownCommit_CombinesTrackedFilesAtThatCommit()
+    {
+        // Arrange - Create entry with metadata on disk
+        var filePath = CreateTestFile("test.txt", "Hello, World!");
+        CreateEntryWithMetadata(filePath);
+        _gitServiceMock.ShowFileAsync(Arg.Any<string>(), "abc123", "refined.md", Arg.Any<CancellationToken>())
+            .Returns("old refined content");
+        _gitServiceMock.ShowFileAsync(Arg.Any<string>(), "abc123", "append-text.md", Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+        _gitServiceMock.ShowFileAsync(Arg.Any<string>(), "abc123", "qa.md", Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        // Act
+        var content = await _vault.GetContentAtCommitAsync(filePath, "abc123");
+
+        // Assert
+        content.Should().Be("old refined content");
+    }
+
+    [Fact]
+    public async Task GetContentAtCommitAsync_UnknownCommit_ReturnsNull()
+    {
+        // Arrange - Create entry with metadata on disk, but the commit resolves to nothing
+        var filePath = CreateTestFile("test.txt", "Hello, World!");
+        CreateEntryWithMetadata(filePath);
+        _gitServiceMock.ShowFileAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns((string?)null);
+
+        // Act
+        var content = await _vault.GetContentAtCommitAsync(filePath, "deadbeef");
+
+        // Assert
+        content.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetContentAtCommitAsync_NoEntry_ReturnsNull()
+    {
+        // Act - no CreateEntryWithMetadata call, so GetAsync resolves to null
+        var content = await _vault.GetContentAtCommitAsync(Path.Combine(_testDir, "missing.txt"), "abc123");
+
+        // Assert
+        content.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ScanFolderAsync_WithFiles_DiscoverFiles()
     {
         // Arrange
