@@ -121,12 +121,16 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         return embedder;
     }
 
-    private VaultPipeline CreatePipeline(ExtractionResult extraction, IVaultImageEnricher? enricher) => new(
+    private VaultPipeline CreatePipeline(ExtractionResult extraction, IVaultImageEnricher? enricher, int? maxImageEnrichmentAttempts = null) => new(
         _git,
         new ContentHasher(),
         _storage,
         NullLogger<VaultPipeline>.Instance,
-        options: MsOptions.Create(new FileVaultOptions { VaultBasePath = _vaultDir }),
+        options: MsOptions.Create(new FileVaultOptions
+        {
+            VaultBasePath = _vaultDir,
+            MaxImageEnrichmentAttempts = maxImageEnrichmentAttempts ?? new FileVaultOptions().MaxImageEnrichmentAttempts
+        }),
         extractor: new StubExtractor(extraction),
         vectorStore: _vectorStore,
         embeddingService: CreateEmbeddingService(),
@@ -291,6 +295,51 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         var succeeds = new RecordingEnricher(_ => "A chart.");
         await CreatePipeline(extraction, succeeds).MemorizeAsync(entry);
         succeeds.Calls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task MemorizeAsync_ImageFailsPastTheCeiling_StopsBeingOfferedToTheEnricher()
+    {
+        // AIMS's own complaint: an image that will never succeed (unsupported format, corrupt data)
+        // must not cost the enricher's backing resource a call on every single scan forever.
+        var entry = CreateEntry("figures.pdf");
+        var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000")] };
+        var alwaysFails = new RecordingEnricher(_ => throw new InvalidOperationException("corrupt image"));
+
+        // Three separate pipeline instances over the same on-disk storage simulate three
+        // process-lifetimes worth of retry, ceiling = 2.
+        await CreatePipeline(extraction, alwaysFails, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry);
+        await CreatePipeline(extraction, alwaysFails, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry);
+        alwaysFails.Calls.Should().HaveCount(2, "both attempts up to the ceiling must still be offered");
+
+        var thirdRunEnricher = new RecordingEnricher(_ => throw new InvalidOperationException("corrupt image"));
+        await CreatePipeline(extraction, thirdRunEnricher, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry);
+
+        thirdRunEnricher.Calls.Should().BeEmpty("the image already reached the ceiling in an earlier process lifetime");
+
+        var manifest = await _storage.GetImageManifestAsync(entry);
+        var failure = manifest.Should().ContainSingle().Subject.LastEnrichmentFailure;
+        failure.Should().NotBeNull();
+        failure!.IsPermanent.Should().BeTrue();
+        failure.AttemptCount.Should().Be(2);
+        failure.Reason.Should().Be("corrupt image");
+    }
+
+    [Fact]
+    public async Task MemorizeAsync_ImageSucceedsAfterAPriorFailure_ClearsTheFailureRecord()
+    {
+        var entry = CreateEntry("figures.pdf");
+        var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000")] };
+
+        await CreatePipeline(extraction, new RecordingEnricher(_ => throw new InvalidOperationException("transient")))
+            .MemorizeAsync(entry);
+        (await _storage.GetImageManifestAsync(entry))[0].LastEnrichmentFailure.Should().NotBeNull();
+
+        await CreatePipeline(extraction, new RecordingEnricher(_ => "A chart.")).MemorizeAsync(entry);
+
+        var image = (await _storage.GetImageManifestAsync(entry))[0];
+        image.IsDescribed.Should().BeTrue();
+        image.LastEnrichmentFailure.Should().BeNull("a later success clears the stale failure history");
     }
 
     [Fact]

@@ -215,6 +215,71 @@ public class VaultStorageServiceImageTests : IDisposable
     }
 
     [Fact]
+    public async Task StoreImagesAsync_ReExtractionOfSameImage_KeepsItsEnrichmentFailure()
+    {
+        // A recorded failure (and its attempt count) is keyed to the picture, not to the run that
+        // extracted it — same reasoning as descriptions. Dropping it on every re-extraction would
+        // reset the attempt count on every MemorizeAsync call, and a permanently-failed image would
+        // be offered to the enricher again on the very next memorize.
+        var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
+        var image = new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" };
+
+        await _storage.StoreImagesAsync(entry, [image], default);
+        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "corrupt", attemptCount: 2, isPermanent: true, default);
+
+        // Same image comes back from a fresh extraction.
+        await _storage.StoreImagesAsync(entry, [image], default);
+
+        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        var failure = manifest.Should().ContainSingle().Subject.LastEnrichmentFailure;
+        failure.Should().NotBeNull();
+        failure!.AttemptCount.Should().Be(2);
+        failure.IsPermanent.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task StoreImagesAsync_ImageContentChanged_DropsTheStaleEnrichmentFailure()
+    {
+        // Same id, different picture — the old failure was about a picture that is no longer there,
+        // so the new picture deserves a fresh set of attempts.
+        var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
+
+        await _storage.StoreImagesAsync(entry,
+            [new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" }], default);
+        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "corrupt", attemptCount: 3, isPermanent: true, default);
+
+        await _storage.StoreImagesAsync(entry,
+            [new ImageArtifact { Id = "img_000", Data = [9, 9, 9, 9], ContentType = "image/png" }], default);
+
+        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        manifest.Should().ContainSingle().Which.LastEnrichmentFailure.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SetImageEnrichmentFailureAsync_SucceedingLater_ClearsTheFailureRecord()
+    {
+        var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
+        await _storage.StoreImagesAsync(entry,
+            [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], default);
+
+        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "transient", attemptCount: 1, isPermanent: false, default);
+        await _storage.SetImageDescriptionAsync(entry, "img_000", "A chart.", default);
+
+        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        manifest.Should().ContainSingle().Which.LastEnrichmentFailure.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SetImageEnrichmentFailureAsync_UnknownImage_ReturnsFalse()
+    {
+        var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
+        await _storage.StoreImagesAsync(entry,
+            [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], default);
+
+        (await _storage.SetImageEnrichmentFailureAsync(entry, "img_999", "nope", 1, false, default)).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task SetImageDescriptionAsync_UnknownImage_ReturnsFalse()
     {
         var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);

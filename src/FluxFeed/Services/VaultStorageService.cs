@@ -100,9 +100,12 @@ public sealed partial class VaultStorageService : IVaultStorageService
         // Descriptions are expensive to produce and are keyed to the image, not to the run that
         // extracted it. A re-memorize re-extracts the same images, so carry a previous description
         // forward when the image is byte-identical — otherwise re-extraction would silently discard
-        // every description and make enrichment pay again on every memorize.
+        // every description and make enrichment pay again on every memorize. The same applies to a
+        // recorded enrichment failure: without carrying it forward too, every MemorizeAsync call
+        // (which re-extracts) would silently reset the attempt count, and a permanently-failed image
+        // would be offered to the enricher again on the very next memorize.
         var previous = (await ReadManifestAsync(entry, ct) ?? [])
-            .Where(item => !string.IsNullOrWhiteSpace(item.Description))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Description) || item.LastEnrichmentFailure != null)
             .ToDictionary(item => item.Id, StringComparer.Ordinal);
 
         var manifest = new List<ImageManifestEntry>();
@@ -116,11 +119,13 @@ public sealed partial class VaultStorageService : IVaultStorageService
             var filePath = Path.Combine(entry.ImagesPath, fileName);
 
             var carriedDescription = image.Description;
-            if (carriedDescription == null &&
-                previous.TryGetValue(image.Id, out var prior) &&
+            EnrichmentFailure? carriedFailure = null;
+            if (previous.TryGetValue(image.Id, out var prior) &&
                 await IsSameStoredImageAsync(filePath, image.Data, ct))
             {
-                carriedDescription = prior.Description;
+                if (carriedDescription == null)
+                    carriedDescription = prior.Description;
+                carriedFailure = prior.LastEnrichmentFailure;
             }
 
             await File.WriteAllBytesAsync(filePath, image.Data, ct);
@@ -134,7 +139,8 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 AltText = image.AltText,
                 Width = image.Width,
                 Height = image.Height,
-                Size = image.Data.Length
+                Size = image.Data.Length,
+                LastEnrichmentFailure = carriedFailure
             });
 
             index++;
@@ -196,7 +202,8 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 FilePath = Path.Combine(entry.ImagesPath, item.FileName),
                 ContentType = item.ContentType,
                 Description = item.Description,
-                AltText = item.AltText
+                AltText = item.AltText,
+                LastEnrichmentFailure = item.LastEnrichmentFailure
             })
             .ToList();
     }
@@ -211,11 +218,42 @@ public sealed partial class VaultStorageService : IVaultStorageService
             return false;
 
         target.Description = description;
+        target.LastEnrichmentFailure = null;
 
         var json = JsonSerializer.Serialize(manifest, JsonOptions);
         await File.WriteAllTextAsync(entry.ImagesManifestPath, json, ct);
 
         LogStoredImageDescription(_logger, imageId, entry.Id);
+        return true;
+    }
+
+    public async Task<bool> SetImageEnrichmentFailureAsync(
+        VaultEntry entry,
+        string imageId,
+        string reason,
+        int attemptCount,
+        bool isPermanent,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(imageId);
+
+        var manifest = await ReadManifestAsync(entry, ct);
+        var target = manifest?.FirstOrDefault(item => item.Id == imageId);
+        if (target == null)
+            return false;
+
+        target.LastEnrichmentFailure = new EnrichmentFailure
+        {
+            Reason = reason,
+            AttemptCount = attemptCount,
+            IsPermanent = isPermanent,
+            LastAttemptAt = DateTimeOffset.UtcNow
+        };
+
+        var json = JsonSerializer.Serialize(manifest, JsonOptions);
+        await File.WriteAllTextAsync(entry.ImagesManifestPath, json, ct);
+
+        LogStoredImageEnrichmentFailure(_logger, imageId, entry.Id, attemptCount, isPermanent);
         return true;
     }
 
@@ -390,6 +428,9 @@ public sealed partial class VaultStorageService : IVaultStorageService
     [LoggerMessage(Level = LogLevel.Debug, Message = "Stored description for image {ImageId} of entry {EntryId}")]
     private static partial void LogStoredImageDescription(ILogger logger, string imageId, Guid entryId);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Recorded enrichment failure for image {ImageId} of entry {EntryId}: attempt {AttemptCount}, permanent={IsPermanent}")]
+    private static partial void LogStoredImageEnrichmentFailure(ILogger logger, string imageId, Guid entryId, int attemptCount, bool isPermanent);
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Stored append-text for entry {EntryId}")]
     private static partial void LogStoredAppendText(ILogger logger, Guid entryId);
 
@@ -418,5 +459,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         public int Width { get; init; }
         public int Height { get; init; }
         public long Size { get; init; }
+        // Settable: recorded per attempt, cleared once Description is finally set.
+        public EnrichmentFailure? LastEnrichmentFailure { get; set; }
     }
 }

@@ -68,10 +68,27 @@ public interface IVaultStorageService
     /// <summary>
     /// Persists a description for a single image in the manifest, leaving the other entries and the
     /// stored image files untouched. This is what makes enrichment idempotent across re-runs: a
-    /// described image is never offered to the enricher again.
+    /// described image is never offered to the enricher again. Clears any prior
+    /// <see cref="VaultImage.LastEnrichmentFailure"/> recorded for this image.
     /// </summary>
     /// <returns>False when the entry has no manifest or no image with that id.</returns>
     Task<bool> SetImageDescriptionAsync(VaultEntry entry, string imageId, string description, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records that an enrichment attempt for this image failed, persisting the attempt count so it
+    /// survives a process restart. The caller (the pipeline, which owns retry policy) decides
+    /// <paramref name="isPermanent"/> — typically once <paramref name="attemptCount"/> reaches a
+    /// configured ceiling — and the scan loop skips images marked permanent instead of retrying them
+    /// every cycle.
+    /// </summary>
+    /// <returns>False when the entry has no manifest or no image with that id.</returns>
+    Task<bool> SetImageEnrichmentFailureAsync(
+        VaultEntry entry,
+        string imageId,
+        string reason,
+        int attemptCount,
+        bool isPermanent,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Gets all text content from vault/ directory (refined.md + append-text.md + qa.md).
@@ -206,4 +223,35 @@ public sealed class VaultImage
 
     /// <summary>True once a description has been persisted for this image.</summary>
     public bool IsDescribed => !string.IsNullOrWhiteSpace(Description);
+
+    /// <summary>
+    /// The most recent enrichment failure for this image, or null if it has never failed (or last
+    /// failed before a description was later persisted, which clears this). Survives process
+    /// restarts — this is what lets the scan loop stop retrying an image that will never succeed
+    /// instead of re-offering it every cycle for the life of the process.
+    /// </summary>
+    public EnrichmentFailure? LastEnrichmentFailure { get; init; }
+}
+
+/// <summary>
+/// A persisted record of a failed <see cref="IVaultImageEnricher"/> attempt for one image.
+/// </summary>
+public sealed class EnrichmentFailure
+{
+    /// <summary>The enricher's exception message, or a fixed reason when it returned null instead of
+    /// throwing.</summary>
+    public required string Reason { get; init; }
+
+    /// <summary>Consecutive failures for this image since its last successful description.</summary>
+    public int AttemptCount { get; init; }
+
+    /// <summary>
+    /// True once <see cref="AttemptCount"/> reached the pipeline's configured ceiling
+    /// (<c>FileVaultOptions.MaxImageEnrichmentAttempts</c>). The scan loop skips a permanently-failed
+    /// image instead of offering it to the enricher again.
+    /// </summary>
+    public bool IsPermanent { get; init; }
+
+    /// <summary>When this failure was recorded.</summary>
+    public DateTimeOffset LastAttemptAt { get; init; }
 }

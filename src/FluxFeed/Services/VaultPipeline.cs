@@ -405,7 +405,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
         if (_imageEnricher == null)
             return described;
 
-        var pending = images.Where(i => !i.IsDescribed).ToList();
+        // A permanently-failed image (see RecordEnrichmentFailureAsync) is excluded from retry: it
+        // will never succeed, and re-offering it every scan wastes the enricher's backing resource
+        // (e.g. a shared vision API) on a call already known to be pointless.
+        var skippedPermanent = images.Count(i => !i.IsDescribed && i.LastEnrichmentFailure?.IsPermanent == true);
+        var pending = images.Where(i => !i.IsDescribed && i.LastEnrichmentFailure?.IsPermanent != true).ToList();
+        if (skippedPermanent > 0)
+            LogSkippingPermanentlyFailedImages(_logger, skippedPermanent, entry.SourcePath);
         if (pending.Count == 0)
             return described;
 
@@ -433,14 +439,17 @@ public sealed partial class VaultPipeline : IVaultPipeline
             catch (Exception ex)
             {
                 // One image failing must not cost the document its other descriptions, nor the
-                // memorize itself. It simply stays pending for the next run.
+                // memorize itself. It simply stays pending for the next run, unless this was its
+                // last permitted attempt.
                 LogImageEnrichmentFailed(_logger, ex, image.Id, entry.SourcePath);
+                await RecordEnrichmentFailureAsync(entry, image, ex.Message, ct);
                 failed++;
                 continue;
             }
 
             if (string.IsNullOrWhiteSpace(description))
             {
+                await RecordEnrichmentFailureAsync(entry, image, "enricher returned no description", ct);
                 failed++;
                 continue;
             }
@@ -451,6 +460,23 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         LogEnrichedImages(_logger, described, failed, entry.SourcePath);
         return described;
+    }
+
+    /// <summary>
+    /// Persists one more failed attempt for this image, deriving <c>IsPermanent</c> from
+    /// <see cref="FileVaultOptions.MaxImageEnrichmentAttempts"/>. The pipeline is the policy owner
+    /// (storage just persists whatever it is told), matching the class-level doc on
+    /// <see cref="EnrichImagesAsync"/>.
+    /// </summary>
+    private async Task RecordEnrichmentFailureAsync(VaultEntry entry, VaultImage image, string reason, CancellationToken ct)
+    {
+        var attemptCount = (image.LastEnrichmentFailure?.AttemptCount ?? 0) + 1;
+        var isPermanent = attemptCount >= _options.MaxImageEnrichmentAttempts;
+
+        await _storage.SetImageEnrichmentFailureAsync(entry, image.Id, reason, attemptCount, isPermanent, ct);
+
+        if (isPermanent)
+            LogImageEnrichmentPermanentlyFailed(_logger, image.Id, entry.SourcePath, attemptCount);
     }
 
     /// <summary>
@@ -1369,6 +1395,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogEnrichedImages(ILogger logger, int describedCount, int failedCount, string sourcePath);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Enricher failed for image {ImageId} of {SourcePath}; it stays pending for the next run")]
     private static partial void LogImageEnrichmentFailed(ILogger logger, Exception exception, string imageId, string sourcePath);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Image {ImageId} of {SourcePath} reached the enrichment attempt ceiling ({AttemptCount}); it will not be retried again")]
+    private static partial void LogImageEnrichmentPermanentlyFailed(ILogger logger, string imageId, string sourcePath, int attemptCount);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping {Count} permanently-failed images for {SourcePath}")]
+    private static partial void LogSkippingPermanentlyFailedImages(ILogger logger, int count, string sourcePath);
     [LoggerMessage(Level = LogLevel.Warning, Message = "No vector store or embedding service configured, skipping indexing")]
     private static partial void LogNoVectorStoreSkipIndexing(ILogger logger);
     [LoggerMessage(Level = LogLevel.Information, Message = "Indexed {Count} chunks for {DocumentId}")]

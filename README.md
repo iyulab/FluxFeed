@@ -236,6 +236,13 @@ description becomes several chunks that each carry the same `image_id` / `image_
 long description is therefore safe: it cannot push the document's embedding request past the model's
 context window.
 
+An image that keeps failing (unsupported format, corrupt data — a `null` return or a thrown
+exception, either counts) is not retried forever. Once it has failed
+`FileVaultOptions.MaxImageEnrichmentAttempts` times (default 3), it is marked permanently failed and
+the pipeline stops offering it to the enricher — this survives a process restart, since the attempt
+count is persisted in the image manifest, not held in memory. A later success (e.g. after you fix the
+enricher) clears the failure record for that image.
+
 ### Keyword index — `IKeywordSearchService`
 
 When one is registered, every chunk written to the vector store is written to the keyword index as

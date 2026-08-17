@@ -119,6 +119,15 @@ public sealed class FileVaultOptions
     public ChunkingDefaults Chunking { get; set; } = new();
 
     /// <summary>
+    /// Consecutive failures an <c>IVaultImageEnricher</c> may accumulate for one image before the
+    /// pipeline stops offering that image to it. The failure count is persisted in the image
+    /// manifest, so it survives a process restart — unlike an in-memory counter, an image that has
+    /// already exhausted this many attempts is not retried again just because the process restarted.
+    /// A failed image below the ceiling is still retried on the next memorize/refresh, as before.
+    /// </summary>
+    public int MaxImageEnrichmentAttempts { get; set; } = 3;
+
+    /// <summary>
     /// Maximum file size in bytes.
     /// </summary>
     public long MaxFileSizeBytes => MaxFileSizeMB * 1024L * 1024L;
