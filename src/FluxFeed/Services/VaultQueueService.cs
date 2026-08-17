@@ -19,13 +19,10 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     private readonly ILogger<VaultQueueService> _logger;
     private readonly string _connectionString;
     private readonly SemaphoreSlim _dbLock = new(1, 1);
-    private readonly List<double> _processingTimes = [];
-
     // Bridges the queue's terminal transitions to WaitForJobAsync without polling. Each awaiting
     // caller registers a TCS keyed by jobId; Complete/Fail/Cancel resolve and remove it.
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<VaultJob>> _waiters = new();
 
-    private DateTimeOffset? _lastProcessedAt;
     private bool _isPaused;
     private bool _disposed;
 
@@ -307,7 +304,6 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
             await cmd.ExecuteNonQueryAsync(ct);
 
-            _lastProcessedAt = completedAt;
             LogCompleted(_logger, jobId);
 
             var job = await GetJobInternalAsync(connection, jobId, ct);
@@ -315,17 +311,6 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             {
                 JobCompleted?.Invoke(this, job);
                 SignalWaiter(job);
-
-                // Track processing time
-                if (job.Duration.HasValue)
-                {
-                    lock (_processingTimes)
-                    {
-                        _processingTimes.Add(job.Duration.Value.TotalMilliseconds);
-                        if (_processingTimes.Count > 100)
-                            _processingTimes.RemoveAt(0);
-                    }
-                }
             }
         }
         finally
@@ -593,27 +578,25 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             await using var connection = CreateConnection();
             await connection.OpenAsync(ct);
 
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                SELECT status, COUNT(*) as count
-                FROM vault_jobs
-                GROUP BY status
-                """;
-
             var counts = new Dictionary<VaultJobStatus, int>();
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+            await using (var cmd = connection.CreateCommand())
             {
-                var status = (VaultJobStatus)reader.GetInt32(0);
-                var count = reader.GetInt32(1);
-                counts[status] = count;
+                cmd.CommandText = """
+                    SELECT status, COUNT(*) as count
+                    FROM vault_jobs
+                    GROUP BY status
+                    """;
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var status = (VaultJobStatus)reader.GetInt32(0);
+                    var count = reader.GetInt32(1);
+                    counts[status] = count;
+                }
             }
 
-            double avgTime;
-            lock (_processingTimes)
-            {
-                avgTime = _processingTimes.Count > 0 ? _processingTimes.Average() : 0;
-            }
+            var (lastProcessedAt, avgTime) = await GetCompletionStatsAsync(connection, ct);
 
             return new QueueStatistics
             {
@@ -623,7 +606,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                 FailedCount = counts.GetValueOrDefault(VaultJobStatus.Failed),
                 CancelledCount = counts.GetValueOrDefault(VaultJobStatus.Cancelled),
                 IsPaused = _isPaused,
-                LastProcessedAt = _lastProcessedAt,
+                LastProcessedAt = lastProcessedAt,
                 AverageProcessingTimeMs = avgTime
             };
         }
@@ -631,6 +614,38 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         {
             _dbLock.Release();
         }
+    }
+
+    // LastProcessedAt/AverageProcessingTimeMs are derived from the persisted vault_jobs rows (not
+    // an in-memory cache) so a statistics read reflects completions recorded by any process
+    // instance, not only ones this instance itself observed via CompleteAsync.
+    private static async Task<(DateTimeOffset? LastProcessedAt, double AverageProcessingTimeMs)> GetCompletionStatsAsync(
+        SqliteConnection connection, CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT started_at, completed_at
+            FROM vault_jobs
+            WHERE status = @status AND started_at IS NOT NULL AND completed_at IS NOT NULL
+            ORDER BY completed_at DESC
+            LIMIT 100
+            """;
+        cmd.Parameters.AddWithValue("@status", (int)VaultJobStatus.Completed);
+
+        DateTimeOffset? lastProcessedAt = null;
+        var durationsMs = new List<double>();
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var startedAt = DateTimeOffset.Parse(reader.GetString(0), CultureInfo.InvariantCulture);
+            var completedAt = DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture);
+            lastProcessedAt ??= completedAt;
+            durationsMs.Add((completedAt - startedAt).TotalMilliseconds);
+        }
+
+        var avgTime = durationsMs.Count > 0 ? durationsMs.Average() : 0;
+        return (lastProcessedAt, avgTime);
     }
 
     #endregion
