@@ -12,7 +12,8 @@ namespace FluxFeed.Tests.Services;
 
 /// <summary>
 /// Strategy routing in <see cref="VaultPipeline.SearchAsync"/> (ISSUE-161). Verifies that a hybrid
-/// request is routed to <see cref="IHybridSearchService"/> when available and otherwise degrades to
+/// request is routed to <see cref="IHybridSearchService"/> and a keyword request to
+/// <see cref="IKeywordSearchService"/> when each is available, and that both otherwise degrade to
 /// vector while reporting the executed strategy truthfully (no silent mismatch).
 /// </summary>
 public class VaultPipelineSearchStrategyTests
@@ -23,7 +24,7 @@ public class VaultPipelineSearchStrategyTests
     private readonly IVectorStore _vectorStore = Substitute.For<IVectorStore>();
     private readonly IEmbeddingService _embedding = Substitute.For<IEmbeddingService>();
 
-    private VaultPipeline CreatePipeline(IHybridSearchService? hybrid)
+    private VaultPipeline CreatePipeline(IHybridSearchService? hybrid, IKeywordSearchService? keyword = null)
     {
         _embedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new float[] { 0.1f, 0.2f, 0.3f, 0.4f });
@@ -37,7 +38,8 @@ public class VaultPipelineSearchStrategyTests
         return new VaultPipeline(
             _git, _hasher, _storage, NullLogger<VaultPipeline>.Instance,
             options: null, extractor: null, chunker: null,
-            vectorStore: _vectorStore, embeddingService: _embedding, hybridSearch: hybrid);
+            vectorStore: _vectorStore, embeddingService: _embedding, hybridSearch: hybrid,
+            keywordSearchService: keyword);
     }
 
     [Fact]
@@ -101,6 +103,63 @@ public class VaultPipelineSearchStrategyTests
         var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid);
 
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
+        response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("keep");
+    }
+
+    // ISSUE-161 (pure-keyword search): routed through IKeywordSearchService directly, never through
+    // IHybridSearchService with VectorWeight=0 (that path still burns an embedding call + vector
+    // search it then discards — the "degenerate weighted hybrid" this strategy value exists to avoid).
+
+    [Fact]
+    public async Task SearchAsync_KeywordRequest_WithKeywordService_ExecutesKeyword_NoEmbeddingCall()
+    {
+        var keyword = Substitute.For<IKeywordSearchService>();
+        keyword.SearchAsync(Arg.Any<string>(), Arg.Any<KeywordSearchOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<KeywordSearchResult>
+            {
+                new() { Chunk = new DocumentChunk { Id = "kw-chunk", DocumentId = "doc-3", Content = "bm25 hit", ChunkIndex = 2 }, Score = 4.2 }
+            });
+        var pipeline = CreatePipeline(hybrid: null, keyword: keyword);
+
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword);
+
+        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Keyword);
+        var item = response.Results.Should().ContainSingle().Subject;
+        item.DocumentId.Should().Be("doc-3");
+        item.Content.Should().Be("bm25 hit");
+        item.Score.Should().BeApproximately(4.2f, 0.0001f);
+        // The whole point of a dedicated Keyword strategy: no embedding call, no vector search.
+        await _embedding.DidNotReceive().GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await _vectorStore.DidNotReceive().SearchAsync(Arg.Any<float[]>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SearchAsync_KeywordRequest_WithoutKeywordService_DegradesToVectorTruthfully()
+    {
+        var pipeline = CreatePipeline(hybrid: null, keyword: null);
+
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword);
+
+        // No IKeywordSearchService registered: executes vector and says so (mirrors the Hybrid fallback).
+        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Vector);
+        response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("doc-1");
+    }
+
+    [Fact]
+    public async Task SearchAsync_KeywordRequest_FiltersByDocumentIds()
+    {
+        var keyword = Substitute.For<IKeywordSearchService>();
+        keyword.SearchAsync(Arg.Any<string>(), Arg.Any<KeywordSearchOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<KeywordSearchResult>
+            {
+                new() { Chunk = new DocumentChunk { Id = "a", DocumentId = "keep", Content = "in scope", ChunkIndex = 0 }, Score = 3.0 },
+                new() { Chunk = new DocumentChunk { Id = "b", DocumentId = "drop", Content = "out of scope", ChunkIndex = 0 }, Score = 2.0 }
+            });
+        var pipeline = CreatePipeline(hybrid: null, keyword: keyword);
+
+        var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword);
+
+        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Keyword);
         response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("keep");
     }
 

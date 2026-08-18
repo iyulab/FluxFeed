@@ -551,9 +551,17 @@ public enum VaultSearchStrategy
     /// </summary>
     Hybrid = 1,
 
-    // Keyword-only (pure BM25) is intentionally not exposed yet: HybridSearchOptions has no dedicated
-    // keyword path (only VectorWeight/SparseWeight), so a "Keyword" value would secretly run degenerate
-    // weighted hybrid — the same silent-mismatch class this carrier fixes. Tracked in ISSUE-161.
+    /// <summary>
+    /// Pure keyword (BM25) search via <c>IKeywordSearchService</c> — no embedding call, no vector
+    /// leg. Requires the consumer to register <c>IKeywordSearchService</c> in the same container
+    /// (FileVault's own ingestion writes to it whenever it is present); when it is absent the request
+    /// executes as <see cref="Vector"/> and the result reports that via
+    /// <see cref="VaultSearchResult.ExecutedStrategy"/> (no silent mismatch). Deliberately routed
+    /// through <c>IKeywordSearchService</c> directly rather than <c>IHybridSearchService</c> with
+    /// <c>VectorWeight=0</c>: the latter still generates a query embedding and runs a vector search
+    /// it then discards, which is not what a caller asking for keyword-only search wants.
+    /// </summary>
+    Keyword = 2,
 }
 
 /// <summary>
@@ -593,8 +601,10 @@ public sealed class VaultSearchOptions
     /// <summary>
     /// Search strategy to use. Defaults to <see cref="VaultSearchStrategy.Vector"/>. A
     /// <see cref="VaultSearchStrategy.Hybrid"/> request is honored only when the consumer registered
-    /// <c>IHybridSearchService</c>; otherwise it degrades to vector and the degradation is reported on
-    /// <see cref="VaultSearchResult.ExecutedStrategy"/>.
+    /// <c>IHybridSearchService</c> (or the vector store exposes a native hybrid path); a
+    /// <see cref="VaultSearchStrategy.Keyword"/> request is honored only when the consumer registered
+    /// <c>IKeywordSearchService</c>. Either degrades to vector when its backend is absent, and the
+    /// degradation is reported on <see cref="VaultSearchResult.ExecutedStrategy"/>.
     /// </summary>
     public VaultSearchStrategy SearchStrategy { get; init; } = VaultSearchStrategy.Vector;
 

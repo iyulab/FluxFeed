@@ -258,6 +258,15 @@ registered. Otherwise the query runs as vector search and says so via
 `VaultSearchResult.ExecutedStrategy` — compare it against `RequestedStrategy` rather than assuming
 the request was honored.
 
+### Keyword-only search — `VaultSearchStrategy.Keyword`
+
+`VaultSearchOptions.SearchStrategy = VaultSearchStrategy.Keyword` runs pure BM25 through the same
+`IKeywordSearchService` the keyword index above writes to — no query embedding, no vector search.
+It degrades to vector the same way `Hybrid` does when no `IKeywordSearchService` is registered
+(reported via `ExecutedStrategy`). Use this over `Hybrid` with a zero vector weight when you actually
+want keyword-only: a weighted hybrid request still generates a query embedding and runs a vector
+search it then discards.
+
 ## Multi-tenant
 
 `AddFileVaultFactoryWithFluxIndex` swaps the single `IVault` for an `IVaultFactory`. Each tenant gets

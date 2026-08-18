@@ -682,6 +682,19 @@ public sealed partial class VaultPipeline : IVaultPipeline
             LogHybridUnavailableFallback(_logger);
         }
 
+        if (strategy == VaultSearchStrategy.Keyword)
+        {
+            if (_keywordSearchService != null)
+            {
+                var keywordResults = await KeywordSearchAsync(query, docIdSet, topK, minScore, ct);
+                LogSearchResults(_logger, query, keywordResults.Count);
+                return new VaultPipelineSearchResponse(keywordResults, VaultSearchStrategy.Keyword);
+            }
+
+            // No IKeywordSearchService registered — degrade to vector and report it truthfully.
+            LogKeywordUnavailableFallback(_logger);
+        }
+
         var vectorResults = await VectorSearchAsync(query, docIdSet, topK, minScore, ct);
         LogSearchResults(_logger, query, vectorResults.Count);
         return new VaultPipelineSearchResponse(vectorResults, VaultSearchStrategy.Vector);
@@ -714,6 +727,40 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 Content = r.Content,
                 Score = r.Score ?? 0f,
                 Metadata = r.Metadata
+            })
+            .ToList();
+    }
+
+    private async Task<IReadOnlyList<PipelineSearchResult>> KeywordSearchAsync(
+        string query,
+        HashSet<string>? docIdSet,
+        int topK,
+        float minScore,
+        CancellationToken ct)
+    {
+        var options = new KeywordSearchOptions
+        {
+            // Over-fetch so document-id filtering does not starve the result set.
+            MaxResults = topK * 2,
+            MinScore = minScore
+        };
+
+        var keywordResults = await _keywordSearchService!.SearchAsync(query, options, ct);
+
+        IEnumerable<KeywordSearchResult> filtered = keywordResults;
+        if (docIdSet != null)
+            filtered = keywordResults.Where(r => docIdSet.Contains(r.Chunk.DocumentId));
+
+        return filtered
+            .Take(topK)
+            .Select(r => new PipelineSearchResult
+            {
+                DocumentId = r.Chunk.DocumentId,
+                ChunkId = r.Chunk.Id,
+                ChunkIndex = r.Chunk.ChunkIndex,
+                Content = r.Chunk.Content,
+                Score = (float)r.Score,
+                Metadata = r.Chunk.Metadata
             })
             .ToList();
     }
@@ -1383,6 +1430,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogSearchResults(ILogger logger, string query, int count);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Hybrid search requested but IHybridSearchService is not registered; executing vector search (reported as ExecutedStrategy=Vector)")]
     private static partial void LogHybridUnavailableFallback(ILogger logger);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Keyword search requested but IKeywordSearchService is not registered; executing vector search (reported as ExecutedStrategy=Vector)")]
+    private static partial void LogKeywordUnavailableFallback(ILogger logger);
     [LoggerMessage(Level = LogLevel.Warning, Message = "No content to index for {SourcePath}")]
     private static partial void LogNoContentToIndex(ILogger logger, string sourcePath);
     [LoggerMessage(Level = LogLevel.Debug, Message = "Created {ChunkCount} chunks from {ContentLength} chars")]

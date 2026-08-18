@@ -68,8 +68,10 @@ public interface IVaultPipeline
     /// <param name="topK">Maximum results to return.</param>
     /// <param name="minScore">Minimum score threshold.</param>
     /// <param name="strategy">Requested search strategy. A <see cref="VaultSearchStrategy.Hybrid"/>
-    /// request degrades to vector when no <c>IHybridSearchService</c> is available; the response
-    /// reports the strategy actually executed.</param>
+    /// request degrades to vector when no <c>IHybridSearchService</c> is available, and a
+    /// <see cref="VaultSearchStrategy.Keyword"/> request degrades to vector when no
+    /// <c>IKeywordSearchService</c> is available; the response reports the strategy actually
+    /// executed.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Search results plus the strategy that was actually executed.</returns>
     Task<VaultPipelineSearchResponse> SearchAsync(
