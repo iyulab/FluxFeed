@@ -146,6 +146,18 @@ public interface IVault
     /// </returns>
     Task<string?> GetContentAtCommitAsync(string filePath, string commitHash, CancellationToken ct = default);
 
+    /// <summary>
+    /// Lists the images recorded for an entry's document, including each one's description (or its
+    /// most recent enrichment failure, if still pending) — the same manifest
+    /// <see cref="FluxFeed.Services.VaultPipeline"/> reads to decide which images still need
+    /// describing, exposed here as a read-only facade method so a caller does not have to reach for
+    /// the storage layer to observe what an <see cref="IVaultImageEnricher"/> wrote. Returns an
+    /// empty list when the entry doesn't exist or has no images.
+    /// </summary>
+    /// <param name="filePath">Source file path identifying the entry.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<VaultImage>> GetImageManifestAsync(string filePath, CancellationToken ct = default);
+
     // === Folder Watching ===
 
     /// <summary>

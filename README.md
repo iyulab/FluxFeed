@@ -243,6 +243,11 @@ the pipeline stops offering it to the enricher — this survives a process resta
 count is persisted in the image manifest, not held in memory. A later success (e.g. after you fix the
 enricher) clears the failure record for that image.
 
+Read back what the enricher wrote — or why an image is still pending — with
+`GetImageManifestAsync(filePath)`. Each `VaultImage` carries its `Description` when one has been
+persisted, or `LastEnrichmentFailure` (reason, attempt count, whether it is now permanent) while none
+has. Returns an empty list when the entry doesn't exist or has no images.
+
 ### Keyword index — `IKeywordSearchService`
 
 When one is registered, every chunk written to the vector store is written to the keyword index as

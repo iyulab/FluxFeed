@@ -804,6 +804,15 @@ public sealed partial class VaultManager : IVault
         return content.GetCombinedContent();
     }
 
+    public async Task<IReadOnlyList<VaultImage>> GetImageManifestAsync(string filePath, CancellationToken ct = default)
+    {
+        var entry = await GetAsync(filePath, ct);
+        if (entry == null)
+            return [];
+
+        return await _storage.GetImageManifestAsync(entry, ct);
+    }
+
     private static long GetDirectorySize(string path)
     {
         var info = new DirectoryInfo(path);

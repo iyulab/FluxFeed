@@ -413,6 +413,47 @@ public class VaultManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task GetImageManifestAsync_KnownEntry_ReturnsStorageManifest()
+    {
+        // Arrange - Create entry with metadata on disk
+        var filePath = CreateTestFile("test.txt", "Hello, World!");
+        var entry = CreateEntryWithMetadata(filePath);
+        var manifest = new List<VaultImage>
+        {
+            new()
+            {
+                Id = "img_000",
+                FilePath = Path.Combine(_vaultDir, "images", "img_000.png"),
+                FileName = "img_000.png",
+                ContentType = "image/png",
+                Description = "A chart of quarterly revenue."
+            }
+        };
+        _storageMock.GetImageManifestAsync(Arg.Any<VaultEntry>(), Arg.Any<CancellationToken>())
+            .Returns(manifest);
+
+        // Act
+        var result = await _vault.GetImageManifestAsync(filePath);
+
+        // Assert - the facade passes the resolved entry straight through to storage
+        result.Should().BeEquivalentTo(manifest);
+        await _storageMock.Received(1).GetImageManifestAsync(
+            Arg.Is<VaultEntry>(e => e.FilepathHash == entry.FilepathHash),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetImageManifestAsync_NoEntry_ReturnsEmpty()
+    {
+        // Act - no CreateEntryWithMetadata call, so GetAsync resolves to null
+        var result = await _vault.GetImageManifestAsync(Path.Combine(_testDir, "missing.txt"));
+
+        // Assert
+        result.Should().BeEmpty();
+        await _storageMock.DidNotReceive().GetImageManifestAsync(Arg.Any<VaultEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ScanFolderAsync_WithFiles_DiscoverFiles()
     {
         // Arrange
