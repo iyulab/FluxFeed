@@ -13,5 +13,7 @@
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+    <!-- FluxGuard (opt-in ingestion-time RAG security pipeline) -->
+    <PackageReference Include="FluxGuard.Remote" />
   </ItemGroup>
 </Project>

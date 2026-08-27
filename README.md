@@ -272,6 +272,23 @@ It degrades to vector the same way `Hybrid` does when no `IKeywordSearchService`
 want keyword-only: a weighted hybrid request still generates a query embedding and runs a vector
 search it then discards.
 
+### RAG security — `FluxGuard.Remote.RAG.IRAGSecurityPipeline`
+
+When one is registered, `MemorizeAsync`/`RefreshAsync` validate every chunk through it before
+indexing — a chunk the pipeline suggests blocking (RAG poisoning / indirect prompt injection) is
+dropped from the batch entirely, one it suggests sanitizing has its content replaced. Off by
+default; nothing changes without it.
+
+```csharp
+using FluxGuard.Remote.RAG;
+
+var pipeline = new VaultPipeline(
+    git, hasher, storage, logger,
+    vectorStore: vectorStore,
+    embeddingService: embeddingService,
+    ragSecurityPipeline: new IndirectInjectionDetector());
+```
+
 ## Multi-tenant
 
 `AddFileVaultFactoryWithFluxIndex` swaps the single `IVault` for an `IVaultFactory`. Each tenant gets

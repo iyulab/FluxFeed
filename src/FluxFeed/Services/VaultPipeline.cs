@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using FluxGuard.Remote.RAG;
 using FluxIndex.Core.Application.Interfaces;
 using FluxIndex.Core.Domain.Entities;
 using FluxFeed.Domain.Entities;
@@ -90,6 +91,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private readonly IKeywordSearchService? _keywordSearchService;
     private readonly IVaultImageEnricher? _imageEnricher;
 
+    // Opt-in RAG poisoning/indirect-injection guard (FluxGuard.Remote), applied at ingestion —
+    // before a poisoned chunk is ever embedded and stored, not just at retrieval time. Null by
+    // default — nothing changes for consumers who don't supply one.
+    private readonly IRAGSecurityPipeline? _ragSecurityPipeline;
+
     /// <summary>
     /// Value of the <c>chunk_kind</c> metadata tag on a chunk that holds an image description
     /// rather than document text.
@@ -122,7 +128,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IHybridSearchService? hybridSearch = null,
         IGraphRAGService? graphRAGService = null,
         IKeywordSearchService? keywordSearchService = null,
-        IVaultImageEnricher? imageEnricher = null)
+        IVaultImageEnricher? imageEnricher = null,
+        IRAGSecurityPipeline? ragSecurityPipeline = null)
     {
         _git = git ?? throw new ArgumentNullException(nameof(git));
         _hasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
@@ -137,6 +144,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         _graphRAGService = graphRAGService;
         _keywordSearchService = keywordSearchService;
         _imageEnricher = imageEnricher;
+        _ragSecurityPipeline = ragSecurityPipeline;
     }
 
     public async Task<MemorizeResult> MemorizeAsync(VaultEntry entry, MemorizeOptions? options = null, CancellationToken ct = default)
@@ -554,6 +562,63 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return chunks;
     }
 
+    /// <summary>
+    /// Runs about-to-be-indexed chunks through the opt-in <see cref="IRAGSecurityPipeline"/>
+    /// (indirect prompt injection / RAG poisoning detection) before they are embedded and stored —
+    /// catching poisoned content at the door rather than relying solely on a retrieval-time check.
+    /// A chunk the pipeline suggests blocking is dropped from the batch entirely; one it suggests
+    /// sanitizing has its content replaced with the pipeline's sanitized version.
+    /// </summary>
+    private async Task<List<VaultChunk>> ApplyRagSecurityAsync(
+        List<VaultChunk> chunks,
+        string sourcePath,
+        CancellationToken ct)
+    {
+        if (chunks.Count == 0)
+        {
+            return chunks;
+        }
+
+        var documents = chunks.Select((c, i) => new RAGDocument
+        {
+            Id = i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            Content = c.Content,
+            Source = sourcePath
+        }).ToList();
+
+        var validations = await _ragSecurityPipeline!.ValidateDocumentsAsync(documents, ct);
+        var validationById = validations.ToDictionary(v => v.Document.Id ?? string.Empty);
+
+        var filtered = new List<VaultChunk>(chunks.Count);
+        var blockedCount = 0;
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var chunk = chunks[i];
+            if (!validationById.TryGetValue(i.ToString(System.Globalization.CultureInfo.InvariantCulture), out var validation))
+            {
+                filtered.Add(chunk);
+                continue;
+            }
+
+            if (validation.SuggestedAction == RAGAction.Block)
+            {
+                blockedCount++;
+                continue;
+            }
+
+            filtered.Add(validation.SuggestedAction == RAGAction.Sanitize && validation.SanitizedContent != null
+                ? chunk with { Content = validation.SanitizedContent }
+                : chunk);
+        }
+
+        if (blockedCount > 0)
+        {
+            LogRagSecurityBlockedChunks(_logger, blockedCount, sourcePath);
+        }
+
+        return filtered;
+    }
+
     public async Task RemoveAsync(VaultEntry entry, CancellationToken ct = default)
     {
         if (_vectorStore == null && _keywordSearchService == null)
@@ -936,6 +1001,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
             .Select(text => new VaultChunk(text, null))
             .Concat(imageChunks)
             .ToList();
+
+        if (_ragSecurityPipeline != null)
+        {
+            allChunks = await ApplyRagSecurityAsync(allChunks, entry.SourcePath, ct);
+        }
 
         LogCreatedChunks(_logger, allChunks.Count, combinedContent.Length);
         if (imageChunks.Count > 0)
@@ -1404,6 +1474,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogMemorizeCompleted(ILogger logger, string sourcePath, int chunkCount, double duration);
     [LoggerMessage(Level = LogLevel.Error, Message = "Memorize failed for {SourcePath}")]
     private static partial void LogMemorizeFailed(ILogger logger, Exception exception, string sourcePath);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "RAG security pipeline blocked {BlockedCount} chunk(s) from indexing for {SourcePath}")]
+    private static partial void LogRagSecurityBlockedChunks(ILogger logger, int blockedCount, string sourcePath);
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting refresh for {SourcePath}")]
     private static partial void LogStartingRefresh(ILogger logger, string sourcePath);
     [LoggerMessage(Level = LogLevel.Information, Message = "Refresh completed for {SourcePath}: {ChunkCount} chunks in {Duration:F2}s")]
