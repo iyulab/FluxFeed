@@ -1,6 +1,6 @@
 using FileFlux;
 using FileFlux.Core;
-using FluentAssertions;
+using AwesomeAssertions;
 using FluxFeed.Adapters;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;

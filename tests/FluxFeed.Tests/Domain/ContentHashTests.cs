@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using FluxFeed.Domain.ValueObjects;
 using Xunit;
 

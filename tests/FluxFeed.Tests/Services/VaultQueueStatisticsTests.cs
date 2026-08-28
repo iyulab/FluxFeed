@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using FluxFeed.Options;
 using FluxFeed.Services;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -1,4 +1,4 @@
-using FluentAssertions;
+using AwesomeAssertions;
 using FluxIndex.Core.Application.Interfaces;
 using FluxIndex.Core.Application.Services;
 using FluxIndex.Core.Domain.Entities;

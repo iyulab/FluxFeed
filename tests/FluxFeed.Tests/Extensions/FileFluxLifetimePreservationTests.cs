@@ -1,7 +1,7 @@
 using System.Linq;
 using FileFlux;
 using FileFlux.Core;
-using FluentAssertions;
+using AwesomeAssertions;
 using FluxFeed.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
