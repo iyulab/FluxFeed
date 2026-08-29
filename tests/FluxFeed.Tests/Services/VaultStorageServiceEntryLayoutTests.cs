@@ -59,7 +59,7 @@ public class VaultStorageServiceEntryLayoutTests : IDisposable
     {
         var entry = NewEntry("document.txt");
 
-        await _storage.InitializeEntryAsync(entry);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         File.Exists(Path.Combine(entry.EntryPath, ".gitignore")).Should().BeFalse(
             "an ignore file at the entry level sits outside the tracked repository and can never apply");
@@ -70,7 +70,7 @@ public class VaultStorageServiceEntryLayoutTests : IDisposable
     {
         var entry = NewEntry("document.txt");
 
-        await _storage.InitializeEntryAsync(entry);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         Directory.Exists(entry.VaultPath).Should().BeTrue();
         File.Exists(entry.MetaPath).Should().BeTrue();

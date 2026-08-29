@@ -12,7 +12,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Xunit;
-using Xunit.Abstractions;
 using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace FluxFeed.Tests.Integration;
@@ -126,13 +125,13 @@ public class FileVaultPipelineSimulationTests : IDisposable
             """);
 
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         var memorizeResult = await _pipeline.MemorizeAsync(entry, new MemorizeOptions
         {
             MaxChunkSize = 200,
             OverlapSize = 20
-        });
+        }, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"  - File: {Path.GetFileName(docPath)}");
         _output.WriteLine($"  - Chunks created: {memorizeResult.ChunkCount}");
@@ -187,13 +186,13 @@ public class FileVaultPipelineSimulationTests : IDisposable
             Chapter 4: Best Practices
             Use chunking strategies appropriate for your content type.
             Monitor search quality with the evaluation framework.
-            """);
+            """, TestContext.Current.CancellationToken);
 
         _output.WriteLine("  - File updated with v2.0 content");
         _output.WriteLine("  - Added new chapters and features");
 
         // Detect changes
-        var changes = await _vault.DetectChangesAsync(docPath);
+        var changes = await _vault.DetectChangesAsync(docPath, TestContext.Current.CancellationToken);
         _output.WriteLine($"  - Source changed: {changes.SourceChanged}");
         _output.WriteLine($"  - Recommended action: {changes.RecommendedAction}");
 
@@ -209,7 +208,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
         _output.WriteLine("\nSTEP 4: Re-memorizing changed file...");
 
         // First, remove old chunks
-        await _pipeline.RemoveAsync(entry, default);
+        await _pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken);
         var oldChunkCount = _vectorStore.Count;
 
         // Re-extract and re-index
@@ -218,7 +217,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
         {
             MaxChunkSize = 200,
             OverlapSize = 20
-        });
+        }, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"  - New chunks created: {rememorizeResult.ChunkCount}");
         _output.WriteLine($"  - Vector store size: {_vectorStore.Count}");
@@ -260,7 +259,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
         _output.WriteLine("  - Source file deleted");
 
         // Detect the deletion
-        var deleteChanges = await _vault.DetectChangesAsync(docPath);
+        var deleteChanges = await _vault.DetectChangesAsync(docPath, TestContext.Current.CancellationToken);
         entry = VaultEntry.LoadByHash(entry.FilepathHash, _vaultDir)!;
         _output.WriteLine($"  - Source exists: {deleteChanges.SourceExists}");
         _output.WriteLine($"  - Recommended action: {deleteChanges.RecommendedAction}");
@@ -278,7 +277,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
         entry.SaveMetadata();
         _output.WriteLine($"    Phase 1a: SyncStatus = {entry.SyncStatus}");
 
-        await _pipeline.RemoveAsync(entry, default);
+        await _pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken);
         entry.MarkRemovalPartial("Vector");
         entry.SaveMetadata();
         _output.WriteLine($"    Phase 1b: SyncStatus = {entry.SyncStatus}, Phase = {entry.RemovalPhase}");
@@ -288,7 +287,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
         entry.RemovalPhase.Should().Be("Vector");
 
         // Phase 2: Remove storage
-        await _storage.DeleteEntryStorageAsync(entry, default);
+        await _storage.DeleteEntryStorageAsync(entry, TestContext.Current.CancellationToken);
         _output.WriteLine("    Phase 2: Storage deleted");
 
         // Verify cleanup
@@ -310,7 +309,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         var docPath = CreateDocument("status_test.txt", "Initial content for status testing.");
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         // Track all state transitions
         var transitions = new List<(string Action, SyncStatus Status, string? Phase)>();
@@ -328,7 +327,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
         entry.SyncStatus.Should().Be(SyncStatus.InSync);
 
         // After memorize
-        await _pipeline.MemorizeAsync(entry, null);
+        await _pipeline.MemorizeAsync(entry, null, TestContext.Current.CancellationToken);
         LogTransition("After Memorize");
         entry.SyncStatus.Should().Be(SyncStatus.InSync);
 
@@ -339,7 +338,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         // After re-memorize
         entry.ResetToSource();
-        await _pipeline.MemorizeAsync(entry, null);
+        await _pipeline.MemorizeAsync(entry, null, TestContext.Current.CancellationToken);
         LogTransition("After Re-memorize");
         entry.SyncStatus.Should().Be(SyncStatus.InSync);
 
@@ -349,9 +348,9 @@ public class FileVaultPipelineSimulationTests : IDisposable
         LogTransition("Vault Modified");
 
         // After refresh
-        await _pipeline.RemoveAsync(entry, default);
+        await _pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken);
         entry.ResetToSource();
-        await _pipeline.MemorizeAsync(entry, null);
+        await _pipeline.MemorizeAsync(entry, null, TestContext.Current.CancellationToken);
         LogTransition("After Refresh");
 
         // Deletion flow
@@ -413,8 +412,8 @@ public class FileVaultPipelineSimulationTests : IDisposable
         foreach (var path in new[] { doc1, doc2, doc3 })
         {
             var entry = VaultEntry.Create(path, _vaultDir);
-            await _storage.InitializeEntryAsync(entry, default);
-            await _pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 150 });
+            await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+            await _pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 150 }, TestContext.Current.CancellationToken);
             entries.Add(entry);
             _output.WriteLine($"Indexed: {Path.GetFileName(path)} -> {entry.ChunkCount} chunks");
         }
@@ -453,8 +452,8 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         // Delete one document and verify isolation
         _output.WriteLine("\nDeleting Python guide and verifying isolation...");
-        await _pipeline.RemoveAsync(entries[1], default);
-        await _storage.DeleteEntryStorageAsync(entries[1], default);
+        await _pipeline.RemoveAsync(entries[1], TestContext.Current.CancellationToken);
+        await _storage.DeleteEntryStorageAsync(entries[1], TestContext.Current.CancellationToken);
 
         var afterDelete = await SearchAsync("programming guide");
         var pythonChunks = afterDelete.Where(r => r.DocumentId == entries[1].FilepathHash).ToList();
@@ -473,8 +472,8 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         var docPath = CreateDocument("recovery_test.txt", "Content for recovery testing scenario.");
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
-        await _pipeline.MemorizeAsync(entry, null);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+        await _pipeline.MemorizeAsync(entry, null, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"Initial state: {_vectorStore.Count} chunks in store");
 
@@ -484,7 +483,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
         entry.MarkRemovalPending();
         entry.SaveMetadata();
 
-        await _pipeline.RemoveAsync(entry, default); // Vector removed
+        await _pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken); // Vector removed
         entry.MarkRemovalPartial("Vector");
         entry.SaveMetadata();
 
@@ -504,7 +503,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         // Complete the removal
         _output.WriteLine("\nCompleting interrupted removal...");
-        await _storage.DeleteEntryStorageAsync(recoveredEntry, default);
+        await _storage.DeleteEntryStorageAsync(recoveredEntry, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"Entry directory exists after completion: {Directory.Exists(entry.EntryPath)}");
         Directory.Exists(entry.EntryPath).Should().BeFalse();
@@ -535,10 +534,10 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         var filePath = CreateDocument("embed_fail.txt", "Content that will fail during embedding.");
         var entry = VaultEntry.Create(filePath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         // Act
-        var result = await failPipeline.MemorizeAsync(entry);
+        var result = await failPipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         // Assert
         _output.WriteLine($"Success={result.Success}, Stage={entry.Stage}, LastError={entry.LastError}");
@@ -569,10 +568,10 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         var filePath = CreateDocument("store_fail.txt", "Content that will fail during vector storage.");
         var entry = VaultEntry.Create(filePath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         // Act
-        var result = await failPipeline.MemorizeAsync(entry);
+        var result = await failPipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         // Assert
         _output.WriteLine($"Success={result.Success}, Stage={entry.Stage}, LastError={entry.LastError}");
@@ -603,8 +602,8 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         var filePath = CreateDocument("persist_error.txt", "Content to test error persistence.");
         var entry = VaultEntry.Create(filePath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
-        await failPipeline.MemorizeAsync(entry);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+        await failPipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         // Act — reload from disk
         var reloaded = VaultEntry.LoadByHash(entry.FilepathHash, _vaultDir);

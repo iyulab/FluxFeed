@@ -80,10 +80,10 @@ public class VaultStorageServiceDeleteConcurrencyTests : IDisposable
                 // Real production read path used by VaultManager.ListAsync.
                 _ = VaultEntry.LoadByHash(entry.FilepathHash, _vaultDir);
             }
-        });
+        }, TestContext.Current.CancellationToken);
 
         // Act: deletion must win despite the concurrent reads.
-        await _storage.DeleteEntryStorageAsync(entry);
+        await _storage.DeleteEntryStorageAsync(entry, TestContext.Current.CancellationToken);
         stop.Cancel();
         await reader;
 
@@ -104,10 +104,10 @@ public class VaultStorageServiceDeleteConcurrencyTests : IDisposable
         {
             await Task.Delay(150);
             handle.Dispose();
-        });
+        }, TestContext.Current.CancellationToken);
 
         // Act
-        await _storage.DeleteEntryStorageAsync(entry);
+        await _storage.DeleteEntryStorageAsync(entry, TestContext.Current.CancellationToken);
         await release;
 
         // Assert

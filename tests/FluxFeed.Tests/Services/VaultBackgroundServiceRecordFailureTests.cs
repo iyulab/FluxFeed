@@ -57,7 +57,7 @@ public class VaultBackgroundServiceRecordFailureTests : IDisposable
 
         // Act
         _ = service.StartAsync(cts.Token);
-        var completed = await queue.JobSettled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var completed = await queue.JobSettled.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         await service.StopAsync(CancellationToken.None);
 
         // Assert

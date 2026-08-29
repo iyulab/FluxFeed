@@ -79,8 +79,8 @@ public class VaultEntryMetadataWriteTests : IDisposable
         for (var round = 0; round < 50; round++)
         {
             await Task.WhenAll(
-                Task.Run(shortRecord.SaveMetadata),
-                Task.Run(longRecord.SaveMetadata));
+                Task.Run(shortRecord.SaveMetadata, TestContext.Current.CancellationToken),
+                Task.Run(longRecord.SaveMetadata, TestContext.Current.CancellationToken));
 
             VaultEntry.LoadByHash(entry.FilepathHash, _testDir)
                 .Should().NotBeNull($"round {round} must not leave an unreadable record");

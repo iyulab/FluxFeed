@@ -48,7 +48,7 @@ public class VaultPipelineSearchStrategyTests
         var hybrid = Substitute.For<IHybridSearchService>();
         var pipeline = CreatePipeline(hybrid);
 
-        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Vector);
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
 
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Vector);
         response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("doc-1");
@@ -66,7 +66,7 @@ public class VaultPipelineSearchStrategyTests
             });
         var pipeline = CreatePipeline(hybrid);
 
-        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid);
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
 
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
         var item = response.Results.Should().ContainSingle().Subject;
@@ -81,7 +81,7 @@ public class VaultPipelineSearchStrategyTests
     {
         var pipeline = CreatePipeline(hybrid: null);
 
-        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid);
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
 
         // No IHybridSearchService registered: executes vector and says so (this is the #2 fix).
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Vector);
@@ -100,7 +100,7 @@ public class VaultPipelineSearchStrategyTests
             });
         var pipeline = CreatePipeline(hybrid);
 
-        var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid);
+        var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
 
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
         response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("keep");
@@ -121,7 +121,7 @@ public class VaultPipelineSearchStrategyTests
             });
         var pipeline = CreatePipeline(hybrid: null, keyword: keyword);
 
-        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword);
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword, ct: TestContext.Current.CancellationToken);
 
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Keyword);
         var item = response.Results.Should().ContainSingle().Subject;
@@ -138,7 +138,7 @@ public class VaultPipelineSearchStrategyTests
     {
         var pipeline = CreatePipeline(hybrid: null, keyword: null);
 
-        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword);
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword, ct: TestContext.Current.CancellationToken);
 
         // No IKeywordSearchService registered: executes vector and says so (mirrors the Hybrid fallback).
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Vector);
@@ -157,7 +157,7 @@ public class VaultPipelineSearchStrategyTests
             });
         var pipeline = CreatePipeline(hybrid: null, keyword: keyword);
 
-        var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword);
+        var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword, ct: TestContext.Current.CancellationToken);
 
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Keyword);
         response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("keep");
@@ -189,7 +189,7 @@ public class VaultPipelineSearchStrategyTests
         var hybridService = Substitute.For<IHybridSearchService>();
         var pipeline = CreatePipelineWithStore(nativeStore, hybridService);
 
-        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid);
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
 
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
         response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("doc-native");
@@ -209,7 +209,7 @@ public class VaultPipelineSearchStrategyTests
             });
         var pipeline = CreatePipelineWithStore(nativeStore, hybrid: null);
 
-        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid);
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
 
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
         response.Results.Should().ContainSingle().Which.Content.Should().Be("fts hit");

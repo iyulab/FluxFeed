@@ -48,7 +48,7 @@ public class VaultBackgroundServiceSignalingTests
         fake.SignalTime = DateTimeOffset.UtcNow;
         fake.FireJobEnqueued(MakeJob());
 
-        var elapsed = await fake.DequeueAfterSignal.Task.WaitAsync(TimeSpan.FromMilliseconds(500));
+        var elapsed = await fake.DequeueAfterSignal.Task.WaitAsync(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
 
         // Assert
         elapsed.TotalMilliseconds.Should().BeLessThan(500,
@@ -74,7 +74,7 @@ public class VaultBackgroundServiceSignalingTests
 
         // Act
         _ = svc.StartAsync(cts.Token);
-        await Task.Delay(250);
+        await Task.Delay(250, TestContext.Current.CancellationToken);
 
         // Assert — paused service must not call DequeueAsync
         fake.DequeueCount.Should().Be(0, "IsPaused=true means no dequeue attempts");

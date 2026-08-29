@@ -13,12 +13,12 @@ public class ContentHasherTests
     {
         // Arrange
         var tempFile = Path.GetTempFileName();
-        await File.WriteAllTextAsync(tempFile, "Hello, World!");
+        await File.WriteAllTextAsync(tempFile, "Hello, World!", TestContext.Current.CancellationToken);
 
         try
         {
             // Act
-            var hash = await _hasher.ComputeHashAsync(tempFile);
+            var hash = await _hasher.ComputeHashAsync(tempFile, TestContext.Current.CancellationToken);
 
             // Assert
             hash.Value.Should().HaveLength(64);
@@ -38,14 +38,14 @@ public class ContentHasherTests
         var tempFile1 = Path.GetTempFileName();
         var tempFile2 = Path.GetTempFileName();
 
-        await File.WriteAllTextAsync(tempFile1, content);
-        await File.WriteAllTextAsync(tempFile2, content);
+        await File.WriteAllTextAsync(tempFile1, content, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(tempFile2, content, TestContext.Current.CancellationToken);
 
         try
         {
             // Act
-            var hash1 = await _hasher.ComputeHashAsync(tempFile1);
-            var hash2 = await _hasher.ComputeHashAsync(tempFile2);
+            var hash1 = await _hasher.ComputeHashAsync(tempFile1, TestContext.Current.CancellationToken);
+            var hash2 = await _hasher.ComputeHashAsync(tempFile2, TestContext.Current.CancellationToken);
 
             // Assert
             hash1.Should().Be(hash2);
@@ -64,14 +64,14 @@ public class ContentHasherTests
         var tempFile1 = Path.GetTempFileName();
         var tempFile2 = Path.GetTempFileName();
 
-        await File.WriteAllTextAsync(tempFile1, "Content A");
-        await File.WriteAllTextAsync(tempFile2, "Content B");
+        await File.WriteAllTextAsync(tempFile1, "Content A", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(tempFile2, "Content B", TestContext.Current.CancellationToken);
 
         try
         {
             // Act
-            var hash1 = await _hasher.ComputeHashAsync(tempFile1);
-            var hash2 = await _hasher.ComputeHashAsync(tempFile2);
+            var hash1 = await _hasher.ComputeHashAsync(tempFile1, TestContext.Current.CancellationToken);
+            var hash2 = await _hasher.ComputeHashAsync(tempFile2, TestContext.Current.CancellationToken);
 
             // Assert
             hash1.Should().NotBe(hash2);
@@ -91,7 +91,7 @@ public class ContentHasherTests
 
         // Act & Assert
         await Assert.ThrowsAsync<FileNotFoundException>(
-            () => _hasher.ComputeHashAsync(nonExistentPath));
+            () => _hasher.ComputeHashAsync(nonExistentPath, TestContext.Current.CancellationToken));
     }
 
     [Fact]

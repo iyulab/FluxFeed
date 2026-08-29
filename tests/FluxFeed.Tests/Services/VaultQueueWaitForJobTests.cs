@@ -44,16 +44,16 @@ public class VaultQueueWaitForJobTests : IDisposable
     public async Task WaitForJobAsync_ResolvesOnComplete_WithoutPolling()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash1", Path.Combine(_testDir, "a.txt"));
-        await queue.DequeueAsync(); // Queued → Processing
+        var job = await queue.EnqueueMemorizeAsync("hash1", Path.Combine(_testDir, "a.txt"), TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken); // Queued → Processing
 
         // Begin waiting BEFORE completion (the production background-memorize ordering).
-        var waitTask = queue.WaitForJobAsync(job.Id);
+        var waitTask = queue.WaitForJobAsync(job.Id, TestContext.Current.CancellationToken);
         waitTask.IsCompleted.Should().BeFalse("the job has not reached a terminal state yet");
 
-        await queue.CompleteAsync(job.Id);
+        await queue.CompleteAsync(job.Id, TestContext.Current.CancellationToken);
 
-        var terminal = await waitTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var terminal = await waitTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         terminal.Status.Should().Be(VaultJobStatus.Completed);
         terminal.Id.Should().Be(job.Id);
     }
@@ -62,12 +62,12 @@ public class VaultQueueWaitForJobTests : IDisposable
     public async Task WaitForJobAsync_ResolvesImmediately_WhenAlreadyTerminal()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash2", Path.Combine(_testDir, "b.txt"));
-        await queue.DequeueAsync();
-        await queue.CompleteAsync(job.Id); // terminal BEFORE anyone waits
+        var job = await queue.EnqueueMemorizeAsync("hash2", Path.Combine(_testDir, "b.txt"), TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
+        await queue.CompleteAsync(job.Id, TestContext.Current.CancellationToken); // terminal BEFORE anyone waits
 
         // Race-free: must resolve immediately, not hang waiting for a signal that already fired.
-        var terminal = await queue.WaitForJobAsync(job.Id).WaitAsync(TimeSpan.FromSeconds(2));
+        var terminal = await queue.WaitForJobAsync(job.Id, TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         terminal.Status.Should().Be(VaultJobStatus.Completed);
     }
 
@@ -75,13 +75,13 @@ public class VaultQueueWaitForJobTests : IDisposable
     public async Task WaitForJobAsync_ResolvesOnFailure()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash3", Path.Combine(_testDir, "c.txt"));
-        await queue.DequeueAsync();
+        var job = await queue.EnqueueMemorizeAsync("hash3", Path.Combine(_testDir, "c.txt"), TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
 
-        var waitTask = queue.WaitForJobAsync(job.Id);
-        await queue.FailAsync(job.Id, "boom");
+        var waitTask = queue.WaitForJobAsync(job.Id, TestContext.Current.CancellationToken);
+        await queue.FailAsync(job.Id, "boom", TestContext.Current.CancellationToken);
 
-        var terminal = await waitTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var terminal = await waitTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         terminal.Status.Should().Be(VaultJobStatus.Failed);
         terminal.ErrorMessage.Should().Be("boom");
     }
@@ -90,12 +90,12 @@ public class VaultQueueWaitForJobTests : IDisposable
     public async Task WaitForJobAsync_ResolvesOnCancel()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash4", Path.Combine(_testDir, "d.txt"));
+        var job = await queue.EnqueueMemorizeAsync("hash4", Path.Combine(_testDir, "d.txt"), TestContext.Current.CancellationToken);
 
-        var waitTask = queue.WaitForJobAsync(job.Id);
-        (await queue.CancelAsync(job.Id)).Should().BeTrue();
+        var waitTask = queue.WaitForJobAsync(job.Id, TestContext.Current.CancellationToken);
+        (await queue.CancelAsync(job.Id, TestContext.Current.CancellationToken)).Should().BeTrue();
 
-        var terminal = await waitTask.WaitAsync(TimeSpan.FromSeconds(2));
+        var terminal = await waitTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         terminal.Status.Should().Be(VaultJobStatus.Cancelled);
     }
 
@@ -111,8 +111,8 @@ public class VaultQueueWaitForJobTests : IDisposable
     public async Task WaitForJobAsync_HonorsCancellation()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash5", Path.Combine(_testDir, "e.txt"));
-        await queue.DequeueAsync();
+        var job = await queue.EnqueueMemorizeAsync("hash5", Path.Combine(_testDir, "e.txt"), TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
 
         using var cts = new CancellationTokenSource();
         var waitTask = queue.WaitForJobAsync(job.Id, cts.Token);

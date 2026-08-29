@@ -155,13 +155,13 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
             "contract.txt",
             "The client pays a retainer each month. Either party may terminate with notice.");
 
-        var first = await pipeline.MemorizeAsync(entry, Options());
+        var first = await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         first.Success.Should().BeTrue();
         var chunkCount = _vectorRows.Count;
         chunkCount.Should().BeGreaterThan(0);
 
-        await pipeline.MemorizeAsync(entry, Options());
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         _vectorRows.Should().HaveCount(chunkCount, "a third memorize replaces the rows rather than adding a third copy");
         _vectorRows.Select(c => c.ChunkIndex).Should().OnlyHaveUniqueItems();
@@ -175,13 +175,11 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
         var pipeline = CreatePipeline();
         var entry = await CreateEntryAsync("invoice.txt", "Consulting hours billed for the quarter.");
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         var afterFirst = _vectorRows.Count;
 
-        await File.WriteAllTextAsync(
-            entry.SourcePath,
-            "Consulting hours billed for the quarter. A revision line changes the content hash.");
-        await pipeline.MemorizeAsync(entry, Options());
+        await File.WriteAllTextAsync(entry.SourcePath, "Consulting hours billed for the quarter. A revision line changes the content hash.", TestContext.Current.CancellationToken);
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         _vectorRows.Select(c => c.ChunkIndex).Should().OnlyHaveUniqueItems();
         _vectorRows.Should().HaveCountGreaterThanOrEqualTo(afterFirst);
@@ -197,11 +195,11 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
         var pipeline = CreatePipeline();
         var entry = await CreateEntryAsync("notes.txt", "Rooms were measured before the tenant moved in.");
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         _vectorRows.Should().NotBeEmpty();
 
-        await File.WriteAllTextAsync(entry.SourcePath, string.Empty);
-        var result = await pipeline.MemorizeAsync(entry, Options());
+        await File.WriteAllTextAsync(entry.SourcePath, string.Empty, TestContext.Current.CancellationToken);
+        var result = await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(0);
@@ -214,11 +212,11 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
         var pipeline = CreatePipeline(CreateKeywordIndex());
         var entry = await CreateEntryAsync("policy.txt", "Requests are reviewed within five business days.");
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         var chunkCount = _keywordRows.Count;
         chunkCount.Should().BeGreaterThan(0);
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         _keywordRows.Should().HaveCount(chunkCount);
         _keywordRows.Select(c => c.ChunkIndex).Should().OnlyHaveUniqueItems();
@@ -232,10 +230,10 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
         var pipeline = CreatePipeline();
         var entry = await CreateEntryAsync("handbook.txt", "Expenses are reimbursed at cost with receipts.");
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         var chunkCount = _vectorRows.Count;
 
-        var refreshed = await pipeline.RefreshAsync(entry, Options());
+        var refreshed = await pipeline.RefreshAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         refreshed.Success.Should().BeTrue();
         _vectorRows.Should().HaveCount(chunkCount);

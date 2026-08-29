@@ -173,7 +173,7 @@ public sealed class VaultFactoryTests : IDisposable
 
         factory.GetOrCreate(TenantId);
         var pipeline = (VaultPipeline)factory.GetContext(TenantId)!.Pipeline;
-        await pipeline.SearchAsync("query", strategy: VaultSearchStrategy.Hybrid);
+        await pipeline.SearchAsync("query", strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
 
         await hybrid.Received(1).SearchAsync(
             "query", Arg.Any<FluxIndex.Core.Domain.Models.HybridSearchOptions>(), Arg.Any<CancellationToken>());
@@ -191,7 +191,7 @@ public sealed class VaultFactoryTests : IDisposable
             _fileWatcher);
 
         var vault = factory.GetOrCreate(TenantId);
-        var status = await vault.StatusAsync();
+        var status = await vault.StatusAsync(TestContext.Current.CancellationToken);
 
         status.Should().NotBeNull();
     }

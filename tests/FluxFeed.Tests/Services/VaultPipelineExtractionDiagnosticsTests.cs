@@ -84,7 +84,7 @@ public class VaultPipelineExtractionDiagnosticsTests : IDisposable
         }));
 
         // Act
-        var result = await pipeline.MemorizeAsync(entry);
+        var result = await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         // Assert — user-visible outcome: the consumer can tell "scanned, needs OCR" from "empty file".
         result.Success.Should().BeTrue();
@@ -106,7 +106,7 @@ public class VaultPipelineExtractionDiagnosticsTests : IDisposable
         var entry = VaultEntry.Create(sourcePath, _vaultDir);
         var pipeline = CreatePipeline(new StubExtractor(new ExtractionResult { Content = "hello world" }));
 
-        await pipeline.MemorizeAsync(entry);
+        await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         var reloaded = VaultEntry.Load(entry.EntryPath, _vaultDir);
         reloaded!.ExtractionHints.Should().BeNull();
@@ -119,18 +119,18 @@ public class VaultPipelineExtractionDiagnosticsTests : IDisposable
         // The source is replaced by a text-bearing revision: the old "no_text_layer" must not linger.
         var sourcePath = CreateSourceFile("replaced.pdf");
         var entry = VaultEntry.Create(sourcePath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         await CreatePipeline(new StubExtractor(new ExtractionResult
         {
             Content = string.Empty,
             Hints = new Dictionary<string, string> { ["extraction_failure_reason"] = "no_text_layer" }
-        })).ExtractAsync(entry);
+        })).ExtractAsync(entry, TestContext.Current.CancellationToken);
 
         entry.ExtractionHints.Should().NotBeNull();
 
         await CreatePipeline(new StubExtractor(new ExtractionResult { Content = "now has text" }))
-            .ExtractAsync(entry);
+            .ExtractAsync(entry, TestContext.Current.CancellationToken);
 
         entry.ExtractionHints.Should().BeNull();
         VaultEntry.Load(entry.EntryPath, _vaultDir)!.ExtractionHints.Should().BeNull();

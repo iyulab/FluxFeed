@@ -45,12 +45,12 @@ public class VaultQueueStatisticsTests : IDisposable
     public async Task GetStatisticsAsync_ReportsLastProcessedAtAndAverageTime_ForCompletedJobs()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash1", Path.Combine(_testDir, "a.txt"));
-        await queue.DequeueAsync();
-        await Task.Delay(20); // ensure a measurable, non-zero processing duration
-        await queue.CompleteAsync(job.Id);
+        var job = await queue.EnqueueMemorizeAsync("hash1", Path.Combine(_testDir, "a.txt"), TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(20, TestContext.Current.CancellationToken); // ensure a measurable, non-zero processing duration
+        await queue.CompleteAsync(job.Id, TestContext.Current.CancellationToken);
 
-        var stats = await queue.GetStatisticsAsync();
+        var stats = await queue.GetStatisticsAsync(TestContext.Current.CancellationToken);
 
         stats.CompletedCount.Should().Be(1);
         stats.LastProcessedAt.Should().NotBeNull();
@@ -65,14 +65,14 @@ public class VaultQueueStatisticsTests : IDisposable
         // same vault directory — the DB row is the source of truth, not in-memory state.
         using (var writer = CreateService())
         {
-            var enqueued = await writer.EnqueueMemorizeAsync("hash2", Path.Combine(_testDir, "b.txt"));
-            await writer.DequeueAsync();
-            await Task.Delay(20);
-            await writer.CompleteAsync(enqueued.Id);
+            var enqueued = await writer.EnqueueMemorizeAsync("hash2", Path.Combine(_testDir, "b.txt"), TestContext.Current.CancellationToken);
+            await writer.DequeueAsync(TestContext.Current.CancellationToken);
+            await Task.Delay(20, TestContext.Current.CancellationToken);
+            await writer.CompleteAsync(enqueued.Id, TestContext.Current.CancellationToken);
         }
 
         using var reader = CreateService();
-        var stats = await reader.GetStatisticsAsync();
+        var stats = await reader.GetStatisticsAsync(TestContext.Current.CancellationToken);
 
         stats.CompletedCount.Should().Be(1);
         stats.LastProcessedAt.Should().NotBeNull();
@@ -83,9 +83,9 @@ public class VaultQueueStatisticsTests : IDisposable
     public async Task GetStatisticsAsync_WithNoCompletedJobs_ReturnsZeroAndNull()
     {
         using var queue = CreateService();
-        await queue.EnqueueMemorizeAsync("hash3", Path.Combine(_testDir, "c.txt"));
+        await queue.EnqueueMemorizeAsync("hash3", Path.Combine(_testDir, "c.txt"), TestContext.Current.CancellationToken);
 
-        var stats = await queue.GetStatisticsAsync();
+        var stats = await queue.GetStatisticsAsync(TestContext.Current.CancellationToken);
 
         stats.CompletedCount.Should().Be(0);
         stats.LastProcessedAt.Should().BeNull();
@@ -96,20 +96,20 @@ public class VaultQueueStatisticsTests : IDisposable
     public async Task GetStatisticsAsync_LastProcessedAt_IsTheMostRecentCompletion()
     {
         using var queue = CreateService();
-        var first = await queue.EnqueueMemorizeAsync("hash4", Path.Combine(_testDir, "d.txt"));
-        await queue.DequeueAsync();
-        await queue.CompleteAsync(first.Id);
+        var first = await queue.EnqueueMemorizeAsync("hash4", Path.Combine(_testDir, "d.txt"), TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
+        await queue.CompleteAsync(first.Id, TestContext.Current.CancellationToken);
 
-        await Task.Delay(20);
+        await Task.Delay(20, TestContext.Current.CancellationToken);
 
-        var second = await queue.EnqueueMemorizeAsync("hash5", Path.Combine(_testDir, "e.txt"));
-        await queue.DequeueAsync();
-        await queue.CompleteAsync(second.Id);
+        var second = await queue.EnqueueMemorizeAsync("hash5", Path.Combine(_testDir, "e.txt"), TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
+        await queue.CompleteAsync(second.Id, TestContext.Current.CancellationToken);
 
-        var stats = await queue.GetStatisticsAsync();
+        var stats = await queue.GetStatisticsAsync(TestContext.Current.CancellationToken);
 
         stats.CompletedCount.Should().Be(2);
-        var secondJob = await queue.GetJobAsync(second.Id);
+        var secondJob = await queue.GetJobAsync(second.Id, TestContext.Current.CancellationToken);
         stats.LastProcessedAt.Should().Be(secondJob!.CompletedAt);
     }
 }

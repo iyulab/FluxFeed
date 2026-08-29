@@ -142,7 +142,7 @@ public sealed class VaultPipelineKeywordIndexTests : IDisposable
         // this stays a claim about RemoveAsync rather than about how the arrange step indexes.
         keyword.ClearReceivedCalls();
 
-        await pipeline.RemoveAsync(entry);
+        await pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken);
 
         await keyword.Received(1).DeleteByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>());
     }
@@ -156,7 +156,7 @@ public sealed class VaultPipelineKeywordIndexTests : IDisposable
         // See above: memorize deletes once as part of replacing the entry's rows.
         _vectorStore.ClearReceivedCalls();
 
-        await pipeline.RemoveAsync(entry);
+        await pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken);
 
         await _vectorStore.Received(1).DeleteByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>());
     }
@@ -172,10 +172,10 @@ public sealed class VaultPipelineKeywordIndexTests : IDisposable
         var keyword = CreateKeywordMock();
         var pipeline = CreatePipeline(keyword);
 
-        await pipeline.PurgeVectorsAsync("tenant-x");
+        await pipeline.PurgeVectorsAsync("tenant-x", TestContext.Current.CancellationToken);
 
-        await keyword.DidNotReceiveWithAnyArgs().DeleteByDocumentIdAsync(default!, default);
-        await keyword.DidNotReceiveWithAnyArgs().DeleteChunkAsync(default!, default);
-        await keyword.DidNotReceiveWithAnyArgs().ClearIndexAsync(default);
+        await keyword.DidNotReceiveWithAnyArgs().DeleteByDocumentIdAsync(default!, TestContext.Current.CancellationToken);
+        await keyword.DidNotReceiveWithAnyArgs().DeleteChunkAsync(default!, TestContext.Current.CancellationToken);
+        await keyword.DidNotReceiveWithAnyArgs().ClearIndexAsync(TestContext.Current.CancellationToken);
     }
 }

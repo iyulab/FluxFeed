@@ -90,7 +90,7 @@ public class VaultQueueCheckpointTests : IDisposable
         var dbPath = Path.Combine(_testDir, "queue.db");
         await using (var conn = new SqliteConnection($"Data Source={dbPath};Mode=ReadWriteCreate"))
         {
-            await conn.OpenAsync();
+            await conn.OpenAsync(TestContext.Current.CancellationToken);
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 CREATE TABLE vault_jobs (
@@ -112,7 +112,7 @@ public class VaultQueueCheckpointTests : IDisposable
                 """;
             cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
             cmd.Parameters.AddWithValue("@path", Path.Combine(_testDir, "legacy.txt"));
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         }
 
         // Construct VaultQueueService — its constructor runs the ALTER TABLE migration.

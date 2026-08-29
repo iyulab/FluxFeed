@@ -164,7 +164,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
             new ExtractionResult { Content = string.Empty, Images = [Image("img_000")] },
             enricher);
 
-        var result = await pipeline.MemorizeAsync(entry);
+        var result = await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(1);
@@ -188,14 +188,14 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
             new ExtractionResult { Content = "Quarterly report body.", Images = [Image("img_000")] },
             new RecordingEnricher(_ => "Bar chart of quarterly sales."));
 
-        var result = await pipeline.MemorizeAsync(entry);
+        var result = await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         result.ChunkCount.Should().Be(2);
         _capture.Chunks[0].Content.Should().Be("Quarterly report body.");
         _capture.Chunks[0].Metadata.Should().NotContainKey("image_id");
         _capture.Chunks[1].Metadata!["image_id"].Should().Be("img_000");
 
-        var refined = await File.ReadAllTextAsync(entry.RefinedMdPath);
+        var refined = await File.ReadAllTextAsync(entry.RefinedMdPath, TestContext.Current.CancellationToken);
         refined.Should().Be("Quarterly report body.");
         refined.Should().NotContain("img_000");
     }
@@ -210,12 +210,12 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
             new ExtractionResult { Content = "Quarterly report body.", Images = [Image("img_000")] },
             enricher: null);
 
-        var result = await pipeline.MemorizeAsync(entry);
+        var result = await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         result.ChunkCount.Should().Be(1);
         _capture.Chunks.Should().ContainSingle();
         _capture.Chunks[0].Metadata.Should().NotContainKey("image_id");
-        (await _storage.GetImageManifestAsync(entry)).Should().ContainSingle()
+        (await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken)).Should().ContainSingle()
             .Which.IsDescribed.Should().BeFalse();
     }
 
@@ -227,7 +227,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
             new ExtractionResult { Content = string.Empty, Images = [Image("img_000")] },
             enricher: null);
 
-        var result = await pipeline.MemorizeAsync(entry);
+        var result = await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(0);
@@ -243,8 +243,8 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         var enricher = new RecordingEnricher(_ => "A chart.");
         var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000")] };
 
-        await CreatePipeline(extraction, enricher).MemorizeAsync(entry);
-        await CreatePipeline(extraction, enricher).MemorizeAsync(entry);
+        await CreatePipeline(extraction, enricher).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+        await CreatePipeline(extraction, enricher).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         enricher.Calls.Should().ContainSingle().Which.Should().Be("img_000");
     }
@@ -264,7 +264,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         var failFirst = new RecordingEnricher(request =>
             request.Image.Id == "img_000" ? throw new InvalidOperationException("vision model down") : "Second figure.");
 
-        var first = await CreatePipeline(extraction, failFirst).MemorizeAsync(entry);
+        var first = await CreatePipeline(extraction, failFirst).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         first.Success.Should().BeTrue();
         first.ChunkCount.Should().Be(2);   // 1 text + 1 described image
@@ -272,7 +272,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
             .Which.Metadata!["image_id"].Should().Be("img_001");
 
         var succeedAll = new RecordingEnricher(_ => "First figure.");
-        var second = await CreatePipeline(extraction, succeedAll).MemorizeAsync(entry);
+        var second = await CreatePipeline(extraction, succeedAll).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         // Only the image that failed is offered again.
         succeedAll.Calls.Should().ContainSingle().Which.Should().Be("img_000");
@@ -286,14 +286,14 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000")] };
 
         var declines = new RecordingEnricher(_ => null);
-        var result = await CreatePipeline(extraction, declines).MemorizeAsync(entry);
+        var result = await CreatePipeline(extraction, declines).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(1);  // text only
-        (await _storage.GetImageManifestAsync(entry))[0].IsDescribed.Should().BeFalse();
+        (await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken))[0].IsDescribed.Should().BeFalse();
 
         var succeeds = new RecordingEnricher(_ => "A chart.");
-        await CreatePipeline(extraction, succeeds).MemorizeAsync(entry);
+        await CreatePipeline(extraction, succeeds).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
         succeeds.Calls.Should().ContainSingle();
     }
 
@@ -308,16 +308,16 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
 
         // Three separate pipeline instances over the same on-disk storage simulate three
         // process-lifetimes worth of retry, ceiling = 2.
-        await CreatePipeline(extraction, alwaysFails, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry);
-        await CreatePipeline(extraction, alwaysFails, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry);
+        await CreatePipeline(extraction, alwaysFails, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+        await CreatePipeline(extraction, alwaysFails, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
         alwaysFails.Calls.Should().HaveCount(2, "both attempts up to the ceiling must still be offered");
 
         var thirdRunEnricher = new RecordingEnricher(_ => throw new InvalidOperationException("corrupt image"));
-        await CreatePipeline(extraction, thirdRunEnricher, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry);
+        await CreatePipeline(extraction, thirdRunEnricher, maxImageEnrichmentAttempts: 2).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         thirdRunEnricher.Calls.Should().BeEmpty("the image already reached the ceiling in an earlier process lifetime");
 
-        var manifest = await _storage.GetImageManifestAsync(entry);
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
         var failure = manifest.Should().ContainSingle().Subject.LastEnrichmentFailure;
         failure.Should().NotBeNull();
         failure!.IsPermanent.Should().BeTrue();
@@ -332,12 +332,12 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000")] };
 
         await CreatePipeline(extraction, new RecordingEnricher(_ => throw new InvalidOperationException("transient")))
-            .MemorizeAsync(entry);
-        (await _storage.GetImageManifestAsync(entry))[0].LastEnrichmentFailure.Should().NotBeNull();
+            .MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+        (await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken))[0].LastEnrichmentFailure.Should().NotBeNull();
 
-        await CreatePipeline(extraction, new RecordingEnricher(_ => "A chart.")).MemorizeAsync(entry);
+        await CreatePipeline(extraction, new RecordingEnricher(_ => "A chart.")).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
-        var image = (await _storage.GetImageManifestAsync(entry))[0];
+        var image = (await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken))[0];
         image.IsDescribed.Should().BeTrue();
         image.LastEnrichmentFailure.Should().BeNull("a later success clears the stale failure history");
     }
@@ -350,10 +350,10 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         var entry = CreateEntry("figures.pdf");
         var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000")] };
 
-        await CreatePipeline(extraction, new RecordingEnricher(_ => null)).MemorizeAsync(entry);
+        await CreatePipeline(extraction, new RecordingEnricher(_ => null)).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         var succeeds = new RecordingEnricher(_ => "A chart.");
-        var refreshed = await CreatePipeline(extraction, succeeds).RefreshAsync(entry);
+        var refreshed = await CreatePipeline(extraction, succeeds).RefreshAsync(entry, ct: TestContext.Current.CancellationToken);
 
         succeeds.Calls.Should().ContainSingle();
         refreshed.ChunkCount.Should().Be(2);
@@ -367,7 +367,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         var enricher = new RecordingEnricher(_ => "A chart.");
         await CreatePipeline(
             new ExtractionResult { Content = "Quarterly body.", Images = [Image("img_000", altText: "sales chart")] },
-            enricher).MemorizeAsync(entry);
+            enricher).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         var request = enricher.Requests.Should().ContainSingle().Subject;
         request.SourcePath.Should().EndWith("report.docx");
@@ -384,7 +384,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         var enricher = new RecordingEnricher(_ => "A scanned form.");
         await CreatePipeline(
             new ExtractionResult { Content = string.Empty, Images = [Image("img_000")] },
-            enricher).MemorizeAsync(entry);
+            enricher).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
         enricher.Requests.Should().ContainSingle().Which.DocumentText.Should().BeNull();
     }
@@ -407,7 +407,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
 
         var result = await CreatePipeline(
             new ExtractionResult { Content = string.Empty, Images = [Image("img_018")] },
-            enricher).MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 512 });
+            enricher).MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 512 }, TestContext.Current.CancellationToken);
 
         result.Success.Should().BeTrue();
         runaway.Length.Should().BeGreaterThan(512, "the fixture must exceed the bound to be meaningful");
@@ -436,7 +436,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
 
         await CreatePipeline(
             new ExtractionResult { Content = string.Empty, Images = [Image("img_000")] },
-            enricher).MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 512 });
+            enricher).MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 512 }, TestContext.Current.CancellationToken);
 
         _capture.Chunks.Should().ContainSingle()
             .Which.Content.Should().Be("Monthly revenue trend chart, peaking in March.");

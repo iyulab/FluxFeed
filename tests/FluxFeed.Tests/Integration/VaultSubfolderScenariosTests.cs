@@ -11,7 +11,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
-using Xunit.Abstractions;
 using MsOptions = Microsoft.Extensions.Options.Options;
 
 namespace FluxFeed.Tests.Integration;
@@ -134,8 +133,8 @@ public class VaultSubfolderScenariosTests : IDisposable
         foreach (var path in new[] { mainA, mainB, subC, subD, otherE })
         {
             var entry = VaultEntry.Create(path, _vaultDir);
-            await _storage.InitializeEntryAsync(entry, default);
-            await _pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 200 });
+            await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+            await _pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 200 }, TestContext.Current.CancellationToken);
             entries.Add(entry);
             _output.WriteLine($"Memorized: {Path.GetRelativePath(_testDir, path)} -> {entry.ChunkCount} chunks");
         }
@@ -157,7 +156,7 @@ public class VaultSubfolderScenariosTests : IDisposable
 
         // Act - Search with folder scope
         _output.WriteLine("Test: Search scope = 'main-folder/' (should search all files in main-folder)");
-        var mainFolderResult = await _vault.SearchAsync("learning", VaultSearchOptions.ForFolder(Path.Combine(_testDir, "main-folder")));
+        var mainFolderResult = await _vault.SearchAsync("learning", VaultSearchOptions.ForFolder(Path.Combine(_testDir, "main-folder")), TestContext.Current.CancellationToken);
 
         _output.WriteLine($"  Query: 'learning'");
         _output.WriteLine($"  Documents searched: {mainFolderResult.DocumentsSearched}");
@@ -183,7 +182,7 @@ public class VaultSubfolderScenariosTests : IDisposable
 
         // Act - Search with subfolder scope
         _output.WriteLine("Test: Search scope = 'main-folder/sub-folder/' (should search only sub-folder files)");
-        var subFolderResult = await _vault.SearchAsync("learning", VaultSearchOptions.ForFolder(Path.Combine(_testDir, "main-folder", "sub-folder")));
+        var subFolderResult = await _vault.SearchAsync("learning", VaultSearchOptions.ForFolder(Path.Combine(_testDir, "main-folder", "sub-folder")), TestContext.Current.CancellationToken);
 
         _output.WriteLine($"  Query: 'learning'");
         _output.WriteLine($"  Documents searched: {subFolderResult.DocumentsSearched}");
@@ -210,7 +209,7 @@ public class VaultSubfolderScenariosTests : IDisposable
         var targetFile = Path.Combine(_testDir, "main-folder", "a.pdf");
         _output.WriteLine($"Test: Search scope = '{Path.GetRelativePath(_testDir, targetFile)}'");
 
-        var singleFileResult = await _vault.SearchAsync("artificial", VaultSearchOptions.ForFile(targetFile));
+        var singleFileResult = await _vault.SearchAsync("artificial", VaultSearchOptions.ForFile(targetFile), TestContext.Current.CancellationToken);
 
         _output.WriteLine($"  Query: 'artificial'");
         _output.WriteLine($"  Documents searched: {singleFileResult.DocumentsSearched}");
@@ -243,7 +242,7 @@ public class VaultSubfolderScenariosTests : IDisposable
         {
             PathScope = [file1, folder1],
             TopK = 10
-        });
+        }, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"  Query: 'learning'");
         _output.WriteLine($"  Documents searched: {multiPathResult.DocumentsSearched}");
@@ -265,22 +264,22 @@ public class VaultSubfolderScenariosTests : IDisposable
         // Arrange - Create and memorize a file
         var filePath = CreateDocument("main-folder/changeable.txt", "Original content about machine learning basics.");
         var entry = VaultEntry.Create(filePath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
-        await _pipeline.MemorizeAsync(entry, null);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+        await _pipeline.MemorizeAsync(entry, null, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"Original file memorized: {entry.ChunkCount} chunks");
         var originalChunkCount = _vectorStore.Count;
 
         // Search for original content
-        var searchBefore = await _vault.SearchAsync("machine learning", VaultSearchOptions.ForFile(filePath));
+        var searchBefore = await _vault.SearchAsync("machine learning", VaultSearchOptions.ForFile(filePath), TestContext.Current.CancellationToken);
         _output.WriteLine($"Search 'machine learning' before change: {searchBefore.Items.Count} results");
 
         // Act - Modify the file
-        await File.WriteAllTextAsync(filePath, "Updated content about artificial intelligence and deep learning neural networks advanced concepts.");
+        await File.WriteAllTextAsync(filePath, "Updated content about artificial intelligence and deep learning neural networks advanced concepts.", TestContext.Current.CancellationToken);
         _output.WriteLine("\nFile content changed.");
 
         // Detect changes
-        var changes = await _vault.DetectChangesAsync(filePath);
+        var changes = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
         _output.WriteLine($"  Source changed: {changes.SourceChanged}");
         _output.WriteLine($"  Recommended action: {changes.RecommendedAction}");
 
@@ -289,15 +288,15 @@ public class VaultSubfolderScenariosTests : IDisposable
 
         // Rememorize
         entry = VaultEntry.LoadByHash(entry.FilepathHash, _vaultDir)!;
-        await _pipeline.RemoveAsync(entry, default);
+        await _pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken);
         entry.ResetToSource();
-        await _pipeline.MemorizeAsync(entry, null);
+        await _pipeline.MemorizeAsync(entry, null, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"\nRememorized: {entry.ChunkCount} chunks");
         _output.WriteLine($"Total chunks: {_vectorStore.Count}");
 
         // Search for new content
-        var searchAfter = await _vault.SearchAsync("artificial intelligence deep learning", VaultSearchOptions.ForFile(filePath));
+        var searchAfter = await _vault.SearchAsync("artificial intelligence deep learning", VaultSearchOptions.ForFile(filePath), TestContext.Current.CancellationToken);
         _output.WriteLine($"Search 'artificial intelligence deep learning' after change: {searchAfter.Items.Count} results");
 
         // Assert
@@ -317,19 +316,19 @@ public class VaultSubfolderScenariosTests : IDisposable
 
         // Get entry to remove
         var fileToRemove = Path.Combine(_testDir, "main-folder", "sub-folder", "c.pdf");
-        var entry = await _vault.GetAsync(fileToRemove);
+        var entry = await _vault.GetAsync(fileToRemove, TestContext.Current.CancellationToken);
         entry.Should().NotBeNull();
 
         // Act - Remove the file
         _output.WriteLine($"\nRemoving: {Path.GetRelativePath(_testDir, fileToRemove)}");
-        await _pipeline.RemoveAsync(entry!, default);
-        await _storage.DeleteEntryStorageAsync(entry!, default);
+        await _pipeline.RemoveAsync(entry!, TestContext.Current.CancellationToken);
+        await _storage.DeleteEntryStorageAsync(entry!, TestContext.Current.CancellationToken);
 
         var afterCount = _vectorStore.Count;
         _output.WriteLine($"Chunk count after removal: {afterCount}");
 
         // Search should no longer find this file
-        var searchResult = await _vault.SearchAsync("deep learning", VaultSearchOptions.ForFolder(Path.Combine(_testDir, "main-folder", "sub-folder")));
+        var searchResult = await _vault.SearchAsync("deep learning", VaultSearchOptions.ForFolder(Path.Combine(_testDir, "main-folder", "sub-folder")), TestContext.Current.CancellationToken);
         _output.WriteLine($"\nSearch 'deep learning' in sub-folder:");
         _output.WriteLine($"  Documents searched: {searchResult.DocumentsSearched}");
         _output.WriteLine($"  Results: {searchResult.Items.Count}");
@@ -352,7 +351,7 @@ public class VaultSubfolderScenariosTests : IDisposable
         await SetupTestFilesAsync();
 
         // Act - Search with no scope (all files)
-        var allResult = await _vault.SearchAsync("document", VaultSearchOptions.All(20));
+        var allResult = await _vault.SearchAsync("document", VaultSearchOptions.All(20), TestContext.Current.CancellationToken);
 
         _output.WriteLine($"Query: 'document'");
         _output.WriteLine($"Documents searched: {allResult.DocumentsSearched}");

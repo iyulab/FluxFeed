@@ -139,14 +139,14 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
             "lease.txt",
             "The tenant pays rent monthly. The landlord maintains the roof and the heating.");
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         var indexed = _vectorRows.Select(c => c.Id).ToList();
         indexed.Should().NotBeEmpty("the precondition of this test is a document that IS indexed");
 
         // Re-index the same document; the provider now rejects the batch.
         _failEmbedding = true;
-        await File.WriteAllTextAsync(entry.SourcePath, "The tenant pays rent monthly. A clause was added.");
-        var result = await pipeline.MemorizeAsync(entry, Options());
+        await File.WriteAllTextAsync(entry.SourcePath, "The tenant pays rent monthly. A clause was added.", TestContext.Current.CancellationToken);
+        var result = await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         result.Success.Should().BeFalse("the embedding failure must still be reported as a failure");
 
@@ -163,12 +163,12 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
         var pipeline = CreatePipeline();
         var entry = await CreateEntryAsync("policy.txt", "Claims are settled within thirty days.");
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         var before = _vectorRows.Count;
 
         _failEmbedding = true;
-        await File.WriteAllTextAsync(entry.SourcePath, "Claims are settled within sixty days instead.");
-        await pipeline.MemorizeAsync(entry, Options());
+        await File.WriteAllTextAsync(entry.SourcePath, "Claims are settled within sixty days instead.", TestContext.Current.CancellationToken);
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         _vectorRows.Should().HaveCount(before, "no partial generation may survive alongside the previous one");
         _vectorRows.Should().OnlyContain(
@@ -184,15 +184,15 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
         var pipeline = CreatePipeline();
         var entry = await CreateEntryAsync("permit.txt", "Work may proceed between eight and six.");
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         var firstGeneration = _vectorRows.Count;
 
         _failEmbedding = true;
-        await File.WriteAllTextAsync(entry.SourcePath, "Work may proceed between nine and five.");
-        await pipeline.MemorizeAsync(entry, Options());
+        await File.WriteAllTextAsync(entry.SourcePath, "Work may proceed between nine and five.", TestContext.Current.CancellationToken);
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         _failEmbedding = false;
-        var retry = await pipeline.MemorizeAsync(entry, Options());
+        var retry = await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         retry.Success.Should().BeTrue();
         _vectorRows.Should().HaveCount(firstGeneration, "the retry replaces the old generation rather than adding to it");
@@ -219,7 +219,7 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
             CheckpointCallback = (i, _) => { checkpoints.Add(i); return Task.CompletedTask; }
         };
 
-        await pipeline.MemorizeAsync(entry, full);
+        await pipeline.MemorizeAsync(entry, full, TestContext.Current.CancellationToken);
         var committed = _vectorRows.Count;
         committed.Should().BeGreaterThan(1, "the document must chunk into several pieces for a resume to be meaningful");
 
@@ -233,7 +233,7 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
             CheckpointCallback = (_, _) => Task.CompletedTask
         };
 
-        var result = await pipeline.MemorizeAsync(entry, resumed);
+        var result = await pipeline.MemorizeAsync(entry, resumed, TestContext.Current.CancellationToken);
 
         result.Success.Should().BeTrue();
         _vectorRows.Should().HaveCount(
@@ -254,12 +254,12 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
             "report.txt",
             "First paragraph of the report.\n\nSecond paragraph with more detail.");
 
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
         var indexedChunks = _vectorRows.Count;
 
         _failEmbedding = true;
-        await File.WriteAllTextAsync(entry.SourcePath, "First paragraph revised.\n\nSecond paragraph revised.");
-        var result = await pipeline.MemorizeAsync(entry, Options());
+        await File.WriteAllTextAsync(entry.SourcePath, "First paragraph revised.\n\nSecond paragraph revised.", TestContext.Current.CancellationToken);
+        var result = await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         result.Success.Should().BeFalse();
         result.Failure.Should().NotBeNull("a failure with no structured detail forces prose parsing");
@@ -281,10 +281,10 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
         var entry = await CreateEntryAsync("clean.txt", "Nothing goes wrong here.");
 
         _failEmbedding = true;
-        await pipeline.MemorizeAsync(entry, Options());
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         _failEmbedding = false;
-        var second = await pipeline.MemorizeAsync(entry, Options());
+        var second = await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
 
         second.Success.Should().BeTrue();
         second.Failure.Should().BeNull();

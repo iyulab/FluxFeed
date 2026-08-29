@@ -27,15 +27,15 @@ public class GitServiceTests : IDisposable
     [Fact]
     public async Task ShowFileAsync_FileTrackedAtCommit_ReturnsThatCommitsContent()
     {
-        await _git.InitAsync(_repoDir);
-        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1 content");
-        var firstCommit = await _git.CommitAsync(_repoDir, "v1");
+        await _git.InitAsync(_repoDir, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1 content", TestContext.Current.CancellationToken);
+        var firstCommit = await _git.CommitAsync(_repoDir, "v1", TestContext.Current.CancellationToken);
         firstCommit.Should().NotBeNull();
 
-        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v2 content");
-        await _git.CommitAsync(_repoDir, "v2");
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v2 content", TestContext.Current.CancellationToken);
+        await _git.CommitAsync(_repoDir, "v2", TestContext.Current.CancellationToken);
 
-        var atFirstCommit = await _git.ShowFileAsync(_repoDir, firstCommit!, "refined.md");
+        var atFirstCommit = await _git.ShowFileAsync(_repoDir, firstCommit!, "refined.md", TestContext.Current.CancellationToken);
 
         atFirstCommit.Should().Be("v1 content");
     }
@@ -43,16 +43,16 @@ public class GitServiceTests : IDisposable
     [Fact]
     public async Task ShowFileAsync_FileNotYetPresentAtCommit_ReturnsNull()
     {
-        await _git.InitAsync(_repoDir);
-        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1 content");
-        var firstCommit = await _git.CommitAsync(_repoDir, "v1");
+        await _git.InitAsync(_repoDir, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1 content", TestContext.Current.CancellationToken);
+        var firstCommit = await _git.CommitAsync(_repoDir, "v1", TestContext.Current.CancellationToken);
         firstCommit.Should().NotBeNull();
 
         // append-text.md doesn't exist until a later commit
-        await File.WriteAllTextAsync(Path.Combine(_repoDir, "append-text.md"), "notes");
-        await _git.CommitAsync(_repoDir, "add notes");
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, "append-text.md"), "notes", TestContext.Current.CancellationToken);
+        await _git.CommitAsync(_repoDir, "add notes", TestContext.Current.CancellationToken);
 
-        var atFirstCommit = await _git.ShowFileAsync(_repoDir, firstCommit!, "append-text.md");
+        var atFirstCommit = await _git.ShowFileAsync(_repoDir, firstCommit!, "append-text.md", TestContext.Current.CancellationToken);
 
         atFirstCommit.Should().BeNull();
     }
@@ -60,11 +60,11 @@ public class GitServiceTests : IDisposable
     [Fact]
     public async Task ShowFileAsync_UnknownCommit_ReturnsNull()
     {
-        await _git.InitAsync(_repoDir);
-        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1 content");
-        await _git.CommitAsync(_repoDir, "v1");
+        await _git.InitAsync(_repoDir, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1 content", TestContext.Current.CancellationToken);
+        await _git.CommitAsync(_repoDir, "v1", TestContext.Current.CancellationToken);
 
-        var result = await _git.ShowFileAsync(_repoDir, "0000000000000000000000000000000000dead", "refined.md");
+        var result = await _git.ShowFileAsync(_repoDir, "0000000000000000000000000000000000dead", "refined.md", TestContext.Current.CancellationToken);
 
         result.Should().BeNull();
     }

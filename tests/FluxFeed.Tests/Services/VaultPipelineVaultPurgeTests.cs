@@ -89,11 +89,11 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
         var pipeline = CreatePipeline(TenantId);
 
         var docPath = Path.Combine(_testDir, "doc.txt");
-        await File.WriteAllTextAsync(docPath, "Alice works at Acme Corp. Bob manages the project in Seoul.");
+        await File.WriteAllTextAsync(docPath, "Alice works at Acme Corp. Bob manages the project in Seoul.", TestContext.Current.CancellationToken);
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
-        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 200 });
+        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 200 }, TestContext.Current.CancellationToken);
 
         result.Success.Should().BeTrue();
         await _vectorStore.Received().StoreBatchAsync(
@@ -109,7 +109,7 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
     {
         var pipeline = CreatePipeline(TenantId);
 
-        await pipeline.PurgeVectorsAsync(TenantId);
+        await pipeline.PurgeVectorsAsync(TenantId, TestContext.Current.CancellationToken);
 
         await _vectorStore.Received(1).DeleteByFilterAsync(
             Arg.Is<Dictionary<string, object>>(f =>
@@ -133,7 +133,7 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
 
         var pipeline = CreatePipeline(TenantId, keywordSearch);
 
-        await pipeline.PurgeVectorsAsync(TenantId);
+        await pipeline.PurgeVectorsAsync(TenantId, TestContext.Current.CancellationToken);
 
         await keywordSearch.Received(1).DeleteByFilterAsync(
             Arg.Is<IReadOnlyDictionary<string, object>>(f =>
@@ -157,7 +157,7 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
                 Arg.Any<IReadOnlyDictionary<string, object>>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(3));
 
-        var removed = await CreatePipeline(TenantId, keywordSearch).PurgeVectorsAsync(TenantId);
+        var removed = await CreatePipeline(TenantId, keywordSearch).PurgeVectorsAsync(TenantId, TestContext.Current.CancellationToken);
 
         removed.Should().Be(3);
     }
@@ -167,7 +167,7 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
     {
         var pipeline = CreatePipeline(TenantId);
 
-        await pipeline.PurgeVectorsAsync(TenantId);
+        await pipeline.PurgeVectorsAsync(TenantId, TestContext.Current.CancellationToken);
 
         await _vectorStore.Received(1).DeleteByFilterAsync(
             Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>());

@@ -94,9 +94,9 @@ public sealed class VaultPipelineRagSecurityTests : IDisposable
         var pipeline = CreatePipeline(ragSecurityPipeline: null);
         var docPath = CreateDocument(PoisonedSentence);
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
-        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 0, SkipCommit = true });
+        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 0, SkipCommit = true }, TestContext.Current.CancellationToken);
 
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(1);
@@ -111,9 +111,9 @@ public sealed class VaultPipelineRagSecurityTests : IDisposable
         var pipeline = CreatePipeline(ragSecurityPipeline: new IndirectInjectionDetector());
         var docPath = CreateDocument(PoisonedSentence);
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
-        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 0, SkipCommit = true });
+        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 0, SkipCommit = true }, TestContext.Current.CancellationToken);
 
         // The chunk was blocked before indexing — 0 chunks written, and StoreBatchAsync is never
         // even reached with the poisoned content (the empty-batch path in ChunkAndIndexAsync
@@ -131,9 +131,9 @@ public sealed class VaultPipelineRagSecurityTests : IDisposable
         var pipeline = CreatePipeline(ragSecurityPipeline: new IndirectInjectionDetector());
         var docPath = CreateDocument(CleanSentence);
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
-        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 0, SkipCommit = true });
+        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 0, SkipCommit = true }, TestContext.Current.CancellationToken);
 
         // Confirms the pipeline isn't a blanket filter — genuinely clean content still indexes.
         result.Success.Should().BeTrue();

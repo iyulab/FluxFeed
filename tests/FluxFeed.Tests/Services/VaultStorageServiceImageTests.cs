@@ -55,7 +55,7 @@ public class VaultStorageServiceImageTests : IDisposable
         // Arrange
         var docPath = CreateDocument("test.txt", "Test content");
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         var testImageData = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG header
         var images = new List<ImageArtifact>
@@ -66,7 +66,7 @@ public class VaultStorageServiceImageTests : IDisposable
         };
 
         // Act
-        await _storage.StoreImagesAsync(entry, images, default);
+        await _storage.StoreImagesAsync(entry, images, TestContext.Current.CancellationToken);
 
         // Assert - verify file names match IDs
         var imagesDir = entry.ImagesPath;
@@ -80,7 +80,7 @@ public class VaultStorageServiceImageTests : IDisposable
         var manifestPath = entry.ImagesManifestPath;
         File.Exists(manifestPath).Should().BeTrue();
 
-        var manifestJson = await File.ReadAllTextAsync(manifestPath);
+        var manifestJson = await File.ReadAllTextAsync(manifestPath, TestContext.Current.CancellationToken);
         var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
         var manifest = JsonSerializer.Deserialize<List<ImageManifestEntry>>(manifestJson, jsonOptions);
 
@@ -100,7 +100,7 @@ public class VaultStorageServiceImageTests : IDisposable
         // Arrange - simulate FileFlux returning custom IDs
         var docPath = CreateDocument("test2.txt", "Test content for custom IDs");
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         var testImageData = new byte[] { 0x89, 0x50, 0x4E, 0x47 };
         var images = new List<ImageArtifact>
@@ -110,7 +110,7 @@ public class VaultStorageServiceImageTests : IDisposable
         };
 
         // Act
-        await _storage.StoreImagesAsync(entry, images, default);
+        await _storage.StoreImagesAsync(entry, images, TestContext.Current.CancellationToken);
 
         // Assert - verify images directory exists and contains files
         var imagesDir = entry.ImagesPath;
@@ -130,7 +130,7 @@ public class VaultStorageServiceImageTests : IDisposable
         // Arrange
         var docPath = CreateDocument("test.txt", "Test content");
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         var testImageData = new byte[] { 0x89, 0x50, 0x4E, 0x47 };
         var images = new List<ImageArtifact>
@@ -138,10 +138,10 @@ public class VaultStorageServiceImageTests : IDisposable
             new() { Id = "img_000", Data = testImageData, ContentType = "image/png" },
             new() { Id = "img_001", Data = testImageData, ContentType = "image/jpeg" }
         };
-        await _storage.StoreImagesAsync(entry, images, default);
+        await _storage.StoreImagesAsync(entry, images, TestContext.Current.CancellationToken);
 
         // Act
-        var retrieved = await _storage.GetImagesAsync(entry, default);
+        var retrieved = await _storage.GetImagesAsync(entry, TestContext.Current.CancellationToken);
 
         // Assert
         retrieved.Should().HaveCount(2);
@@ -155,7 +155,7 @@ public class VaultStorageServiceImageTests : IDisposable
         // Arrange - This test verifies the fix for the index mismatch bug
         var docPath = CreateDocument("test.txt", "Test content");
         var entry = VaultEntry.Create(docPath, _vaultDir);
-        await _storage.InitializeEntryAsync(entry, default);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
 
         var testImageData = new byte[] { 0x89, 0x50, 0x4E, 0x47 };
         var originalImages = new List<ImageArtifact>
@@ -166,8 +166,8 @@ public class VaultStorageServiceImageTests : IDisposable
         };
 
         // Act
-        await _storage.StoreImagesAsync(entry, originalImages, default);
-        var retrievedImages = await _storage.GetImagesAsync(entry, default);
+        await _storage.StoreImagesAsync(entry, originalImages, TestContext.Current.CancellationToken);
+        var retrievedImages = await _storage.GetImagesAsync(entry, TestContext.Current.CancellationToken);
 
         // Assert - IDs must match exactly (this was the bug: store used local index)
         for (int i = 0; i < originalImages.Count; i++)
@@ -186,13 +186,13 @@ public class VaultStorageServiceImageTests : IDisposable
         var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
         var image = new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" };
 
-        await _storage.StoreImagesAsync(entry, [image], default);
-        await _storage.SetImageDescriptionAsync(entry, "img_000", "A revenue chart.", default);
+        await _storage.StoreImagesAsync(entry, [image], TestContext.Current.CancellationToken);
+        await _storage.SetImageDescriptionAsync(entry, "img_000", "A revenue chart.", TestContext.Current.CancellationToken);
 
         // Same image comes back from a fresh extraction, with no description of its own.
-        await _storage.StoreImagesAsync(entry, [image], default);
+        await _storage.StoreImagesAsync(entry, [image], TestContext.Current.CancellationToken);
 
-        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
         manifest.Should().ContainSingle().Which.Description.Should().Be("A revenue chart.");
     }
 
@@ -203,14 +203,12 @@ public class VaultStorageServiceImageTests : IDisposable
         // about something that is no longer there, so it must not survive.
         var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
 
-        await _storage.StoreImagesAsync(entry,
-            [new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" }], default);
-        await _storage.SetImageDescriptionAsync(entry, "img_000", "A revenue chart.", default);
+        await _storage.StoreImagesAsync(entry, [new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" }], TestContext.Current.CancellationToken);
+        await _storage.SetImageDescriptionAsync(entry, "img_000", "A revenue chart.", TestContext.Current.CancellationToken);
 
-        await _storage.StoreImagesAsync(entry,
-            [new ImageArtifact { Id = "img_000", Data = [9, 9, 9, 9], ContentType = "image/png" }], default);
+        await _storage.StoreImagesAsync(entry, [new ImageArtifact { Id = "img_000", Data = [9, 9, 9, 9], ContentType = "image/png" }], TestContext.Current.CancellationToken);
 
-        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
         manifest.Should().ContainSingle().Which.IsDescribed.Should().BeFalse();
     }
 
@@ -224,13 +222,13 @@ public class VaultStorageServiceImageTests : IDisposable
         var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
         var image = new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" };
 
-        await _storage.StoreImagesAsync(entry, [image], default);
-        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "corrupt", attemptCount: 2, isPermanent: true, default);
+        await _storage.StoreImagesAsync(entry, [image], TestContext.Current.CancellationToken);
+        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "corrupt", attemptCount: 2, isPermanent: true, TestContext.Current.CancellationToken);
 
         // Same image comes back from a fresh extraction.
-        await _storage.StoreImagesAsync(entry, [image], default);
+        await _storage.StoreImagesAsync(entry, [image], TestContext.Current.CancellationToken);
 
-        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
         var failure = manifest.Should().ContainSingle().Subject.LastEnrichmentFailure;
         failure.Should().NotBeNull();
         failure!.AttemptCount.Should().Be(2);
@@ -244,14 +242,12 @@ public class VaultStorageServiceImageTests : IDisposable
         // so the new picture deserves a fresh set of attempts.
         var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
 
-        await _storage.StoreImagesAsync(entry,
-            [new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" }], default);
-        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "corrupt", attemptCount: 3, isPermanent: true, default);
+        await _storage.StoreImagesAsync(entry, [new ImageArtifact { Id = "img_000", Data = [1, 2, 3], ContentType = "image/png" }], TestContext.Current.CancellationToken);
+        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "corrupt", attemptCount: 3, isPermanent: true, TestContext.Current.CancellationToken);
 
-        await _storage.StoreImagesAsync(entry,
-            [new ImageArtifact { Id = "img_000", Data = [9, 9, 9, 9], ContentType = "image/png" }], default);
+        await _storage.StoreImagesAsync(entry, [new ImageArtifact { Id = "img_000", Data = [9, 9, 9, 9], ContentType = "image/png" }], TestContext.Current.CancellationToken);
 
-        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
         manifest.Should().ContainSingle().Which.LastEnrichmentFailure.Should().BeNull();
     }
 
@@ -259,13 +255,12 @@ public class VaultStorageServiceImageTests : IDisposable
     public async Task SetImageEnrichmentFailureAsync_SucceedingLater_ClearsTheFailureRecord()
     {
         var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
-        await _storage.StoreImagesAsync(entry,
-            [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], default);
+        await _storage.StoreImagesAsync(entry, [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], TestContext.Current.CancellationToken);
 
-        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "transient", attemptCount: 1, isPermanent: false, default);
-        await _storage.SetImageDescriptionAsync(entry, "img_000", "A chart.", default);
+        await _storage.SetImageEnrichmentFailureAsync(entry, "img_000", "transient", attemptCount: 1, isPermanent: false, TestContext.Current.CancellationToken);
+        await _storage.SetImageDescriptionAsync(entry, "img_000", "A chart.", TestContext.Current.CancellationToken);
 
-        var manifest = await _storage.GetImageManifestAsync(entry, default);
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
         manifest.Should().ContainSingle().Which.LastEnrichmentFailure.Should().BeNull();
     }
 
@@ -273,20 +268,18 @@ public class VaultStorageServiceImageTests : IDisposable
     public async Task SetImageEnrichmentFailureAsync_UnknownImage_ReturnsFalse()
     {
         var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
-        await _storage.StoreImagesAsync(entry,
-            [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], default);
+        await _storage.StoreImagesAsync(entry, [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], TestContext.Current.CancellationToken);
 
-        (await _storage.SetImageEnrichmentFailureAsync(entry, "img_999", "nope", 1, false, default)).Should().BeFalse();
+        (await _storage.SetImageEnrichmentFailureAsync(entry, "img_999", "nope", 1, false, TestContext.Current.CancellationToken)).Should().BeFalse();
     }
 
     [Fact]
     public async Task SetImageDescriptionAsync_UnknownImage_ReturnsFalse()
     {
         var entry = VaultEntry.Create(CreateDocument("doc.docx", "body"), _vaultDir);
-        await _storage.StoreImagesAsync(entry,
-            [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], default);
+        await _storage.StoreImagesAsync(entry, [new ImageArtifact { Id = "img_000", Data = [1], ContentType = "image/png" }], TestContext.Current.CancellationToken);
 
-        (await _storage.SetImageDescriptionAsync(entry, "img_999", "nope", default)).Should().BeFalse();
+        (await _storage.SetImageDescriptionAsync(entry, "img_999", "nope", TestContext.Current.CancellationToken)).Should().BeFalse();
     }
 
     [Fact]
@@ -294,7 +287,7 @@ public class VaultStorageServiceImageTests : IDisposable
     {
         var entry = VaultEntry.Create(CreateDocument("plain.txt", "body"), _vaultDir);
 
-        (await _storage.GetImageManifestAsync(entry, default)).Should().BeEmpty();
+        (await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken)).Should().BeEmpty();
     }
 
     private string CreateDocument(string fileName, string content)

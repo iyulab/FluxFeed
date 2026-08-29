@@ -93,7 +93,7 @@ public class VaultManagerTests : IDisposable
             .Returns(7);
         var vault = CreateVaultWithVaultId("tenant-x");
 
-        var deleted = await vault.PurgeAsync();
+        var deleted = await vault.PurgeAsync(TestContext.Current.CancellationToken);
 
         deleted.Should().Be(7);
         await _pipelineMock.Received(1).PurgeVectorsAsync("tenant-x", Arg.Any<CancellationToken>());
@@ -132,7 +132,7 @@ public class VaultManagerTests : IDisposable
         var filePath = CreateTestFile("test.txt", "Hello, World!");
 
         // Act
-        var result = await _vault.MemorizeAsync(filePath);
+        var result = await _vault.MemorizeAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         result.Should().NotBeNull();
@@ -151,7 +151,7 @@ public class VaultManagerTests : IDisposable
 
         // Act & Assert
         await Assert.ThrowsAsync<FileNotFoundException>(
-            () => _vault.MemorizeAsync(nonExistentPath));
+            () => _vault.MemorizeAsync(nonExistentPath, TestContext.Current.CancellationToken));
     }
 
     // === MU-2: terminal-await overload ===
@@ -179,7 +179,7 @@ public class VaultManagerTests : IDisposable
         _queueServiceMock.WaitForJobAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
             .Returns(MakeTerminalJob(VaultJobStatus.Completed));
 
-        var result = await _vault.MemorizeAsync(filePath, waitForCompletion: true);
+        var result = await _vault.MemorizeAsync(filePath, waitForCompletion: true, ct: TestContext.Current.CancellationToken);
 
         result.Should().NotBeNull();
         await _queueServiceMock.Received(1).EnqueueMemorizeAsync(
@@ -192,7 +192,7 @@ public class VaultManagerTests : IDisposable
     {
         var filePath = CreateTestFile("nowait.txt", "content");
 
-        await _vault.MemorizeAsync(filePath, waitForCompletion: false);
+        await _vault.MemorizeAsync(filePath, waitForCompletion: false, ct: TestContext.Current.CancellationToken);
 
         await _queueServiceMock.Received(1).EnqueueMemorizeAsync(
             Arg.Any<string>(), Path.GetFullPath(filePath), Arg.Any<CancellationToken>());
@@ -218,7 +218,7 @@ public class VaultManagerTests : IDisposable
         var filePath = CreateTestFile("test.txt", "Hello, World!");
 
         // Act
-        await _vault.MemorizeAsync(filePath);
+        await _vault.MemorizeAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         await _storageMock.Received(1).InitializeEntryAsync(
@@ -230,7 +230,7 @@ public class VaultManagerTests : IDisposable
     public async Task GetAsync_NonExistentEntry_ReturnsNull()
     {
         // Act
-        var result = await _vault.GetAsync(Path.Combine(_testDir, "nonexistent.txt"));
+        var result = await _vault.GetAsync(Path.Combine(_testDir, "nonexistent.txt"), TestContext.Current.CancellationToken);
 
         // Assert
         result.Should().BeNull();
@@ -244,7 +244,7 @@ public class VaultManagerTests : IDisposable
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _vault.RefreshAsync(filePath));
+            () => _vault.RefreshAsync(filePath, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -257,7 +257,7 @@ public class VaultManagerTests : IDisposable
         WriteRefinedContent(entry);
 
         // Act
-        var result = await _vault.RefreshAsync(filePath);
+        var result = await _vault.RefreshAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         result.Should().NotBeNull();
@@ -275,7 +275,7 @@ public class VaultManagerTests : IDisposable
         var createdEntry = CreateEntryWithMetadata(filePath);
 
         // Act
-        var retrieved = await _vault.GetAsync(filePath);
+        var retrieved = await _vault.GetAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         retrieved.Should().NotBeNull();
@@ -290,7 +290,7 @@ public class VaultManagerTests : IDisposable
         var createdEntry = CreateEntryWithMetadata(filePath);
 
         // Act
-        var retrieved = await _vault.GetByHashAsync(createdEntry.FilepathHash);
+        var retrieved = await _vault.GetByHashAsync(createdEntry.FilepathHash, TestContext.Current.CancellationToken);
 
         // Assert
         retrieved.Should().NotBeNull();
@@ -307,7 +307,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadata(file2);
 
         // Act
-        var entries = await _vault.ListAsync();
+        var entries = await _vault.ListAsync(ct: TestContext.Current.CancellationToken);
 
         // Assert
         entries.Should().HaveCount(2);
@@ -323,7 +323,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadata(file2);
 
         // Act
-        var status = await _vault.StatusAsync();
+        var status = await _vault.StatusAsync(TestContext.Current.CancellationToken);
 
         // Assert
         status.TotalEntries.Should().Be(2);
@@ -338,7 +338,7 @@ public class VaultManagerTests : IDisposable
         _gitServiceMock.DiffAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns("diff output");
 
         // Act
-        var diff = await _vault.DiffAsync(filePath);
+        var diff = await _vault.DiffAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         diff.Should().Be("diff output");
@@ -357,7 +357,7 @@ public class VaultManagerTests : IDisposable
         _gitServiceMock.LogAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns([]);
 
         // Act
-        var logs = await _vault.LogAsync(filePath);
+        var logs = await _vault.LogAsync(filePath, ct: TestContext.Current.CancellationToken);
 
         // Assert
         await _gitServiceMock.Received(1).LogAsync(
@@ -380,7 +380,7 @@ public class VaultManagerTests : IDisposable
             .Returns((string?)null);
 
         // Act
-        var content = await _vault.GetContentAtCommitAsync(filePath, "abc123");
+        var content = await _vault.GetContentAtCommitAsync(filePath, "abc123", TestContext.Current.CancellationToken);
 
         // Assert
         content.Should().Be("old refined content");
@@ -396,7 +396,7 @@ public class VaultManagerTests : IDisposable
             .Returns((string?)null);
 
         // Act
-        var content = await _vault.GetContentAtCommitAsync(filePath, "deadbeef");
+        var content = await _vault.GetContentAtCommitAsync(filePath, "deadbeef", TestContext.Current.CancellationToken);
 
         // Assert
         content.Should().BeNull();
@@ -406,7 +406,7 @@ public class VaultManagerTests : IDisposable
     public async Task GetContentAtCommitAsync_NoEntry_ReturnsNull()
     {
         // Act - no CreateEntryWithMetadata call, so GetAsync resolves to null
-        var content = await _vault.GetContentAtCommitAsync(Path.Combine(_testDir, "missing.txt"), "abc123");
+        var content = await _vault.GetContentAtCommitAsync(Path.Combine(_testDir, "missing.txt"), "abc123", TestContext.Current.CancellationToken);
 
         // Assert
         content.Should().BeNull();
@@ -433,7 +433,7 @@ public class VaultManagerTests : IDisposable
             .Returns(manifest);
 
         // Act
-        var result = await _vault.GetImageManifestAsync(filePath);
+        var result = await _vault.GetImageManifestAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert - the facade passes the resolved entry straight through to storage
         result.Should().BeEquivalentTo(manifest);
@@ -446,7 +446,7 @@ public class VaultManagerTests : IDisposable
     public async Task GetImageManifestAsync_NoEntry_ReturnsEmpty()
     {
         // Act - no CreateEntryWithMetadata call, so GetAsync resolves to null
-        var result = await _vault.GetImageManifestAsync(Path.Combine(_testDir, "missing.txt"));
+        var result = await _vault.GetImageManifestAsync(Path.Combine(_testDir, "missing.txt"), TestContext.Current.CancellationToken);
 
         // Assert
         result.Should().BeEmpty();
@@ -461,7 +461,7 @@ public class VaultManagerTests : IDisposable
         CreateTestFile("doc2.md", "Content 2");
 
         // Act
-        var result = await _vault.ScanFolderAsync(_testDir);
+        var result = await _vault.ScanFolderAsync(_testDir, TestContext.Current.CancellationToken);
 
         // Assert
         result.NewFilesCount.Should().BeGreaterThan(0);
@@ -476,7 +476,7 @@ public class VaultManagerTests : IDisposable
         CreateTestFile("Thumbs.db", "thumbnail cache");
 
         // Act
-        var result = await _vault.ScanFolderAsync(_testDir);
+        var result = await _vault.ScanFolderAsync(_testDir, TestContext.Current.CancellationToken);
 
         // Assert
         result.DetectedChanges.Should().OnlyContain(c => c.FilePath.EndsWith("doc1.pdf"));
@@ -494,7 +494,7 @@ public class VaultManagerTests : IDisposable
         File.Delete(filePath);
 
         // Act
-        var result = await _vault.ScanFolderAsync(_testDir);
+        var result = await _vault.ScanFolderAsync(_testDir, TestContext.Current.CancellationToken);
 
         // Assert
         result.OrphanedFilesCount.Should().Be(1);
@@ -517,7 +517,7 @@ public class VaultManagerTests : IDisposable
             File.Delete(outsidePath);
 
             // Act
-            var result = await _vault.ScanFolderAsync(_testDir);
+            var result = await _vault.ScanFolderAsync(_testDir, TestContext.Current.CancellationToken);
 
             // Assert
             result.OrphanedFilesCount.Should().Be(0);
@@ -535,7 +535,7 @@ public class VaultManagerTests : IDisposable
         var filePath = CreateTestFile("test.txt", "Hello, World!");
 
         // Act
-        var result = await _vault.DetectChangesAsync(filePath);
+        var result = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         result.Should().NotBeNull();
@@ -546,7 +546,7 @@ public class VaultManagerTests : IDisposable
     public async Task GetQueueStatusAsync_ReturnsQueueStatus()
     {
         // Act
-        var status = await _vault.GetQueueStatusAsync();
+        var status = await _vault.GetQueueStatusAsync(TestContext.Current.CancellationToken);
 
         // Assert
         status.Should().NotBeNull();
@@ -566,7 +566,7 @@ public class VaultManagerTests : IDisposable
         });
 
         // Act
-        var status = await _vault.GetQueueStatusAsync();
+        var status = await _vault.GetQueueStatusAsync(TestContext.Current.CancellationToken);
 
         // Assert
         status.LastProcessedAt.Should().Be(lastProcessedAt);
@@ -584,7 +584,7 @@ public class VaultManagerTests : IDisposable
         _queueServiceMock.EnqueueRemoveAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(callInfo => { var hash = callInfo.ArgAt<string>(0); var path = callInfo.ArgAt<string>(1); return CreateTestJob(hash, path, VaultJobType.Remove); });
 
         // Act
-        await _vault.RemoveAsync(filePath);
+        await _vault.RemoveAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         await _queueServiceMock.Received(1).EnqueueRemoveAsync(
@@ -682,7 +682,7 @@ public class VaultManagerTests : IDisposable
                 callInfo.ArgAt<string>(0), callInfo.ArgAt<string>(1), VaultJobType.Remove));
 
         // Act
-        await _vault.RemoveAsync(new[] { path1, path2 });
+        await _vault.RemoveAsync(new[] { path1, path2 }, TestContext.Current.CancellationToken);
 
         // Assert
         await _queueServiceMock.Received(1).EnqueueRemoveAsync(
@@ -704,7 +704,7 @@ public class VaultManagerTests : IDisposable
                 callInfo.ArgAt<string>(0), callInfo.ArgAt<string>(1), VaultJobType.Remove));
 
         // Act
-        await _vault.RemoveAsync(new[] { existingPath, missingPath });
+        await _vault.RemoveAsync(new[] { existingPath, missingPath }, TestContext.Current.CancellationToken);
 
         // Assert — only the existing path is queued
         await _queueServiceMock.Received(1).EnqueueRemoveAsync(
@@ -717,7 +717,7 @@ public class VaultManagerTests : IDisposable
     public async Task RemoveAsync_BatchWithEmptyList_DoesNothing()
     {
         // Act
-        await _vault.RemoveAsync(Array.Empty<string>());
+        await _vault.RemoveAsync(Array.Empty<string>(), TestContext.Current.CancellationToken);
 
         // Assert
         await _queueServiceMock.DidNotReceive().EnqueueRemoveAsync(
@@ -738,7 +738,7 @@ public class VaultManagerTests : IDisposable
         entry2.SaveMetadata();
 
         // Act
-        var sourceModifiedEntries = await _vault.ListByStatusAsync(SyncStatus.SourceModified);
+        var sourceModifiedEntries = await _vault.ListByStatusAsync(SyncStatus.SourceModified, TestContext.Current.CancellationToken);
 
         // Assert
         sourceModifiedEntries.Should().HaveCount(1);
@@ -766,7 +766,7 @@ public class VaultManagerTests : IDisposable
         entry3.SaveMetadata();
 
         // Act
-        var pendingRemovals = await _vault.GetPendingRemovalsAsync();
+        var pendingRemovals = await _vault.GetPendingRemovalsAsync(TestContext.Current.CancellationToken);
 
         // Assert
         pendingRemovals.Should().HaveCount(3);
@@ -786,7 +786,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadata(file2);
 
         // Act
-        var errorEntries = await _vault.GetErrorEntriesAsync();
+        var errorEntries = await _vault.GetErrorEntriesAsync(TestContext.Current.CancellationToken);
 
         // Assert
         errorEntries.Should().HaveCount(1);
@@ -814,7 +814,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadata(file3);
 
         // Act
-        var errors = await _vault.GetErrorEntriesAsync();
+        var errors = await _vault.GetErrorEntriesAsync(TestContext.Current.CancellationToken);
 
         // Assert — both pipeline and sync errors detected
         errors.Should().HaveCount(2);
@@ -841,7 +841,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadata(file3); // InSync
 
         // Act
-        var needingSync = await _vault.GetEntriesNeedingSyncAsync();
+        var needingSync = await _vault.GetEntriesNeedingSyncAsync(TestContext.Current.CancellationToken);
 
         // Assert
         needingSync.Should().HaveCount(2);
@@ -867,7 +867,7 @@ public class VaultManagerTests : IDisposable
         entry3.SaveMetadata();
 
         // Act
-        var status = await _vault.StatusAsync();
+        var status = await _vault.StatusAsync(TestContext.Current.CancellationToken);
 
         // Assert
         status.TotalEntries.Should().Be(3);
@@ -893,14 +893,14 @@ public class VaultManagerTests : IDisposable
         _gitServiceMock.StatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new GitStatus { ModifiedFiles = [] });
 
         // Act
-        var changes = await _vault.DetectChangesAsync(filePath);
+        var changes = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         changes.SourceChanged.Should().BeTrue();
         changes.RecommendedAction.Should().Be(ChangeAction.Memorize);
 
         // Verify entry was updated
-        var reloaded = await _vault.GetAsync(filePath);
+        var reloaded = await _vault.GetAsync(filePath, TestContext.Current.CancellationToken);
         reloaded!.SyncStatus.Should().Be(SyncStatus.SourceModified);
     }
 
@@ -1030,7 +1030,7 @@ public class VaultManagerTests : IDisposable
         GivenModifiedVaultFiles("append-text.md");
 
         // Act
-        var change = await _vault.DetectChangesAsync(filePath);
+        var change = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         change.VaultChanged.Should().BeTrue();
@@ -1048,7 +1048,7 @@ public class VaultManagerTests : IDisposable
         GivenModifiedVaultFiles("qa.md");
 
         // Act
-        var change = await _vault.DetectChangesAsync(filePath);
+        var change = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         change.RecommendedAction.Should().Be(ChangeAction.Refresh);
@@ -1064,7 +1064,7 @@ public class VaultManagerTests : IDisposable
         GivenModifiedVaultFiles("append-text.md");
 
         // Act
-        var change = await _vault.DetectChangesAsync(filePath);
+        var change = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         change.VaultChanged.Should().BeTrue("a failed entry can still own modified vault files");
@@ -1085,7 +1085,7 @@ public class VaultManagerTests : IDisposable
         GivenModifiedVaultFiles();
 
         // Act
-        var change = await _vault.DetectChangesAsync(filePath);
+        var change = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         change.FirstError.Should().Contain("extraction_error_kind=PdfParse");
@@ -1102,7 +1102,7 @@ public class VaultManagerTests : IDisposable
 
         // Act
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => _vault.RefreshAsync(filePath));
+            () => _vault.RefreshAsync(filePath, TestContext.Current.CancellationToken));
 
         // Assert
         ex.Message.Should().Contain("Run memorize first");
@@ -1123,7 +1123,7 @@ public class VaultManagerTests : IDisposable
         CorruptRecordFor(CreateTestFile("unreadable.md", "content"));
 
         // Act
-        var entries = await _vault.ListAsync();
+        var entries = await _vault.ListAsync(ct: TestContext.Current.CancellationToken);
 
         // Assert - one damaged record must not take the rest of the listing with it.
         entries.Should().ContainSingle()
@@ -1138,7 +1138,7 @@ public class VaultManagerTests : IDisposable
         var damagedEntryPath = CorruptRecordFor(CreateTestFile("unreadable.md", "content"));
 
         // Act
-        var unreadable = await _vault.ListUnreadableAsync();
+        var unreadable = await _vault.ListUnreadableAsync(TestContext.Current.CancellationToken);
 
         // Assert - a caller can only offer repair for what it has been told about.
         unreadable.Should().ContainSingle().Which.Should().Be(damagedEntryPath);
@@ -1153,7 +1153,7 @@ public class VaultManagerTests : IDisposable
         CorruptRecordFor(filePath);
 
         // Act
-        var entry = await _vault.MemorizeAsync(filePath);
+        var entry = await _vault.MemorizeAsync(filePath, TestContext.Current.CancellationToken);
 
         // Assert
         entry.SourcePath.Should().Be(Path.GetFullPath(filePath));
@@ -1170,8 +1170,8 @@ public class VaultManagerTests : IDisposable
         CorruptRecordFor(CreateTestFile("damaged.md", "content"));
 
         // Act
-        var readable = await _vault.ListAsync();
-        var unreadable = await _vault.ListUnreadableAsync();
+        var readable = await _vault.ListAsync(ct: TestContext.Current.CancellationToken);
+        var unreadable = await _vault.ListUnreadableAsync(TestContext.Current.CancellationToken);
 
         // Assert
         (readable.Count + unreadable.Count).Should().Be(Directory.GetDirectories(_vaultDir).Length);
