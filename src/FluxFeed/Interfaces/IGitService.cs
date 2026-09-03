@@ -29,9 +29,22 @@ public interface IGitService
     Task<string?> CommitAsync(string vaultPath, string message, CancellationToken ct = default);
 
     /// <summary>
-    /// Gets the diff for a specific file or all files.
+    /// Gets the diff between the working tree and the index/HEAD for a specific file or all files —
+    /// i.e. uncommitted changes only. Callers that auto-commit after every write (as
+    /// <see cref="FluxFeed.Services.VaultManager"/>'s Memorize/Refresh path does) will normally see an
+    /// empty diff here, since the working tree is already clean by the time this runs — use
+    /// <see cref="DiffLastChangeAsync"/> to see what the most recent commit actually changed.
     /// </summary>
     Task<string> DiffAsync(string vaultPath, string? filePath = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the diff between HEAD and the commit before it (or, on a repository with only one
+    /// commit, between HEAD and the empty tree) for a specific file or all files — "what did the
+    /// most recent commit change", the question <see cref="DiffAsync"/> can't answer once a caller
+    /// has already committed. Returns an empty string when git is unavailable, the directory isn't a
+    /// repository, or HEAD itself doesn't exist yet (zero commits).
+    /// </summary>
+    Task<string> DiffLastChangeAsync(string vaultPath, string? filePath = null, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the status of the repository.

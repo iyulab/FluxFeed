@@ -770,6 +770,15 @@ public sealed partial class VaultManager : IVault
         return await _git.DiffAsync(entry.VaultPath, null, ct);
     }
 
+    public async Task<string> DiffLastChangeAsync(string filePath, CancellationToken ct = default)
+    {
+        var entry = await GetAsync(filePath, ct);
+        if (entry == null || !Directory.Exists(entry.VaultPath))
+            return "";
+
+        return await _git.DiffLastChangeAsync(entry.VaultPath, null, ct);
+    }
+
     public async Task<IReadOnlyList<GitCommit>> LogAsync(string filePath, int maxCount = 10, CancellationToken ct = default)
     {
         var entry = await GetAsync(filePath, ct);

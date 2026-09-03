@@ -120,9 +120,23 @@ public interface IVault
     Task<VaultStatus> StatusAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Gets the diff for a vault entry's vault/ directory.
+    /// Gets the diff between the working tree and HEAD for a vault entry's vault/ directory — i.e.
+    /// uncommitted changes only. This vault normally auto-commits after every successful
+    /// Memorize/RefreshAsync, so the working tree is typically clean by the time a caller gets around
+    /// to checking, and this returns an empty string almost every time. Use
+    /// <see cref="DiffLastChangeAsync"/> to see what the most recent commit actually changed.
     /// </summary>
     Task<string> DiffAsync(string filePath, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the diff between HEAD and the commit before it for a vault entry's vault/ directory —
+    /// "what did the last Memorize/RefreshAsync actually change", which <see cref="DiffAsync"/>
+    /// structurally can't answer once the auto-commit that follows every update has already run. On
+    /// the entry's very first commit (no prior commit to diff against), compares against the empty
+    /// tree instead, so the first commit's content still shows up as an addition rather than an
+    /// empty result. Empty string when the entry has no commits at all.
+    /// </summary>
+    Task<string> DiffLastChangeAsync(string filePath, CancellationToken ct = default);
 
     /// <summary>
     /// Gets the commit history for a vault entry.

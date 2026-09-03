@@ -82,6 +82,27 @@ public sealed partial class GitService : IGitService
         return await RunGitAsync(vaultPath, args, ct);
     }
 
+    // The SHA of git's well-known empty tree object. Identical in every git repository (it's the
+    // hash of an empty tree, not of any repository-specific content) — diffing against it is git's
+    // standard trick for "what did this commit add", including for a repo's very first commit, where
+    // HEAD~1 doesn't exist.
+    private const string EmptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    public async Task<string> DiffLastChangeAsync(string vaultPath, string? filePath = null, CancellationToken ct = default)
+    {
+        if (!CheckGitAvailable() || !IsGitRepository(vaultPath)) return string.Empty;
+
+        var pathArg = string.IsNullOrEmpty(filePath) ? "" : $" -- \"{filePath}\"";
+
+        var (output, exitCode) = await RunGitWithExitCodeAsync(vaultPath, $"diff HEAD~1 HEAD{pathArg}", ct);
+        if (exitCode == 0)
+            return output;
+
+        // HEAD~1 doesn't resolve — most likely this is the repository's first commit.
+        var (fallbackOutput, fallbackExitCode) = await RunGitWithExitCodeAsync(vaultPath, $"diff {EmptyTreeSha} HEAD{pathArg}", ct);
+        return fallbackExitCode == 0 ? fallbackOutput : string.Empty;
+    }
+
     public async Task<GitStatus> StatusAsync(string vaultPath, CancellationToken ct = default)
     {
         if (!CheckGitAvailable() || !IsGitRepository(vaultPath))

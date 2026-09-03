@@ -214,4 +214,95 @@ public class VaultPipelineSearchStrategyTests
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
         response.Results.Should().ContainSingle().Which.Content.Should().Be("fts hit");
     }
+
+    // FluxFeed docket #172 (VectorSearchAsync/HybridSearchAsync/KeywordSearchAsync never pushed a
+    // filter into the underlying store, so a document-id scope was only ever applied as a client-side
+    // Where() over an unscoped candidate window — silent-empty in any vault where unrelated content
+    // outnumbers the scoped folder's own competitive matches). These assert the filter argument
+    // itself reaches the store/service, not just that the (still over-fetched, still small) window
+    // happened to contain the right rows.
+
+    [Fact]
+    public async Task VectorSearchAsync_ScopedToDocumentIds_PushesFilterIntoVectorStoreSearch()
+    {
+        var pipeline = CreatePipeline(hybrid: null);
+
+        await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
+
+        await _vectorStore.Received().SearchAsync(
+            Arg.Any<float[]>(),
+            Arg.Any<int>(),
+            Arg.Any<float>(),
+            Arg.Is<Dictionary<string, object>?>(f =>
+                f != null && ((HashSet<string>)f["document_id"]).Contains("keep")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task VectorSearchAsync_UnscopedRequest_PassesNullFilter()
+    {
+        var pipeline = CreatePipeline(hybrid: null);
+
+        await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
+
+        await _vectorStore.Received().SearchAsync(
+            Arg.Any<float[]>(), Arg.Any<int>(), Arg.Any<float>(), null, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task KeywordSearchAsync_ScopedToDocumentIds_PushesMetadataFilter()
+    {
+        var keyword = Substitute.For<IKeywordSearchService>();
+        keyword.SearchAsync(Arg.Any<string>(), Arg.Any<KeywordSearchOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<KeywordSearchResult>());
+        var pipeline = CreatePipeline(hybrid: null, keyword: keyword);
+
+        await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Keyword, ct: TestContext.Current.CancellationToken);
+
+        await keyword.Received().SearchAsync(
+            "q",
+            Arg.Is<KeywordSearchOptions>(o =>
+                o.MetadataFilter != null && ((HashSet<string>)o.MetadataFilter["document_id"]).Contains("keep")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HybridSearchAsync_ScopedToDocumentIds_PushesFilters()
+    {
+        var hybrid = Substitute.For<IHybridSearchService>();
+        hybrid.SearchAsync(Arg.Any<string>(), Arg.Any<HybridSearchOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>());
+        var pipeline = CreatePipeline(hybrid);
+
+        await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
+
+        await hybrid.Received().SearchAsync(
+            "q",
+            Arg.Is<HybridSearchOptions>(o =>
+                ((HashSet<string>)o.Filters["document_id"]).Contains("keep")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_Scoped_NativeHybridOnly_DegradesToScopedVector_NotUnscopedNative()
+    {
+        // Native hybrid can't honor a document-id scope (no filters parameter on its surface yet —
+        // see the FluxFeed docket #172 companion note on INativeHybridSearch). With no
+        // IHybridSearchService registered either, the scoped request must fall through to the
+        // (filterable) vector leg rather than serve an out-of-scope native-hybrid result.
+        var nativeStore = Substitute.For<IVectorStore, INativeHybridSearch>();
+        nativeStore.SearchAsync(Arg.Any<float[]>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<DocumentChunk>
+            {
+                new() { Id = "v", DocumentId = "keep", Content = "vector-scoped hit", ChunkIndex = 0, Score = 0.5f }
+            });
+        var pipeline = CreatePipelineWithStore(nativeStore, hybrid: null);
+
+        var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
+
+        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Vector);
+        response.Results.Should().ContainSingle().Which.Content.Should().Be("vector-scoped hit");
+        await ((INativeHybridSearch)nativeStore).DidNotReceive().HybridSearchAsync(
+            Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<CancellationToken>());
+    }
 }

@@ -349,6 +349,25 @@ public class VaultManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task DiffLastChangeAsync_ExistingEntry_CallsGitService()
+    {
+        // Arrange - Create entry with metadata on disk
+        var filePath = CreateTestFile("test.txt", "Hello, World!");
+        CreateEntryWithMetadata(filePath);
+        _gitServiceMock.DiffLastChangeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns("last-change diff output");
+
+        // Act
+        var diff = await _vault.DiffLastChangeAsync(filePath, TestContext.Current.CancellationToken);
+
+        // Assert
+        diff.Should().Be("last-change diff output");
+        await _gitServiceMock.Received(1).DiffLastChangeAsync(
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task LogAsync_ExistingEntry_CallsGitService()
     {
         // Arrange - Create entry with metadata on disk

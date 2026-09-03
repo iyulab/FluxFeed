@@ -120,6 +120,10 @@ Each entry lives under the vault base path, keyed by a hash of its absolute file
 ```
 
 Because `vault/` is a git repository, `DiffAsync` and `LogAsync` report exactly what changed and when.
+`DiffAsync` compares the working tree against HEAD — since Memorize/RefreshAsync auto-commit after
+every successful update, the working tree is normally clean by the time a caller checks, so `DiffAsync`
+usually returns an empty string. Use `DiffLastChangeAsync` instead to see what the most recent commit
+actually changed (HEAD vs. its parent, or vs. the empty tree on the entry's first commit).
 `GetContentAtCommitAsync(filePath, commitHash)` reads the combined content (`refined.md` +
 `append-text.md` + `qa.md`) as it existed at a specific commit from that history — read-only, it does
 not touch the working tree. Returns `null` when the commit is unknown. To actually roll an entry back,

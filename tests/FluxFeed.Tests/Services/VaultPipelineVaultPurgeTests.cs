@@ -104,6 +104,32 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
             Arg.Any<CancellationToken>());
     }
 
+    // FluxFeed docket #172: search scoping (VaultPipeline.SearchAsync's documentIds parameter) works
+    // by pushing a document_id metadata filter into the underlying store/service query. That filter
+    // only matches anything if the stored chunk actually carries a document_id metadata entry — same
+    // requirement the vault_id tag above satisfies for tenant purge.
+
+    [Fact]
+    public async Task MemorizeAsync_TagsStoredChunksWithDocumentId()
+    {
+        var pipeline = CreatePipeline(vaultId: null);
+
+        var docPath = Path.Combine(_testDir, "doc.txt");
+        await File.WriteAllTextAsync(docPath, "Alice works at Acme Corp. Bob manages the project in Seoul.", TestContext.Current.CancellationToken);
+        var entry = VaultEntry.Create(docPath, _vaultDir);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+
+        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 200 }, TestContext.Current.CancellationToken);
+
+        result.Success.Should().BeTrue();
+        await _vectorStore.Received().StoreBatchAsync(
+            Arg.Is<IEnumerable<DocumentChunk>>(chunks =>
+                chunks.All(c => c.Metadata != null
+                    && c.Metadata.ContainsKey("document_id")
+                    && (string)c.Metadata["document_id"] == c.DocumentId)),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task PurgeVectorsAsync_DeletesByVaultIdFilter()
     {
