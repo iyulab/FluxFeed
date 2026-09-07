@@ -179,6 +179,103 @@ public class VaultPipelineLegacyChunkScopeTests
     }
 
     /// <summary>
+    /// A store that refuses the write must not leave the document recorded as migrated.
+    ///
+    /// <para>
+    /// This is the FluxFeed half of a defect that shipped in three releases: the backfill called
+    /// <c>UpdateAsync</c> and discarded its answer, so a store that wrote nothing looked identical
+    /// to one that succeeded. The store side is fixed separately; what is guarded here is that this
+    /// pipeline now reads the answer — a document whose chunks did not persist stays unsettled, so
+    /// a later search retries it instead of serving those chunks as permanently unreachable.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_WhenTheStoreRefusesTheBackfillWrite_RetriesOnTheNextSearch()
+    {
+        var store = new RefusingUpdateVectorStore();
+        await StoreLegacyChunkAsync(store, "doc-a", "chunk-a", "alpha content", TestContext.Current.CancellationToken);
+        var pipeline = CreatePipeline(store);
+
+        await pipeline.SearchAsync(
+            "alpha", documentIds: ["doc-a"], topK: 10, minScore: 0f,
+            strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
+        var afterFirst = store.UpdateAttempts;
+
+        await pipeline.SearchAsync(
+            "alpha", documentIds: ["doc-a"], topK: 10, minScore: 0f,
+            strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
+
+        afterFirst.Should().BeGreaterThan(0, "the first search should have attempted the migration");
+        store.UpdateAttempts.Should().BeGreaterThan(afterFirst,
+            "a refused write must not mark the document settled, so the next search retries it");
+    }
+
+    /// <summary>
+    /// Same double as <see cref="RecordingVectorStore"/> except that updates are refused. Reporting
+    /// <c>false</c> is the contract a store is required to honour when it writes no row.
+    /// </summary>
+    private sealed class RefusingUpdateVectorStore : VectorStoreBase
+    {
+        private readonly Dictionary<string, DocumentChunk> _chunks = [];
+
+        public int UpdateAttempts { get; private set; }
+
+        protected override Task<string> StoreCoreAsync(DocumentChunk chunk, CancellationToken cancellationToken)
+        {
+            _chunks[chunk.Id] = chunk;
+            return Task.FromResult(chunk.Id);
+        }
+
+        protected override Task<DocumentChunk?> GetCoreAsync(string id, CancellationToken cancellationToken)
+            => Task.FromResult(_chunks.TryGetValue(id, out var chunk) ? chunk : null);
+
+        protected override Task<IEnumerable<VectorSearchResult>> SearchCoreAsync(
+            float[] queryEmbedding, int topK, Dictionary<string, object>? filters, CancellationToken cancellationToken)
+            => Task.FromResult<IEnumerable<VectorSearchResult>>([]);
+
+        protected override Task<bool> UpdateCoreAsync(DocumentChunk chunk, CancellationToken cancellationToken)
+        {
+            UpdateAttempts++;
+            return Task.FromResult(false);
+        }
+
+        protected override Task<IEnumerable<DocumentChunk>> GetByDocumentIdCoreAsync(
+            string documentId, CancellationToken cancellationToken)
+        {
+            // Project fresh objects, as the shipped stores do. Handing back the stored instances
+            // would let a caller's in-place mutation "persist" without any write, which is the
+            // exact illusion these tests exist to rule out.
+            IEnumerable<DocumentChunk> found = _chunks.Values
+                .Where(c => c.DocumentId == documentId)
+                .Select(c => new DocumentChunk
+                {
+                    Id = c.Id,
+                    DocumentId = c.DocumentId,
+                    ChunkIndex = c.ChunkIndex,
+                    Content = c.Content,
+                    Metadata = c.Metadata != null ? new Dictionary<string, object>(c.Metadata) : null
+                })
+                .ToList();
+            return Task.FromResult(found);
+        }
+
+        protected override Task<bool> DeleteCoreAsync(string id, CancellationToken cancellationToken)
+            => Task.FromResult(_chunks.Remove(id));
+
+        protected override Task<bool> DeleteByDocumentIdCoreAsync(string documentId, CancellationToken cancellationToken)
+            => Task.FromResult(true);
+
+        protected override Task<int> CountCoreAsync(CancellationToken cancellationToken)
+            => Task.FromResult(_chunks.Count);
+
+        protected override Task ClearCoreAsync(CancellationToken cancellationToken)
+        {
+            _chunks.Clear();
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
     /// In-memory <see cref="VectorStoreBase"/> so the filter, the metadata backstop and the
     /// "no embedding means leave the vector alone" update contract are the real ones. Cosine
     /// similarity over the stored vectors; no candidate trimming, so recall effects are the base

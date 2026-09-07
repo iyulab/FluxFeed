@@ -755,6 +755,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
         if (docIdSet == null || _vectorStore == null)
             return;
 
+        var migratedDocuments = 0;
+        var migratedChunks = 0;
+        var failedDocuments = 0;
+
         foreach (var documentId in docIdSet)
         {
             if (!_scopeTagCheckedDocuments.TryAdd(documentId, 0))
@@ -770,6 +774,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 if (untagged.Count == 0)
                     continue;
 
+                var written = 0;
                 foreach (var chunk in untagged)
                 {
                     var metadata = chunk.Metadata != null
@@ -779,10 +784,24 @@ public sealed partial class VaultPipeline : IVaultPipeline
                     chunk.Metadata = metadata;
                     // Embedding is left null on purpose — see the remarks above.
                     chunk.Embedding = null;
-                    await _vectorStore.UpdateAsync(chunk, ct);
+                    if (await _vectorStore.UpdateAsync(chunk, ct))
+                        written++;
                 }
 
-                LogBackfilledDocumentScopeTags(_logger, untagged.Count, documentId);
+                if (written < untagged.Count)
+                {
+                    // The store accepted the writes and reported that it did not perform them.
+                    // Discarding that answer is how a store-side no-op became invisible here for
+                    // three releases: every search re-ran the same migration, reported success,
+                    // and the scoped search kept returning nothing.
+                    _scopeTagCheckedDocuments.TryRemove(documentId, out _);
+                    failedDocuments++;
+                    LogBackfillDocumentScopeTagsNotPersisted(_logger, written, untagged.Count, documentId);
+                    continue;
+                }
+
+                migratedDocuments++;
+                migratedChunks += written;
             }
             catch (Exception ex)
             {
@@ -791,9 +810,16 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 // next search tries again instead of silently serving that document's chunks as
                 // unreachable forever.
                 _scopeTagCheckedDocuments.TryRemove(documentId, out _);
+                failedDocuments++;
                 LogBackfillDocumentScopeTagsFailed(_logger, ex, documentId);
             }
         }
+
+        // One line per migration pass rather than one per document: a first search over a large
+        // vault otherwise buries everything else in the log, and the per-document detail is not
+        // actionable when the pass succeeds.
+        if (migratedDocuments > 0 || failedDocuments > 0)
+            LogBackfilledDocumentScopeTags(_logger, migratedChunks, migratedDocuments, failedDocuments);
     }
 
     private static bool HasDocumentScopeTag(DocumentChunk chunk)
@@ -1610,8 +1636,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogRefined(ILogger logger, int length, string path);
     [LoggerMessage(Level = LogLevel.Warning, Message = "No vector store configured, skipping removal")]
     private static partial void LogNoVectorStoreSkipRemoval(ILogger logger);
-    [LoggerMessage(Level = LogLevel.Information, Message = "Backfilled document scope tag on {Count} chunks predating it for document {DocumentId}")]
-    private static partial void LogBackfilledDocumentScopeTags(ILogger logger, int count, string documentId);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfilled document scope tag on {ChunkCount} chunks across {DocumentCount} documents predating it ({FailedCount} documents could not be migrated)")]
+    private static partial void LogBackfilledDocumentScopeTags(ILogger logger, int chunkCount, int documentCount, int failedCount);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Vector store persisted only {Written} of {Expected} document scope tags for document {DocumentId} while reporting no error; its chunks stay unreachable by a scoped search")]
+    private static partial void LogBackfillDocumentScopeTagsNotPersisted(ILogger logger, int written, int expected, string documentId);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to backfill document scope tag for document {DocumentId}; its chunks stay unreachable by a scoped search until this succeeds")]
     private static partial void LogBackfillDocumentScopeTagsFailed(ILogger logger, Exception exception, string documentId);
