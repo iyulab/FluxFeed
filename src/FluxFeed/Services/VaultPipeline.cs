@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using FluxGuard.Remote.RAG;
 using FluxIndex.Core.Application.Interfaces;
@@ -95,6 +96,14 @@ public sealed partial class VaultPipeline : IVaultPipeline
     // before a poisoned chunk is ever embedded and stored, not just at retrieval time. Null by
     // default — nothing changes for consumers who don't supply one.
     private readonly IRAGSecurityPipeline? _ragSecurityPipeline;
+
+    /// <summary>
+    /// Documents whose chunks have already been examined for the "document_id" scope tag by
+    /// <see cref="BackfillDocumentScopeTagsAsync"/>. Keeps the one-time migration from re-reading
+    /// every document on every search; a document that failed to migrate is removed again so the
+    /// next search retries it.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> _scopeTagCheckedDocuments = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Value of the <c>chunk_kind</c> metadata tag on a chunk that holds an image description
@@ -715,6 +724,81 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static Dictionary<string, object>? BuildDocScopeFilter(HashSet<string>? docIdSet)
         => docIdSet == null ? null : new Dictionary<string, object> { ["document_id"] = docIdSet };
 
+    /// <summary>
+    /// Writes the "document_id" tag onto chunks that predate it, so that the scope filter built by
+    /// <see cref="BuildDocScopeFilter"/> can match them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The tag is written at index time by <see cref="ApplyChunkMetadata"/>, but chunks stored
+    /// before it existed carry only their provenance tags. The filter is built for every search
+    /// that names a document set — and the caller names one on every search, the whole vault when
+    /// no scope was requested — so without this those chunks match nothing: every search over an
+    /// existing store returns no results at all, silently, until each document is re-indexed.
+    /// </para>
+    /// <para>
+    /// No re-embedding is involved. The value being written is already on the chunk as
+    /// <see cref="DocumentChunk.DocumentId"/> — the store's own key, which
+    /// <see cref="IVectorStore.GetByDocumentIdAsync"/> queries — so this copies a value the store
+    /// already holds into the metadata the filter reads. The chunks handed to
+    /// <see cref="IVectorStore.UpdateAsync"/> deliberately carry no embedding, which is what leaves
+    /// the stored vector untouched.
+    /// </para>
+    /// <para>
+    /// Each document is examined at most once per pipeline instance, and a document whose first
+    /// chunk already carries the tag is skipped without any write, so a store written entirely by a
+    /// current release pays one read per document and nothing after that.
+    /// </para>
+    /// </remarks>
+    private async Task BackfillDocumentScopeTagsAsync(HashSet<string>? docIdSet, CancellationToken ct)
+    {
+        if (docIdSet == null || _vectorStore == null)
+            return;
+
+        foreach (var documentId in docIdSet)
+        {
+            if (!_scopeTagCheckedDocuments.TryAdd(documentId, 0))
+                continue;
+
+            try
+            {
+                var chunks = (await _vectorStore.GetByDocumentIdAsync(documentId, ct)).ToList();
+                if (chunks.Count == 0)
+                    continue;
+
+                var untagged = chunks.Where(c => !HasDocumentScopeTag(c)).ToList();
+                if (untagged.Count == 0)
+                    continue;
+
+                foreach (var chunk in untagged)
+                {
+                    var metadata = chunk.Metadata != null
+                        ? new Dictionary<string, object>(chunk.Metadata)
+                        : [];
+                    metadata["document_id"] = chunk.DocumentId;
+                    chunk.Metadata = metadata;
+                    // Embedding is left null on purpose — see the remarks above.
+                    chunk.Embedding = null;
+                    await _vectorStore.UpdateAsync(chunk, ct);
+                }
+
+                LogBackfilledDocumentScopeTags(_logger, untagged.Count, documentId);
+            }
+            catch (Exception ex)
+            {
+                // A document that could not be migrated must not take the search down with it, but
+                // it must also not be remembered as settled — drop it from the checked set so the
+                // next search tries again instead of silently serving that document's chunks as
+                // unreachable forever.
+                _scopeTagCheckedDocuments.TryRemove(documentId, out _);
+                LogBackfillDocumentScopeTagsFailed(_logger, ex, documentId);
+            }
+        }
+    }
+
+    private static bool HasDocumentScopeTag(DocumentChunk chunk)
+        => chunk.Metadata != null && chunk.Metadata.ContainsKey("document_id");
+
     public async Task<VaultPipelineSearchResponse> SearchAsync(
         string query,
         IEnumerable<string>? documentIds = null,
@@ -730,6 +814,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
 
         var docIdSet = documentIds?.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        await BackfillDocumentScopeTagsAsync(docIdSet, ct);
 
         if (strategy == VaultSearchStrategy.Hybrid)
         {
@@ -1524,6 +1610,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogRefined(ILogger logger, int length, string path);
     [LoggerMessage(Level = LogLevel.Warning, Message = "No vector store configured, skipping removal")]
     private static partial void LogNoVectorStoreSkipRemoval(ILogger logger);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Backfilled document scope tag on {Count} chunks predating it for document {DocumentId}")]
+    private static partial void LogBackfilledDocumentScopeTags(ILogger logger, int count, string documentId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to backfill document scope tag for document {DocumentId}; its chunks stay unreachable by a scoped search until this succeeds")]
+    private static partial void LogBackfillDocumentScopeTagsFailed(ILogger logger, Exception exception, string documentId);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Removed chunks for document {DocumentId}")]
     private static partial void LogRemovedChunks(ILogger logger, string documentId);
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to roll back the partial index for {SourcePath}; both the previous and the partial generation may be present")]
