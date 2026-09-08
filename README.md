@@ -336,6 +336,10 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 | `Chunking.MaxChunkSize` / `OverlapSize` / `Strategy` | `1024` / `128` / `Intelligent` | Chunking defaults, with per-extension overrides via `Chunking.FormatStrategies` |
 | `DefaultIncludePatterns` / `DefaultExcludePatterns` | common document / temp-file globs | See [File selection patterns](#file-selection-patterns) |
 
+The background worker (`VaultBackgroundService`) holds a lease from `IVaultQueueService.RegisterWorker()` while it consumes the queue; that lease is
+how `WaitForJobAsync` tells "a worker is busy" from "nobody will ever process this job". A custom `IVaultQueueService` implementation should return a
+real lease from `RegisterWorker()` (the interface default is a no-op lease, which disables the check).
+
 ## Requirements
 
 - .NET 10.0

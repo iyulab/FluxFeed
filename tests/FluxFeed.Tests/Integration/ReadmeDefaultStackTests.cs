@@ -89,7 +89,7 @@ public sealed class ReadmeDefaultStackTests : IDisposable
         var act = () => vault.MemorizeAsync(file, waitForCompletion: true);
 
         var ex = await act.Should().ThrowAsync<InvalidOperationException>();
-        ex.Which.Message.Should().Contain("no queue worker is running")
+        ex.Which.Message.Should().Contain("no worker is consuming this queue")
             .And.Contain("Generic Host")
             .And.Contain("EnableBackgroundProcessing");
         sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(30),

@@ -506,13 +506,14 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                     ct.ThrowIfCancellationRequested();
                     _waiters.TryRemove(jobId, out _);
                     throw new InvalidOperationException(
-                        $"Vault job {jobId} cannot complete: no queue worker is running " +
-                        $"(waited {_workerStartupTimeout.TotalSeconds:0.#}s for one to start). " +
-                        "VaultBackgroundService is registered as an IHostedService and only runs inside a " +
-                        "Generic Host (Host.CreateApplicationBuilder / WebApplication). Either host FluxFeed in " +
-                        "a Generic Host, start the IHostedService yourself, or set " +
-                        "FileVaultOptions.EnableBackgroundProcessing = false and call MemorizeAsync with " +
-                        "waitForCompletion: false.");
+                        $"Vault job {jobId} cannot complete: no worker is consuming this queue " +
+                        $"(waited {_workerStartupTimeout.TotalSeconds:0.#}s for one to register). " +
+                        "The default worker, VaultBackgroundService, is an IHostedService: it only runs inside a " +
+                        "Generic Host (Host.CreateApplicationBuilder / WebApplication) and only consumes the " +
+                        "container-registered queue. Either host FluxFeed in a Generic Host, start the " +
+                        "IHostedService yourself, or set FileVaultOptions.EnableBackgroundProcessing = false so " +
+                        "MemorizeAsync processes inline. Vaults created through IVaultFactory own a separate " +
+                        "queue that currently has no worker.");
                 }
             }
 
