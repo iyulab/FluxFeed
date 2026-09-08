@@ -173,6 +173,20 @@ public sealed class FileVaultOptions
     /// services; raise it if your host starts many services before the vault worker.
     /// </summary>
     public TimeSpan WorkerStartupTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The git executable used for vault history (<c>git</c> on PATH by default). Set an explicit
+    /// path when git is installed but not on the process PATH.
+    /// </summary>
+    public string GitExecutablePath { get; set; } = "git";
+
+    /// <summary>
+    /// Whether to keep working without git. Vault history (<c>DiffAsync</c>, <c>LogAsync</c>,
+    /// <c>GetContentAtCommitAsync</c>) needs the git CLI; when it cannot be started the vault
+    /// fails fast with an <see cref="InvalidOperationException"/> that names this option. Set to
+    /// <c>true</c> to accept a history-less vault instead (a warning is logged once).
+    /// </summary>
+    public bool AllowMissingGit { get; set; }
 }
 
 /// <summary>

@@ -39,6 +39,18 @@ document's extracted content, see its commit history, and edit it without touchi
 dotnet add package FluxFeed
 ```
 
+### Requirements
+
+- **.NET 10**, and a registered FluxIndex vector store + `IEmbeddingService` (see Quick Start). The package
+  pulls in `FluxIndex.Core` and `FileFlux` (the source of the extraction diagnostics described below) at the
+  versions it was built against.
+- **git 2.x on PATH.** Vault history (`DiffAsync`, `LogAsync`, `GetContentAtCommitAsync`) runs the git CLI.
+  If git is installed elsewhere, set `FileVaultOptions.GitExecutablePath`; if you deliberately want a
+  history-less vault, set `FileVaultOptions.AllowMissingGit = true`. Without either, the first vault
+  operation fails with a message that says exactly this instead of silently creating a vault with no history.
+- **A Generic Host** (`Microsoft.Extensions.Hosting`) for background processing — the queue worker is an
+  `IHostedService`. Console apps without a host set `EnableBackgroundProcessing = false` (see below).
+
 ## Quick Start
 
 ```csharp
@@ -47,38 +59,74 @@ using FluxFeed.Interfaces;
 using FluxIndex.Core.Application.Interfaces;  // IEmbeddingService
 using FluxIndex.Storage.SQLite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
-var services = new ServiceCollection();
+var builder = Host.CreateApplicationBuilder(args);
 
 // 1. FluxIndex side — a vector store and an embedding service must be registered.
-services.AddSQLiteVecVectorStore(o =>
+IEmbeddingService embedder = new MyEmbeddingService();   // bring your own, or a FluxIndex.Providers.* service
+builder.Services.AddSingleton<IEmbeddingService>(embedder);
+builder.Services.AddSQLiteVecVectorStore(o =>
 {
     o.DatabasePath = "fluxindex.db";
-    o.VectorDimension = 1536;
+    o.VectorDimension = embedder.GetEmbeddingDimension();  // the store's dimension is the embedder's
 });
-services.AddSingleton<IEmbeddingService, MyEmbeddingService>();  // bring your own
 
 // 2. FluxFeed side — vault + FileFlux extraction/chunking + FluxIndex indexing.
-services.AddFileVaultWithFluxIndex(o => o.VaultBasePath = "./data/.vault");
+builder.Services.AddFileVaultWithFluxIndex(o => o.VaultBasePath = "./data/.vault");
 
-var provider = services.BuildServiceProvider();
+using var host = builder.Build();
+await host.StartAsync();   // starts the background queue worker
 
-using var scope = provider.CreateScope();
-var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+using (var scope = host.Services.CreateScope())
+{
+    var vault = scope.ServiceProvider.GetRequiredService<IVault>();
 
-// Index a file and wait for the pipeline to finish.
-var entry = await vault.MemorizeAsync("./docs/handbook.pdf", waitForCompletion: true);
-Console.WriteLine($"{entry.Stage} · {entry.ChunkCount} chunks");
+    // Index a file and wait for the pipeline to finish.
+    var entry = await vault.MemorizeAsync("./docs/handbook.pdf", waitForCompletion: true);
+    Console.WriteLine($"{entry.Stage} · {entry.ChunkCount} chunks");
 
-// Watch a folder; new and changed files are queued automatically.
-await vault.AddWatchedFolderAsync("./docs", autoMemorize: true);
+    // Watch a folder; new and changed files are queued automatically.
+    await vault.AddWatchedFolderAsync("./docs", autoMemorize: true);
 
-// Search, optionally scoped to a path.
-var results = await vault.SearchAsync("vacation policy", VaultSearchOptions.ForFolder("./docs"));
+    // Search, optionally scoped to a path.
+    var results = await vault.SearchAsync("vacation policy", VaultSearchOptions.ForFolder("./docs"));
+}
+
+await host.StopAsync();
 ```
+
+FluxFeed binds the vector store to the embedder's identity for you — there is no `BindIdentity` call
+to make, and a store already bound to a different embedder fails at startup with
+`EmbeddingModelMismatchException` rather than mixing vectors.
 
 `IVault` is scoped — resolve it from a scope, or inject it into a scoped service, rather than from
 the root provider.
+
+### Without a host
+
+The background worker is an `IHostedService`; a plain `ServiceCollection` never starts it. Either
+start the hosted services yourself, or process inline:
+
+```csharp
+var services = new ServiceCollection();
+services.AddSingleton<IEmbeddingService>(embedder);
+services.AddSQLiteVecVectorStore(o => { o.DatabasePath = "fluxindex.db"; o.VectorDimension = embedder.GetEmbeddingDimension(); });
+services.AddFileVaultWithFluxIndex(o =>
+{
+    o.VaultBasePath = "./data/.vault";
+    o.EnableBackgroundProcessing = false;   // MemorizeAsync/RefreshAsync run inline and return the terminal entry
+});
+
+using var provider = services.BuildServiceProvider();
+using var scope = provider.CreateScope();
+var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+var entry = await vault.MemorizeAsync("./docs/handbook.pdf", waitForCompletion: true);
+```
+
+If background processing is left on without a host, `MemorizeAsync(..., waitForCompletion: true)` does
+not hang: after `WorkerStartupTimeout` (5 s) it throws an `InvalidOperationException` that names both
+fixes above.
 
 ### Registration entry points
 
@@ -118,9 +166,12 @@ Each entry lives under the vault base path, keyed by a hash of its absolute file
 │   └── manifest.json
 └── vault/             (git-tracked)
     ├── refined.md     extracted + refined content
-    ├── append-text.md your additions
-    └── qa.md          your Q&A
+    ├── append-text.md your additions  (create it yourself, then RefreshAsync)
+    └── qa.md          your Q&A         (same)
 ```
+
+Memorize writes `refined.md` only; `append-text.md` and `qa.md` are yours to create next to it. Their
+content is indexed together with `refined.md` on the next `RefreshAsync`, which also commits them.
 
 Because `vault/` is a git repository, `DiffAsync` and `LogAsync` report exactly what changed and when.
 `DiffAsync` compares the working tree against HEAD — since Memorize/RefreshAsync auto-commit after
@@ -332,6 +383,8 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 | `EnableRealTimeWatch` | `true` | Folder watching |
 | `DebounceDelayMs` | `500` | Merge window for rapid change events |
 | `EnableBackgroundProcessing` | `true` | Background queue; when false the service idles |
+| `GitExecutablePath` | `git` | Git CLI used for vault history; set an explicit path when git is not on PATH |
+| `AllowMissingGit` | `false` | When true, a missing git CLI degrades to a history-less vault (one warning) instead of failing the first vault operation |
 | `WorkerStartupTimeout` | `5s` | How long `MemorizeAsync(..., waitForCompletion: true)` tolerates the absence of a running queue worker before throwing. The worker is an `IHostedService`, so without a Generic Host (or `EnableBackgroundProcessing = false`) the wait fails fast with the fix in its message instead of hanging |
 | `MaxConcurrentProcessing` | `4` | Concurrent file operations |
 | `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` | `true` / `3` / `5000` | Retry policy |
@@ -342,12 +395,6 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 The background worker (`VaultBackgroundService`) holds a lease from `IVaultQueueService.RegisterWorker()` while it consumes the queue; that lease is
 how `WaitForJobAsync` tells "a worker is busy" from "nobody will ever process this job". A custom `IVaultQueueService` implementation should return a
 real lease from `RegisterWorker()` (the interface default is a no-op lease, which disables the check).
-
-## Requirements
-
-- .NET 10.0
-- FluxIndex.Core 0.17.0+
-- FileFlux 0.16.0+ — the source of the structured extraction diagnostics described above
 
 ## License
 

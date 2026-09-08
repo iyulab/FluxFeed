@@ -1,22 +1,31 @@
 using System.Diagnostics;
 using System.Text;
 using FluxFeed.Interfaces;
+using FluxFeed.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace FluxFeed.Services;
 
 /// <summary>
-/// Git operations service using CLI commands.
-/// Degrades gracefully when git is not installed — all operations become no-ops.
+/// Git operations service using CLI commands (<see cref="FileVaultOptions.GitExecutablePath"/>).
+/// When git cannot be started the service fails fast with an actionable exception; with
+/// <see cref="FileVaultOptions.AllowMissingGit"/> it degrades instead — all operations become no-ops
+/// and the vault keeps no history.
 /// </summary>
 public sealed partial class GitService : IGitService
 {
     private readonly ILogger<GitService> _logger;
+    private readonly string _gitExecutable;
+    private readonly bool _allowMissingGit;
     private bool? _isAvailable;
 
-    public GitService(ILogger<GitService> logger)
+    public GitService(ILogger<GitService> logger, IOptions<FileVaultOptions>? options = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        var opts = options?.Value ?? new FileVaultOptions();
+        _gitExecutable = string.IsNullOrWhiteSpace(opts.GitExecutablePath) ? "git" : opts.GitExecutablePath;
+        _allowMissingGit = opts.AllowMissingGit;
     }
 
     /// <inheritdoc />
@@ -200,7 +209,7 @@ public sealed partial class GitService : IGitService
 
         try
         {
-            var psi = new ProcessStartInfo("git", "--version")
+            var psi = new ProcessStartInfo(_gitExecutable, "--version")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -218,7 +227,16 @@ public sealed partial class GitService : IGitService
 
         if (!_isAvailable.Value)
         {
-            LogGitNotAvailable(_logger);
+            if (!_allowMissingGit)
+            {
+                throw new InvalidOperationException(
+                    $"Git executable '{_gitExecutable}' could not be started. FluxFeed keeps vault history through the git CLI " +
+                    "(DiffAsync, LogAsync, GetContentAtCommitAsync). Install git and make sure it is on PATH, point " +
+                    "FileVaultOptions.GitExecutablePath at it, or set FileVaultOptions.AllowMissingGit = true to run with a " +
+                    "history-less vault.");
+            }
+
+            LogGitNotAvailable(_logger, _gitExecutable);
         }
 
         return _isAvailable.Value;
@@ -234,7 +252,7 @@ public sealed partial class GitService : IGitService
     {
         var startInfo = new ProcessStartInfo
         {
-            FileName = "git",
+            FileName = _gitExecutable,
             Arguments = arguments,
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
@@ -299,8 +317,8 @@ public sealed partial class GitService : IGitService
     [LoggerMessage(Level = LogLevel.Warning, Message = "Git command failed: git {Args} -> {Error}")]
     private static partial void LogGitCommandFailed(ILogger logger, string args, string error);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Git is not available on this system. Vault versioning (diff, log, commit) will be disabled. Install git to enable version tracking.")]
-    private static partial void LogGitNotAvailable(ILogger logger);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Git executable {GitExecutable} could not be started; running with a history-less vault because FileVaultOptions.AllowMissingGit is set. Diff, log and commit are disabled.")]
+    private static partial void LogGitNotAvailable(ILogger logger, string gitExecutable);
 
     #endregion
 }

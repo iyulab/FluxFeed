@@ -43,6 +43,39 @@ public class GitServiceTests : IDisposable
         _log.Warnings.Should().BeEmpty(because: "HEAD~1 is probed, not tried-and-failed");
     }
 
+    [Fact]
+    public async Task MissingGit_Default_FailsFastWithActionableMessage()
+    {
+        var git = new GitService(_log, Microsoft.Extensions.Options.Options.Create(new FluxFeed.Options.FileVaultOptions
+        {
+            GitExecutablePath = "git-that-does-not-exist-" + Guid.NewGuid().ToString("N")
+        }));
+
+        var act = () => git.InitAsync(_repoDir, TestContext.Current.CancellationToken);
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("could not be started")
+            .And.Contain("GitExecutablePath")
+            .And.Contain("AllowMissingGit");
+    }
+
+    [Fact]
+    public async Task MissingGit_AllowMissingGit_DegradesWithOneWarning()
+    {
+        var git = new GitService(_log, Microsoft.Extensions.Options.Options.Create(new FluxFeed.Options.FileVaultOptions
+        {
+            GitExecutablePath = "git-that-does-not-exist-" + Guid.NewGuid().ToString("N"),
+            AllowMissingGit = true
+        }));
+
+        await git.InitAsync(_repoDir, TestContext.Current.CancellationToken);
+        var diff = await git.DiffLastChangeAsync(_repoDir, ct: TestContext.Current.CancellationToken);
+
+        git.IsAvailable.Should().BeFalse();
+        diff.Should().BeEmpty();
+        _log.Warnings.Should().ContainSingle(because: "the opt-in degraded mode announces itself exactly once");
+    }
+
     /// <summary>Captures warnings so tests can assert that a normal path stays silent.</summary>
     private sealed class RecordingLogger : Microsoft.Extensions.Logging.ILogger<GitService>
     {
