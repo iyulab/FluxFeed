@@ -849,16 +849,14 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         if (strategy == VaultSearchStrategy.Hybrid)
         {
-            // Prefer the vector store's native hybrid (vec + its own already-populated keyword index,
-            // e.g. chunk_fts written by ingestion) over a separately-registered IHybridSearchService —
-            // the latter's sparse index is NOT filled by FileVault ingestion, so it would return
-            // vector-only results under a Hybrid label.
-            //
-            // INativeHybridSearch has no filter parameter on its public surface yet, so a
-            // document-id-scoped request can't be pushed into the native path — using it anyway would
-            // silently truncate-then-filter an unscoped candidate window (FluxFeed docket #172).
-            // Only take the native path when the caller isn't asking for scoping.
-            if (docIdSet == null && _vectorStore is INativeHybridSearch nativeHybrid)
+            // Prefer the vector store's native hybrid (vec + the keyword rows the store itself wrote
+            // at ingestion, e.g. chunk_fts) over a separately-registered IHybridSearchService: the
+            // native path needs no second index and no reindex. A document-id scope is pushed into
+            // it as a metadata filter, which the store applies to both legs before fusion — so a
+            // scoped request gets the fused ranking of the in-scope chunks, not a fused ranking of
+            // everything filtered afterwards (FluxFeed docket #214: until the interface carried a
+            // filter, every scoped Hybrid request here silently ran as Vector).
+            if (_vectorStore is INativeHybridSearch nativeHybrid)
             {
                 var nativeResults = await NativeHybridSearchAsync(nativeHybrid, query, docIdSet, topK, minScore, ct);
                 LogSearchResults(_logger, query, nativeResults.Count);
@@ -872,19 +870,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 return new VaultPipelineSearchResponse(hybridResults, VaultSearchStrategy.Hybrid);
             }
 
-            if (docIdSet != null && _vectorStore is INativeHybridSearch)
-            {
-                // Native hybrid exists but can't honor the scope, and no IHybridSearchService is
-                // registered either — degrade to filtered vector-only rather than serve a hybrid
-                // result that leaked outside the requested scope.
-                LogHybridScopedFallback(_logger);
-            }
-            else
-            {
-                // Neither a native-hybrid store nor a hybrid service — degrade to vector and report
-                // it truthfully (no silent mismatch).
-                LogHybridUnavailableFallback(_logger);
-            }
+            // Neither a native-hybrid store nor a hybrid service — degrade to vector and report
+            // it truthfully (no silent mismatch).
+            LogHybridUnavailableFallback(_logger);
         }
 
         if (strategy == VaultSearchStrategy.Keyword)
@@ -1005,9 +993,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
         CancellationToken ct)
     {
         // Native hybrid fuses dense vectors with the store's own keyword index (e.g. chunk_fts);
-        // it takes the embedding plus the raw text query. Over-fetch to survive doc-id filtering.
+        // it takes the embedding plus the raw text query. The document-id scope goes in as a
+        // filter so both legs are scoped before fusion; the client-side projection below stays as
+        // the same correctness backstop the vector path keeps. Over-fetch to survive it.
         var queryEmbedding = await _embeddingService!.GenerateEmbeddingAsync(query, ct);
-        var nativeResults = await nativeHybrid.HybridSearchAsync(queryEmbedding, query, topK * 2, minScore, vectorWeight: null, ct);
+        var nativeResults = await nativeHybrid.HybridSearchAsync(
+            queryEmbedding, query, topK * 2, minScore, vectorWeight: null, BuildDocScopeFilter(docIdSet), ct);
         return ProjectHybrid(nativeResults, docIdSet, topK);
     }
 
@@ -1659,8 +1650,6 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogSearchResults(ILogger logger, string query, int count);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Hybrid search requested but IHybridSearchService is not registered; executing vector search (reported as ExecutedStrategy=Vector)")]
     private static partial void LogHybridUnavailableFallback(ILogger logger);
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Document-id-scoped hybrid search requested but only native hybrid (which cannot honor the scope) is available; executing vector search (reported as ExecutedStrategy=Vector)")]
-    private static partial void LogHybridScopedFallback(ILogger logger);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Keyword search requested but IKeywordSearchService is not registered; executing vector search (reported as ExecutedStrategy=Vector)")]
     private static partial void LogKeywordUnavailableFallback(ILogger logger);
     [LoggerMessage(Level = LogLevel.Warning, Message = "No content to index for {SourcePath}")]

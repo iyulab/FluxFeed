@@ -314,10 +314,14 @@ degenerates to vector-only. Check `IVaultPipeline.SupportsKeywordIndex` to confi
 it is on the interface, so holding the pipeline as `IVaultPipeline` is enough (`SupportsGraphRAG`
 reports the GraphRAG leg the same way).
 
-### Hybrid search — `IHybridSearchService`
+### Hybrid search — store-native, or `IHybridSearchService`
 
-`VaultSearchOptions.SearchStrategy = VaultSearchStrategy.Hybrid` is honored only when this service is
-registered. Otherwise the query runs as vector search and says so via
+`VaultSearchOptions.SearchStrategy = VaultSearchStrategy.Hybrid` is honored when either the vector
+store fuses natively (`INativeHybridSearch` — `FluxIndex.Storage.SQLite`'s sqlite-vec store does,
+over the FTS5 rows it writes itself at ingestion; preferred, no second index) or an
+`IHybridSearchService` is registered. A `PathScope` is pushed into the native path as a filter and
+applied to both legs before fusion, so a scoped request gets the fused ranking of the in-scope
+chunks (FluxIndex.Core 0.32.0+). Otherwise the query runs as vector search and says so via
 `VaultSearchResult.ExecutedStrategy` — compare it against `RequestedStrategy` rather than assuming
 the request was honored.
 

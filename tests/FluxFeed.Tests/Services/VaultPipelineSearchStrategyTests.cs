@@ -181,7 +181,7 @@ public class VaultPipelineSearchStrategyTests
         // Store exposes native hybrid (vec + its own populated keyword index, e.g. chunk_fts).
         var nativeStore = Substitute.For<IVectorStore, INativeHybridSearch>();
         ((INativeHybridSearch)nativeStore).HybridSearchAsync(
-                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<CancellationToken>())
+                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
             .Returns(new List<HybridSearchResult>
             {
                 new() { Chunk = new DocumentChunk { Id = "n", DocumentId = "doc-native", Content = "native fused", ChunkIndex = 0 }, FusedScore = 0.99 }
@@ -202,7 +202,7 @@ public class VaultPipelineSearchStrategyTests
     {
         var nativeStore = Substitute.For<IVectorStore, INativeHybridSearch>();
         ((INativeHybridSearch)nativeStore).HybridSearchAsync(
-                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<CancellationToken>())
+                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
             .Returns(new List<HybridSearchResult>
             {
                 new() { Chunk = new DocumentChunk { Id = "n2", DocumentId = "doc-native-2", Content = "fts hit", ChunkIndex = 0 }, FusedScore = 0.88 }
@@ -284,25 +284,50 @@ public class VaultPipelineSearchStrategyTests
     }
 
     [Fact]
-    public async Task SearchAsync_HybridRequest_Scoped_NativeHybridOnly_DegradesToScopedVector_NotUnscopedNative()
+    public async Task SearchAsync_HybridRequest_Scoped_NativeHybrid_PushesScopeIntoNativeFusion()
     {
-        // Native hybrid can't honor a document-id scope (no filters parameter on its surface yet —
-        // see the FluxFeed docket #172 companion note on INativeHybridSearch). With no
-        // IHybridSearchService registered either, the scoped request must fall through to the
-        // (filterable) vector leg rather than serve an out-of-scope native-hybrid result.
+        // FluxFeed docket #214: the native path used to be taken only for unscoped requests, so a
+        // consumer whose every search carries a PathScope never got hybrid at all — every default
+        // search silently ran as Vector. The scope now goes into the native call as a metadata
+        // filter (INativeHybridSearch gained the parameter in FluxIndex.Core 0.32.0) and the response
+        // reports the strategy that actually ran.
         var nativeStore = Substitute.For<IVectorStore, INativeHybridSearch>();
-        nativeStore.SearchAsync(Arg.Any<float[]>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<DocumentChunk>
+        ((INativeHybridSearch)nativeStore).HybridSearchAsync(
+                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(),
+                Arg.Is<Dictionary<string, object>?>(f => f != null && ((HashSet<string>)f["document_id"]).SetEquals(new[] { "keep" })),
+                Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>
             {
-                new() { Id = "v", DocumentId = "keep", Content = "vector-scoped hit", ChunkIndex = 0, Score = 0.5f }
+                new() { Chunk = new DocumentChunk { Id = "n", DocumentId = "keep", Content = "scoped fused hit", ChunkIndex = 0 }, FusedScore = 0.9 }
             });
         var pipeline = CreatePipelineWithStore(nativeStore, hybrid: null);
 
         var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
 
-        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Vector);
-        response.Results.Should().ContainSingle().Which.Content.Should().Be("vector-scoped hit");
-        await ((INativeHybridSearch)nativeStore).DidNotReceive().HybridSearchAsync(
-            Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<CancellationToken>());
+        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
+        response.Results.Should().ContainSingle().Which.Content.Should().Be("scoped fused hit");
+        // The filterable vector leg is not consulted: the scope was honoured inside the fusion.
+        await nativeStore.DidNotReceive().SearchAsync(Arg.Any<float[]>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_Scoped_NativeHybrid_KeepsTheClientSideScopeBackstop()
+    {
+        // A store that ignored the filter it was handed must still not leak an out-of-scope chunk to
+        // the caller — the projection re-applies the scope, the same backstop the vector path keeps.
+        var nativeStore = Substitute.For<IVectorStore, INativeHybridSearch>();
+        ((INativeHybridSearch)nativeStore).HybridSearchAsync(
+                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>
+            {
+                new() { Chunk = new DocumentChunk { Id = "a", DocumentId = "keep", Content = "in scope", ChunkIndex = 0 }, FusedScore = 0.5 },
+                new() { Chunk = new DocumentChunk { Id = "b", DocumentId = "drop", Content = "leaked", ChunkIndex = 0 }, FusedScore = 0.9 },
+            });
+        var pipeline = CreatePipelineWithStore(nativeStore, hybrid: null);
+
+        var response = await pipeline.SearchAsync("q", documentIds: new[] { "keep" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
+
+        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
+        response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("keep");
     }
 }
