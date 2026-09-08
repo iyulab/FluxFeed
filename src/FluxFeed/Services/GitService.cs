@@ -94,13 +94,19 @@ public sealed partial class GitService : IGitService
 
         var pathArg = string.IsNullOrEmpty(filePath) ? "" : $" -- \"{filePath}\"";
 
-        var (output, exitCode) = await RunGitWithExitCodeAsync(vaultPath, $"diff HEAD~1 HEAD{pathArg}", ct);
-        if (exitCode == 0)
-            return output;
+        // Probe the revisions before diffing. `--verify --quiet` exits non-zero without writing to
+        // stderr, so a missing revision is a plain branch here — not a logged "git command failed"
+        // that consumers read as vault corruption (a fresh entry with 0 or 1 commits is normal).
+        var (_, headExit) = await RunGitWithExitCodeAsync(vaultPath, "rev-parse --verify --quiet HEAD", ct);
+        if (headExit != 0)
+            return string.Empty; // no commits yet — nothing changed
 
-        // HEAD~1 doesn't resolve — most likely this is the repository's first commit.
-        var (fallbackOutput, fallbackExitCode) = await RunGitWithExitCodeAsync(vaultPath, $"diff {EmptyTreeSha} HEAD{pathArg}", ct);
-        return fallbackExitCode == 0 ? fallbackOutput : string.Empty;
+        var (_, parentExit) = await RunGitWithExitCodeAsync(vaultPath, "rev-parse --verify --quiet HEAD~1", ct);
+        // First commit: diff against git's empty tree so the result reads as "everything was added".
+        var baseRevision = parentExit == 0 ? "HEAD~1" : EmptyTreeSha;
+
+        var (output, exitCode) = await RunGitWithExitCodeAsync(vaultPath, $"diff {baseRevision} HEAD{pathArg}", ct);
+        return exitCode == 0 ? output : string.Empty;
     }
 
     public async Task<GitStatus> StatusAsync(string vaultPath, CancellationToken ct = default)

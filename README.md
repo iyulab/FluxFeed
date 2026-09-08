@@ -105,6 +105,9 @@ missing — the integrity check sets it, and re-memorizing restores search.
 
 `MemorizeAsync` runs the whole pipeline (re-extracting the source). `RefreshAsync` re-indexes the
 refined content without re-extracting — use it after hand-editing `append-text.md` or `qa.md`.
+With background processing on, both only enqueue a job and return the entry as it was; pass
+`waitForCompletion: true` (`MemorizeAsync(path, waitForCompletion: true)`,
+`RefreshAsync(path, waitForCompletion: true)`) to get the re-indexed entry — and its new commit — back.
 
 Each entry lives under the vault base path, keyed by a hash of its absolute file path:
 

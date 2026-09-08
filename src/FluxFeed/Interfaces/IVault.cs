@@ -50,6 +50,21 @@ public interface IVault
     Task<VaultEntry> RefreshAsync(string filePath, CancellationToken ct = default);
 
     /// <summary>
+    /// Refreshes a file's vault content without re-extraction, optionally awaiting the terminal
+    /// completion of the queued refresh job. With background processing enabled the single-argument
+    /// overload only enqueues the job and returns the entry as it was before the refresh; pass
+    /// <paramref name="waitForCompletion"/> = true to get the re-indexed entry (and its new commit)
+    /// back — the counterpart of <see cref="MemorizeAsync(string, bool, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="filePath">Source file whose vault content changed.</param>
+    /// <param name="waitForCompletion">Await terminal completion before returning.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The vault entry; re-read after the refresh when <paramref name="waitForCompletion"/> is true.</returns>
+    /// <exception cref="InvalidOperationException">The refresh job failed, or no queue worker is running.</exception>
+    /// <exception cref="OperationCanceledException">The refresh job was cancelled.</exception>
+    Task<VaultEntry> RefreshAsync(string filePath, bool waitForCompletion, CancellationToken ct = default);
+
+    /// <summary>
     /// Syncs all watched folders and queues necessary memorize/refresh operations.
     /// Detects changes and queues appropriate jobs.
     /// </summary>

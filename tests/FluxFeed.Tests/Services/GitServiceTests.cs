@@ -8,12 +8,55 @@ namespace FluxFeed.Tests.Services;
 public class GitServiceTests : IDisposable
 {
     private readonly GitService _git;
+    private readonly RecordingLogger _log = new();
     private readonly string _repoDir;
 
     public GitServiceTests()
     {
-        _git = new GitService(NullLogger<GitService>.Instance);
+        _git = new GitService(_log);
         _repoDir = Path.Combine(Path.GetTempPath(), "GitServiceTests_" + Guid.NewGuid().ToString("N"));
+    }
+
+    [Fact]
+    public async Task DiffLastChangeAsync_NoCommitsYet_ReturnsEmptyWithoutWarnings()
+    {
+        // A fresh entry whose memorize failed before its first commit is a normal state, not a
+        // damaged repository: no "git command failed" must leak into the consumer's log.
+        await _git.InitAsync(_repoDir, TestContext.Current.CancellationToken);
+
+        var diff = await _git.DiffLastChangeAsync(_repoDir, ct: TestContext.Current.CancellationToken);
+
+        diff.Should().BeEmpty();
+        _log.Warnings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DiffLastChangeAsync_FirstCommit_DoesNotLogWarnings()
+    {
+        await _git.InitAsync(_repoDir, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1 content", TestContext.Current.CancellationToken);
+        await _git.CommitAsync(_repoDir, "v1", TestContext.Current.CancellationToken);
+
+        var diff = await _git.DiffLastChangeAsync(_repoDir, ct: TestContext.Current.CancellationToken);
+
+        diff.Should().Contain("+v1 content");
+        _log.Warnings.Should().BeEmpty(because: "HEAD~1 is probed, not tried-and-failed");
+    }
+
+    /// <summary>Captures warnings so tests can assert that a normal path stays silent.</summary>
+    private sealed class RecordingLogger : Microsoft.Extensions.Logging.ILogger<GitService>
+    {
+        public List<string> Warnings { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= Microsoft.Extensions.Logging.LogLevel.Warning)
+                Warnings.Add(formatter(state, exception));
+        }
     }
 
     public void Dispose()

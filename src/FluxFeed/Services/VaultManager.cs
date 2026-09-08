@@ -126,6 +126,38 @@ public sealed partial class VaultManager : IVault
         return await GetByHashAsync(entry.FilepathHash, ct) ?? entry;
     }
 
+    public async Task<VaultEntry> RefreshAsync(string filePath, bool waitForCompletion, CancellationToken ct = default)
+    {
+        // Without terminal-await, behavior is identical to the single-arg overload (pure additive).
+        if (!waitForCompletion || !_options.EnableBackgroundProcessing)
+            return await RefreshAsync(filePath, ct);
+
+        var fullPath = Path.GetFullPath(filePath);
+
+        var entry = await GetAsync(fullPath, ct);
+        if (entry == null)
+            throw new InvalidOperationException($"No vault entry exists for: {fullPath}. Use MemorizeAsync first.");
+
+        if (!entry.RefinedExists)
+            throw new InvalidOperationException(
+                $"No refined content found at {entry.RefinedMdPath}. Run memorize first. Current stage: {entry.Stage}");
+
+        // Enqueue, then await the queue's terminal transition (signal-driven, no polling) — the
+        // same contract as MemorizeAsync(waitForCompletion: true).
+        var job = await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, ct);
+        LogQueuedRefresh(_logger, fullPath);
+
+        var terminal = await _queue.WaitForJobAsync(job.Id, ct);
+        if (terminal.Status == VaultJobStatus.Failed)
+            throw new InvalidOperationException(
+                $"Refresh job failed for {fullPath}: {terminal.ErrorMessage ?? "unknown error"}");
+        if (terminal.Status == VaultJobStatus.Cancelled)
+            throw new OperationCanceledException($"Refresh job was cancelled for {fullPath}.");
+
+        // Re-read so callers see the re-indexed entry, not the pre-refresh snapshot.
+        return await GetByHashAsync(entry.FilepathHash, ct) ?? entry;
+    }
+
     public async Task<VaultEntry> RefreshAsync(string filePath, CancellationToken ct = default)
     {
         var fullPath = Path.GetFullPath(filePath);

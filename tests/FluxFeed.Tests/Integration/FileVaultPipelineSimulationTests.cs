@@ -20,7 +20,6 @@ namespace FluxFeed.Tests.Integration;
 /// Full pipeline simulation tests for FileVault.
 /// Tests the complete flow: memorize → search → change → rememorize → search → delete
 /// </summary>
-[Trait("Category", "Integration")]
 public class FileVaultPipelineSimulationTests : IDisposable
 {
     private readonly ITestOutputHelper _output;

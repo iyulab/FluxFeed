@@ -115,6 +115,67 @@ public sealed class ReadmeDefaultStackTests : IDisposable
         entry.Stage.Should().Be(ProcessingStage.Memorized);
     }
 
+    [Fact]
+    public async Task ReadmeStack_HandEditedAppendText_RefreshIndexesAndCommitsIt()
+    {
+        // README: "use RefreshAsync after hand-editing append-text.md". Inline mode makes the refresh
+        // synchronous so the assertions are deterministic.
+        await using var provider = BuildReadmeStack(o => o.EnableBackgroundProcessing = false);
+
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var file = Path.Combine(_docs, "vacation-policy.md");
+
+        var entry = await vault.MemorizeAsync(file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized);
+        var commitsAfterMemorize = await vault.LogAsync(file, ct: TestContext.Current.CancellationToken);
+
+        await File.WriteAllTextAsync(entry.AppendTextPath,
+            "\nThe vault mascot is a purple axolotl named Zorbix.\n", TestContext.Current.CancellationToken);
+
+        var refreshed = await vault.RefreshAsync(file, TestContext.Current.CancellationToken);
+        refreshed.Stage.Should().Be(ProcessingStage.Memorized);
+
+        var commitsAfterRefresh = await vault.LogAsync(file, ct: TestContext.Current.CancellationToken);
+        commitsAfterRefresh.Count.Should().Be(commitsAfterMemorize.Count + 1,
+            because: "refresh auto-commits the hand-edited vault content");
+
+        var result = await vault.SearchAsync("purple axolotl Zorbix", ct: TestContext.Current.CancellationToken);
+        result.Items.Should().NotBeEmpty();
+        result.Items[0].SourcePath.Should().EndWith("vacation-policy.md");
+        result.Items[0].Content.Should().Contain("Zorbix", because: "the appended text must be part of the indexed chunks");
+    }
+
+    [Fact]
+    public async Task ReadmeStack_BackgroundMode_RefreshWaitForCompletion_ReturnsReindexedEntry()
+    {
+        // Background mode: RefreshAsync(path) only enqueues and returns the pre-refresh snapshot, which
+        // is what made a consumer script read "refresh did nothing". The waitForCompletion overload
+        // mirrors MemorizeAsync and returns the entry after the worker re-indexed and committed.
+        await using var provider = BuildReadmeStack();
+        await using var worker = await StartHostedServicesAsync(provider);
+
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var file = Path.Combine(_docs, "vacation-policy.md");
+
+        var entry = await vault.MemorizeAsync(file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        var commitsAfterMemorize = await vault.LogAsync(file, ct: TestContext.Current.CancellationToken);
+
+        await File.WriteAllTextAsync(entry.AppendTextPath,
+            "\nThe vault mascot is a purple axolotl named Zorbix.\n", TestContext.Current.CancellationToken);
+
+        var refreshed = await vault.RefreshAsync(file, waitForCompletion: true, TestContext.Current.CancellationToken);
+
+        refreshed.Stage.Should().Be(ProcessingStage.Memorized);
+        var commitsAfterRefresh = await vault.LogAsync(file, ct: TestContext.Current.CancellationToken);
+        commitsAfterRefresh.Count.Should().Be(commitsAfterMemorize.Count + 1);
+
+        var result = await vault.SearchAsync("purple axolotl Zorbix", ct: TestContext.Current.CancellationToken);
+        result.Items.Should().NotBeEmpty();
+        result.Items[0].Content.Should().Contain("Zorbix");
+    }
+
     private ServiceProvider BuildReadmeStack(Action<FileVaultOptions>? configure = null)
     {
         var services = new ServiceCollection();
