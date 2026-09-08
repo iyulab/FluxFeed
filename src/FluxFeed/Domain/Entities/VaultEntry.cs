@@ -242,10 +242,35 @@ public sealed class VaultEntry
             // entry, not a damaged one.
             return null;
         }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException && IsGoneAfterRace(metaPath, entryPath))
+        {
+            // Windows reports a file in the pending-delete window as ERROR_ACCESS_DENIED rather than
+            // not-found, so a read racing the entry's removal surfaced here as "unreadable" — an
+            // error log in ListAsync, an entry in ListUnreadableAsync, a "rebuilding" warning in
+            // GetByHash. A record that is disappearing is absent, not damaged.
+            return null;
+        }
         catch (Exception ex) when (ex is not VaultRecordUnreadableException)
         {
             throw new VaultRecordUnreadableException(metaPath, ex);
         }
+    }
+
+    /// <summary>
+    /// After an access/IO failure, decides whether the record was in fact being deleted: the metadata
+    /// file (or the entry directory) is gone now, or goes away within a short bounded wait — the
+    /// pending-delete window closes as soon as the deleting side releases its last handle.
+    /// </summary>
+    private static bool IsGoneAfterRace(string metaPath, string entryPath)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            if (!File.Exists(metaPath) || !Directory.Exists(entryPath))
+                return true;
+            Thread.Sleep(15);
+        }
+
+        return !File.Exists(metaPath) || !Directory.Exists(entryPath);
     }
 
     /// <summary>

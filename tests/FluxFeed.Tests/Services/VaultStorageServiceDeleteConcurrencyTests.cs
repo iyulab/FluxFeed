@@ -73,12 +73,22 @@ public class VaultStorageServiceDeleteConcurrencyTests : IDisposable
         var entry = CreateEntryWithMetadata("concurrent-read.txt");
 
         using var stop = new CancellationTokenSource();
+        var unreadableSeen = 0;
         var reader = Task.Run(() =>
         {
             while (!stop.IsCancellationRequested)
             {
-                // Real production read path used by VaultManager.ListAsync.
-                _ = VaultEntry.LoadByHash(entry.FilepathHash, _vaultDir);
+                try
+                {
+                    // Real production read path used by VaultManager.ListAsync.
+                    _ = VaultEntry.LoadByHash(entry.FilepathHash, _vaultDir);
+                }
+                catch (FluxFeed.Domain.Exceptions.VaultRecordUnreadableException)
+                {
+                    // A read that races the delete must resolve to "absent" (null), never to
+                    // "unreadable": Windows reports the pending-delete window as access denied.
+                    Interlocked.Increment(ref unreadableSeen);
+                }
             }
         }, TestContext.Current.CancellationToken);
 
@@ -90,6 +100,8 @@ public class VaultStorageServiceDeleteConcurrencyTests : IDisposable
         // Assert
         Directory.Exists(entry.EntryPath).Should().BeFalse(
             "the entry directory must be physically removed even under concurrent meta.json reads");
+        unreadableSeen.Should().Be(0,
+            "a record that is being deleted is absent, not damaged - no error log, no unreadable report, no rebuild");
     }
 
     [Fact]

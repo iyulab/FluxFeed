@@ -289,6 +289,8 @@ public sealed partial class VaultFactory : IVaultFactory
             AutoCleanupOrphans = source.AutoCleanupOrphans,
             DefaultIncludePatterns = [.. source.DefaultIncludePatterns],
             DefaultExcludePatterns = [.. source.DefaultExcludePatterns],
+            AdditionalTextExtensions = new HashSet<string>(source.AdditionalTextExtensions, source.AdditionalTextExtensions.Comparer),
+            MaxImageEnrichmentAttempts = source.MaxImageEnrichmentAttempts,
             MaxConcurrentProcessing = source.MaxConcurrentProcessing,
             QueuePollingIntervalMs = source.QueuePollingIntervalMs,
             EnableAutoRetry = source.EnableAutoRetry,
@@ -303,7 +305,8 @@ public sealed partial class VaultFactory : IVaultFactory
                 MaxChunkSize = source.Chunking.MaxChunkSize,
                 OverlapSize = source.Chunking.OverlapSize,
                 Strategy = source.Chunking.Strategy,
-                Language = source.Chunking.Language
+                Language = source.Chunking.Language,
+                FormatStrategies = new Dictionary<string, string>(source.Chunking.FormatStrategies, source.Chunking.FormatStrategies.Comparer)
             }
         };
     }

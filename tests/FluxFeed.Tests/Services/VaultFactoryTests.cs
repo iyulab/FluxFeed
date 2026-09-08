@@ -103,6 +103,57 @@ public sealed class VaultFactoryTests : IDisposable
     }
 
     [Fact]
+    public void GetOrCreate_CarriesEverySettableOptionToTheTenant()
+    {
+        // VaultFactory clones the default options per tenant with a hand-maintained copy list; three
+        // options added in 0.20.0 were missing from it and tenants silently fell back to defaults. Give
+        // every settable property a non-default value and require it to arrive on the tenant, so a new
+        // option cannot be forgotten without failing here. VaultBasePath/VaultId are the factory's own.
+        var source = new FileVaultOptions { VaultBasePath = _basePath, EnableBackgroundProcessing = false };
+        var skip = new[] { nameof(FileVaultOptions.VaultBasePath), nameof(FileVaultOptions.VaultId), nameof(FileVaultOptions.EnableBackgroundProcessing) };
+        var scalar = typeof(FileVaultOptions).GetProperties()
+            .Where(p => p.CanWrite && !skip.Contains(p.Name) && p.PropertyType != typeof(ChunkingDefaults))
+            .ToList();
+        foreach (var p in scalar)
+            p.SetValue(source, Distinct(p.PropertyType, p.GetValue(source), p.Name));
+        var chunkingProps = typeof(ChunkingDefaults).GetProperties().Where(p => p.CanWrite).ToList();
+        foreach (var p in chunkingProps)
+            p.SetValue(source.Chunking, Distinct(p.PropertyType, p.GetValue(source.Chunking), p.Name));
+
+        using var factory = new VaultFactory(
+            Substitute.For<IServiceProvider>(), NullLoggerFactory.Instance, MsOptions.Create(source),
+            new ContentHasher(), _git, _fileWatcher, vectorStore: _vectorStore, embeddingService: _embeddingService);
+        factory.GetOrCreate(TenantId);
+        var tenant = factory.GetContext(TenantId)!.Options;
+
+        foreach (var p in scalar)
+            p.GetValue(tenant).Should().BeEquivalentTo(p.GetValue(source), because: $"{p.Name} must survive CloneOptions");
+        foreach (var p in chunkingProps)
+            p.GetValue(tenant.Chunking).Should().BeEquivalentTo(p.GetValue(source.Chunking), because: $"Chunking.{p.Name} must survive CloneOptions");
+    }
+
+    private static object? Distinct(Type type, object? current, string name)
+    {
+        type = Nullable.GetUnderlyingType(type) ?? type;
+        if (type == typeof(bool)) return !(current is true);
+        if (type == typeof(int)) return (current is int i ? i : 0) + 7;
+        if (type == typeof(long)) return (current is long l ? l : 0) + 7;
+        if (type == typeof(double)) return (current is double d ? d : 0) + 0.5;
+        if (type == typeof(string)) return "distinct-" + name;
+        if (type == typeof(TimeSpan)) return (current is TimeSpan t ? t : TimeSpan.Zero) + TimeSpan.FromSeconds(11);
+        if (type.IsEnum)
+        {
+            var values = Enum.GetValues(type).Cast<object>().ToList();
+            return values.First(v => !Equals(v, current));
+        }
+        if (type == typeof(List<string>) || type == typeof(IList<string>) || type == typeof(string[]))
+            return type == typeof(string[]) ? new[] { "distinct-" + name } : new List<string> { "distinct-" + name };
+        if (type == typeof(HashSet<string>)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".distinct-" + name };
+        if (type == typeof(Dictionary<string, string>)) return new Dictionary<string, string> { ["." + name] = "distinct" };
+        throw new InvalidOperationException($"No distinct value generator for {name} ({type.Name}) - extend the test when FileVaultOptions grows a new kind of property");
+    }
+
+    [Fact]
     public async Task GetOrCreate_BackgroundProcessingOn_TenantQueueHasItsOwnWorker_MemorizeCompletes()
     {
         // Default options keep background processing on. The hosted VaultBackgroundService only
