@@ -21,6 +21,8 @@
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+    <!-- README default stack (AddSQLiteVecVectorStore + AddFileVaultWithFluxIndex) exercised for real -->
+    <PackageReference Include="FluxIndex.Storage.SQLite" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\FluxFeed\FluxFeed.csproj" />

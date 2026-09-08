@@ -163,6 +163,16 @@ public sealed class FileVaultOptions
     /// Enable background queue processing.
     /// </summary>
     public bool EnableBackgroundProcessing { get; set; } = true;
+
+    /// <summary>
+    /// How long a caller that waits for a queued job (<c>MemorizeAsync(..., waitForCompletion: true)</c>)
+    /// tolerates the absence of a queue worker before failing. The background worker is an
+    /// <c>IHostedService</c> and only runs inside a Generic Host; without one a queued job can never
+    /// complete, so the wait throws an <see cref="InvalidOperationException"/> that names the fix
+    /// instead of hanging forever. Long enough to cover a host that is still starting its hosted
+    /// services; raise it if your host starts many services before the vault worker.
+    /// </summary>
+    public TimeSpan WorkerStartupTimeout { get; set; } = TimeSpan.FromSeconds(5);
 }
 
 /// <summary>

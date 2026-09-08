@@ -329,6 +329,7 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 | `EnableRealTimeWatch` | `true` | Folder watching |
 | `DebounceDelayMs` | `500` | Merge window for rapid change events |
 | `EnableBackgroundProcessing` | `true` | Background queue; when false the service idles |
+| `WorkerStartupTimeout` | `5s` | How long `MemorizeAsync(..., waitForCompletion: true)` tolerates the absence of a running queue worker before throwing. The worker is an `IHostedService`, so without a Generic Host (or `EnableBackgroundProcessing = false`) the wait fails fast with the fix in its message instead of hanging |
 | `MaxConcurrentProcessing` | `4` | Concurrent file operations |
 | `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` | `true` / `3` / `5000` | Retry policy |
 | `AutoCleanupOrphans` | `false` | Remove entries whose source file is gone, during sync |

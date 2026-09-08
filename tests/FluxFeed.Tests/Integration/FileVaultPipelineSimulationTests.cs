@@ -27,7 +27,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
     private readonly string _testDir;
     private readonly string _vaultDir;
     private readonly InMemoryVectorStore _vectorStore;
-    private readonly InMemoryEmbeddingService _embeddingService;
+    private readonly DeterministicEmbeddingService _embeddingService;
     private readonly VaultManager _vault;
     private readonly VaultPipeline _pipeline;
     private readonly VaultStorageService _storage;
@@ -46,7 +46,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
         // Real services
         _vectorStore = new InMemoryVectorStore();
-        _embeddingService = new InMemoryEmbeddingService();
+        _embeddingService = new DeterministicEmbeddingService();
         _hasher = new ContentHasher();
 
         // Mocks
@@ -812,69 +812,6 @@ public class FileVaultPipelineSimulationTests : IDisposable
             }
             var denom = MathF.Sqrt(normA) * MathF.Sqrt(normB);
             return denom > 0 ? dot / denom : 0;
-        }
-    }
-
-    /// <summary>
-    /// Simple deterministic embedding service for testing.
-    /// Uses hash-based embeddings for reproducible results.
-    /// </summary>
-    private class InMemoryEmbeddingService : IEmbeddingService
-    {
-        private const int Dimension = 128;
-        private const int MaxTokens = 8192;
-
-        public Task<float[]> GenerateEmbeddingAsync(string text, CancellationToken ct = default)
-        {
-            // Generate deterministic embedding based on text content
-            var embedding = new float[Dimension];
-            var words = text.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var word in words)
-            {
-                var hash = word.GetHashCode();
-                for (int i = 0; i < Dimension; i++)
-                {
-                    embedding[i] += MathF.Sin(hash * (i + 1) * 0.1f) * 0.1f;
-                }
-            }
-
-            // Normalize
-            var norm = MathF.Sqrt(embedding.Sum(x => x * x));
-            if (norm > 0)
-            {
-                for (int i = 0; i < Dimension; i++)
-                    embedding[i] /= norm;
-            }
-
-            return Task.FromResult(embedding);
-        }
-
-        public async Task<IEnumerable<float[]>> GenerateEmbeddingsBatchAsync(IEnumerable<string> texts, CancellationToken ct = default)
-        {
-            var results = new List<float[]>();
-            foreach (var text in texts)
-            {
-                results.Add(await GenerateEmbeddingAsync(text, ct));
-            }
-            return results;
-        }
-
-        public int GetEmbeddingDimension() => Dimension;
-        public string GetModelName() => "InMemoryTestEmbedding";
-        public int GetMaxTokens() => MaxTokens;
-
-        public FluxIndex.Core.Domain.ValueObjects.EmbeddingIdentity GetIdentity() => new()
-        {
-            Provider = "InMemory",
-            Model = GetModelName(),
-            Dimension = Dimension
-        };
-
-        public Task<int> CountTokensAsync(string text, CancellationToken ct = default)
-        {
-            // Simple approximation: ~4 characters per token
-            return Task.FromResult(text.Length / 4);
         }
     }
 

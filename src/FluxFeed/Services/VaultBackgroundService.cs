@@ -57,6 +57,10 @@ public sealed partial class VaultBackgroundService : BackgroundService
     {
         LogServiceStarting(_logger);
 
+        // Announce ourselves as the queue's consumer for the lifetime of this loop so that
+        // WaitForJobAsync can distinguish "worker still busy" from "no worker will ever run".
+        using var workerLease = _queueService.RegisterWorker();
+
         // Recover any stuck jobs from previous run
         var recovered = await _queueService.RecoverStuckJobsAsync(stoppingToken);
         if (recovered > 0)

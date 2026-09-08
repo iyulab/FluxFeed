@@ -27,6 +27,7 @@ public sealed partial class FluxIndexMemorizer
         _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        VectorStoreIdentityBinding.EnsureBound(_vectorStore, _embeddingService);
     }
 
     /// <summary>

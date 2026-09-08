@@ -109,8 +109,33 @@ public interface IVaultQueueService
     /// <param name="jobId">The job to await.</param>
     /// <param name="ct">Cancellation token; cancelling abandons the wait (the job itself is unaffected).</param>
     /// <returns>The job in its terminal state.</returns>
-    /// <exception cref="InvalidOperationException">No job exists with the given id.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// No job exists with the given id, or no worker registered via <see cref="RegisterWorker"/>
+    /// within <see cref="Options.FileVaultOptions.WorkerStartupTimeout"/> while the job is still
+    /// pending. The latter means nothing can ever complete the job (the queue is consumed only by
+    /// a running <c>VaultBackgroundService</c>), so the wait fails fast instead of hanging.
+    /// </exception>
     Task<VaultJob> WaitForJobAsync(Guid jobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Registers the caller as an active consumer of this queue for the lifetime of the returned
+    /// lease. <see cref="WaitForJobAsync"/> uses the lease count to detect a job that can never be
+    /// processed because no worker is running (for example, the hosted service was registered but
+    /// never started because the application has no Generic Host). Implementations that do not
+    /// track workers may keep the default no-op lease.
+    /// </summary>
+    /// <returns>A lease; dispose it when the worker stops consuming the queue.</returns>
+    IDisposable RegisterWorker() => NoOpWorkerLease.Instance;
+
+    /// <summary>
+    /// Default lease returned by <see cref="RegisterWorker"/> when the implementation does not
+    /// track workers.
+    /// </summary>
+    private sealed class NoOpWorkerLease : IDisposable
+    {
+        public static readonly NoOpWorkerLease Instance = new();
+        public void Dispose() { }
+    }
 
     /// <summary>
     /// Gets jobs with optional filters.

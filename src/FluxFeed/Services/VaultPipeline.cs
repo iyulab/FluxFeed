@@ -3,6 +3,7 @@ using System.Diagnostics;
 using FluxGuard.Remote.RAG;
 using FluxIndex.Core.Application.Interfaces;
 using FluxIndex.Core.Domain.Entities;
+using FluxFeed.Adapters;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
 using FluxFeed.Interfaces;
@@ -149,6 +150,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
         _chunker = chunker;
         _vectorStore = vectorStore;
         _embeddingService = embeddingService;
+        // The store's physical layout may depend on the embedding identity; bind before the first
+        // store access so consumers never have to call BindIdentity themselves.
+        VectorStoreIdentityBinding.EnsureBound(_vectorStore, _embeddingService);
         _hybridSearch = hybridSearch;
         _graphRAGService = graphRAGService;
         _keywordSearchService = keywordSearchService;

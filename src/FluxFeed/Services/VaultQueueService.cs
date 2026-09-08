@@ -23,10 +23,23 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     // caller registers a TCS keyed by jobId; Complete/Fail/Cancel resolve and remove it.
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<VaultJob>> _waiters = new();
 
+    // Worker presence. A pending job can only ever reach a terminal state through a registered
+    // worker (VaultBackgroundService), so WaitForJobAsync consults this instead of waiting forever
+    // when the hosted service was registered but never started (no Generic Host).
+    private readonly TimeSpan _workerStartupTimeout;
+    private readonly object _workerLock = new();
+    private int _activeWorkers;
+    private TaskCompletionSource _workerAvailable = NewWorkerSignal();
+
     private bool _isPaused;
     private bool _disposed;
 
     public bool IsPaused => _isPaused;
+
+    /// <summary>
+    /// Whether at least one worker currently holds a lease from <see cref="RegisterWorker"/>.
+    /// </summary>
+    public bool HasActiveWorker => Volatile.Read(ref _activeWorkers) > 0;
 
     public event EventHandler<VaultJob>? JobEnqueued;
     public event EventHandler<VaultJob>? JobCompleted;
@@ -38,6 +51,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var opts = options?.Value ?? new FileVaultOptions();
+        _workerStartupTimeout = opts.WorkerStartupTimeout;
         var basePath = opts.VaultBasePath ?? Path.Combine(Directory.GetCurrentDirectory(), opts.VaultDirectoryName);
         Directory.CreateDirectory(basePath);
 
@@ -475,6 +489,33 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
         try
         {
+            if (!HasActiveWorker)
+            {
+                // Nothing can complete this job until a worker exists. Give a worker that is still
+                // starting up (host boot, a sibling hosted service racing ours) a bounded grace,
+                // then fail with a configuration diagnosis instead of waiting forever.
+                var workerSignal = Volatile.Read(ref _workerAvailable).Task;
+                var completed = await Task.WhenAny(
+                        tcs.Task,
+                        workerSignal,
+                        Task.Delay(_workerStartupTimeout, ct))
+                    .ConfigureAwait(false);
+
+                if (!ReferenceEquals(completed, tcs.Task) && !ReferenceEquals(completed, workerSignal))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    _waiters.TryRemove(jobId, out _);
+                    throw new InvalidOperationException(
+                        $"Vault job {jobId} cannot complete: no queue worker is running " +
+                        $"(waited {_workerStartupTimeout.TotalSeconds:0.#}s for one to start). " +
+                        "VaultBackgroundService is registered as an IHostedService and only runs inside a " +
+                        "Generic Host (Host.CreateApplicationBuilder / WebApplication). Either host FluxFeed in " +
+                        "a Generic Host, start the IHostedService yourself, or set " +
+                        "FileVaultOptions.EnableBackgroundProcessing = false and call MemorizeAsync with " +
+                        "waitForCompletion: false.");
+                }
+            }
+
             return await tcs.Task.WaitAsync(ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -482,6 +523,46 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             // Abandon the wait; the job is unaffected.
             _waiters.TryRemove(jobId, out _);
             throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public IDisposable RegisterWorker()
+    {
+        lock (_workerLock)
+        {
+            _activeWorkers++;
+            _workerAvailable.TrySetResult();
+        }
+
+        return new WorkerLease(this);
+    }
+
+    private void ReleaseWorker()
+    {
+        lock (_workerLock)
+        {
+            if (--_activeWorkers == 0)
+            {
+                // Arm a fresh signal so a later waiter blocks until the next worker registers.
+                _workerAvailable = NewWorkerSignal();
+            }
+        }
+    }
+
+    private static TaskCompletionSource NewWorkerSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private sealed class WorkerLease : IDisposable
+    {
+        private VaultQueueService? _owner;
+
+        public WorkerLease(VaultQueueService owner) => _owner = owner;
+
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            owner?.ReleaseWorker();
         }
     }
 
