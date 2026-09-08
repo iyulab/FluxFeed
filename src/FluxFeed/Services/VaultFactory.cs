@@ -240,6 +240,20 @@ public sealed partial class VaultFactory : IVaultFactory
             managerLogger,
             optionsWrapper);
 
+        // A tenant queue is consumed by its own worker; the hosted VaultBackgroundService only
+        // consumes the container queue. Without this, background-mode tenant jobs sat Queued forever.
+        VaultQueueWorker? worker = null;
+        if (tenantOptions.EnableBackgroundProcessing)
+        {
+            worker = new VaultQueueWorker(
+                _loggerFactory.CreateLogger<VaultQueueWorker>(),
+                queue,
+                VaultQueueWorker.ForSharedPipeline(pipeline),
+                storage,
+                tenantOptions);
+            worker.Start();
+        }
+
         return new VaultContext
         {
             TenantId = tenantId,
@@ -248,7 +262,8 @@ public sealed partial class VaultFactory : IVaultFactory
             QueueService = queue,
             StorageService = storage,
             Pipeline = pipeline,
-            Options = tenantOptions
+            Options = tenantOptions,
+            Worker = worker
         };
     }
 
@@ -280,6 +295,9 @@ public sealed partial class VaultFactory : IVaultFactory
             MaxRetryCount = source.MaxRetryCount,
             RetryDelayMs = source.RetryDelayMs,
             EnableBackgroundProcessing = source.EnableBackgroundProcessing,
+            WorkerStartupTimeout = source.WorkerStartupTimeout,
+            GitExecutablePath = source.GitExecutablePath,
+            AllowMissingGit = source.AllowMissingGit,
             Chunking = new ChunkingDefaults
             {
                 MaxChunkSize = source.Chunking.MaxChunkSize,
@@ -292,6 +310,12 @@ public sealed partial class VaultFactory : IVaultFactory
 
     private static async Task DisposeContextAsync(VaultContext context)
     {
+        // Stop the tenant's worker first (waits for in-flight jobs), then close the queue it consumed.
+        if (context.Worker is { } worker)
+        {
+            await worker.DisposeAsync();
+        }
+
         // Dispose queue service (closes SQLite connection)
         if (context.QueueService is IDisposable disposableQueue)
         {
@@ -312,6 +336,7 @@ public sealed partial class VaultFactory : IVaultFactory
         // Synchronously dispose all contexts
         foreach (var context in _vaults.Values)
         {
+            context.Worker?.Dispose();
             if (context.QueueService is IDisposable disposable)
             {
                 disposable.Dispose();

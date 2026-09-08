@@ -133,4 +133,10 @@ public sealed class VaultContext
     /// The options used to create this vault.
     /// </summary>
     public required FileVaultOptions Options { get; init; }
+
+    /// <summary>
+    /// The worker consuming this tenant's queue, started by the factory when background processing
+    /// is enabled and stopped when the tenant is disposed. <c>null</c> when processing runs inline.
+    /// </summary>
+    public Services.VaultQueueWorker? Worker { get; init; }
 }

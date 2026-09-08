@@ -71,11 +71,12 @@ public sealed class VaultFactoryTests : IDisposable
     private VaultFactory CreateFactory(
         IHybridSearchService? hybridSearch = null,
         IGraphRAGService? graphRAGService = null,
-        IKeywordSearchService? keywordSearchService = null) =>
+        IKeywordSearchService? keywordSearchService = null,
+        bool backgroundProcessing = false) =>
         new(
             Substitute.For<IServiceProvider>(),
             NullLoggerFactory.Instance,
-            MsOptions.Create(new FileVaultOptions { VaultBasePath = _basePath, EnableBackgroundProcessing = false }),
+            MsOptions.Create(new FileVaultOptions { VaultBasePath = _basePath, EnableBackgroundProcessing = backgroundProcessing }),
             new ContentHasher(),
             _git,
             _fileWatcher,
@@ -99,6 +100,31 @@ public sealed class VaultFactoryTests : IDisposable
 
         await vault.MemorizeAsync(docPath);
         _ = context; // context kept for callers that need VaultBasePath/Pipeline
+    }
+
+    [Fact]
+    public async Task GetOrCreate_BackgroundProcessingOn_TenantQueueHasItsOwnWorker_MemorizeCompletes()
+    {
+        // Default options keep background processing on. The hosted VaultBackgroundService only
+        // consumes the container queue, so a tenant queue needs the worker the factory now starts -
+        // before this, the job sat Queued forever and waitForCompletion hung (or, since 0.20.0, threw).
+        await using var factory = CreateFactory(backgroundProcessing: true);
+        var vault = factory.GetOrCreate(TenantId);
+        var context = factory.GetContext(TenantId)!;
+        context.Worker.Should().NotBeNull();
+
+        var docDir = Path.Combine(_basePath, "sources");
+        Directory.CreateDirectory(docDir);
+        var docPath = Path.Combine(docDir, "background.txt");
+        await File.WriteAllTextAsync(docPath, "Tenant queues are consumed by a worker the factory owns.", TestContext.Current.CancellationToken);
+
+        var entry = await vault.MemorizeAsync(docPath, waitForCompletion: true, TestContext.Current.CancellationToken);
+
+        entry.Stage.Should().Be(ProcessingStage.Memorized);
+        await _vectorStore.Received(1).StoreBatchAsync(Arg.Is<IEnumerable<DocumentChunk>>(c => c.Any()), Arg.Any<CancellationToken>());
+
+        await factory.DisposeAsync(TenantId);
+        factory.GetContext(TenantId).Should().BeNull();
     }
 
     [Fact]

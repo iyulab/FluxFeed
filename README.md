@@ -350,8 +350,8 @@ var pipeline = new VaultPipeline(
 ## Multi-tenant
 
 `AddFileVaultFactoryWithFluxIndex` swaps the single `IVault` for an `IVaultFactory`. Each tenant gets
-its own `.vault/` directory and processing queue, while stateless services and the vector store are
-shared.
+its own `.vault/` directory, processing queue **and queue worker** (started by the factory, stopped when
+the tenant is disposed - no host involvement), while stateless services and the vector store are shared.
 
 ```csharp
 services.AddFileVaultFactoryWithFluxIndex(o => o.VaultBasePath = "./data");
