@@ -156,7 +156,19 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
                 await _concurrencyLimiter.WaitAsync(stoppingToken);
 
                 _ = ProcessJobAsync(job, stoppingToken)
-                    .ContinueWith(_ => _concurrencyLimiter.Release(), TaskScheduler.Default);
+                    .ContinueWith(
+                        _ =>
+                        {
+                            _concurrencyLimiter.Release();
+
+                            // The entry this job held is free again, and DequeueAsync excludes entries with a
+                            // job in flight -- so a sibling job for the same file may have been passed over
+                            // while this one ran. Without this signal the loop would only notice on its next
+                            // enqueue or after the 30s health-check timeout, which a caller awaiting
+                            // WaitForJobAsync feels directly.
+                            _jobSignal.Release();
+                        },
+                        TaskScheduler.Default);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

@@ -9,7 +9,8 @@ namespace FluxFeed.Interfaces;
 public interface IVaultQueueService
 {
     /// <summary>
-    /// Enqueues a memorize job.
+    /// Enqueues a memorize job, or merges into one already queued for the same file
+    /// (see <see cref="DequeueAsync"/> for why same-entry work is never run in parallel).
     /// </summary>
     Task<VaultJob> EnqueueMemorizeAsync(
         string filepathHash,
@@ -17,7 +18,8 @@ public interface IVaultQueueService
         CancellationToken ct = default);
 
     /// <summary>
-    /// Enqueues a memorize job with priority.
+    /// Enqueues a memorize job with priority, or merges into one already queued for the
+    /// same file — raising that job to this priority when this request is the more urgent one.
     /// </summary>
     Task<VaultJob> EnqueueMemorizeAsync(
         string filepathHash,
@@ -26,7 +28,7 @@ public interface IVaultQueueService
         CancellationToken ct = default);
 
     /// <summary>
-    /// Enqueues a refresh job.
+    /// Enqueues a refresh job, or merges into one already queued for the same file.
     /// </summary>
     Task<VaultJob> EnqueueRefreshAsync(
         string filepathHash,
@@ -34,7 +36,8 @@ public interface IVaultQueueService
         CancellationToken ct = default);
 
     /// <summary>
-    /// Enqueues a refresh job with priority.
+    /// Enqueues a refresh job with priority, or merges into one already queued for the
+    /// same file — raising that job to this priority when this request is the more urgent one.
     /// </summary>
     Task<VaultJob> EnqueueRefreshAsync(
         string filepathHash,
@@ -43,7 +46,7 @@ public interface IVaultQueueService
         CancellationToken ct = default);
 
     /// <summary>
-    /// Enqueues a remove job.
+    /// Enqueues a remove job, or merges into one already queued for the same file.
     /// </summary>
     Task<VaultJob> EnqueueRemoveAsync(
         string filepathHash,
@@ -51,7 +54,8 @@ public interface IVaultQueueService
         CancellationToken ct = default);
 
     /// <summary>
-    /// Enqueues a remove job with priority.
+    /// Enqueues a remove job with priority, or merges into one already queued for the
+    /// same file — raising that job to this priority when this request is the more urgent one.
     /// </summary>
     Task<VaultJob> EnqueueRemoveAsync(
         string filepathHash,
@@ -70,8 +74,17 @@ public interface IVaultQueueService
 
     /// <summary>
     /// Dequeues the next job for processing.
-    /// Returns null if queue is empty or paused.
+    /// Returns null if the queue is empty or paused, and also when every queued job belongs to a file
+    /// that already has a job in flight.
     /// </summary>
+    /// <remarks>
+    /// A vault's git repository is per <b>entry</b> (<c>VaultEntry.VaultPath</c> = <c>&lt;EntryPath&gt;/vault</c>),
+    /// so jobs for different files write different repositories and run in parallel up to
+    /// <c>MaxConcurrentProcessing</c>. Jobs for the <i>same</i> file do not: they would race one working
+    /// tree and one <c>index.lock</c>. This method therefore skips any entry that already has a job in
+    /// <see cref="VaultJobStatus.Processing"/>; the skipped job is handed out as soon as that one finishes.
+    /// A consumer does not need its own per-file lock on top of this.
+    /// </remarks>
     Task<VaultJob?> DequeueAsync(CancellationToken ct = default);
 
     /// <summary>

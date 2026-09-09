@@ -192,6 +192,23 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             await using var connection = CreateConnection();
             await connection.OpenAsync(ct);
 
+            // A request for work that is already waiting is the same unit of work: one Memorize of a file
+            // still sitting in the queue supersedes nothing and adds nothing, but as a second row it becomes
+            // a second writer of that entry's git repository. Merge into the waiting job instead, and let the
+            // caller wait on that one. Only Queued jobs merge -- a job already Processing has read the file
+            // as it was, so a request arriving after it started is asking about a later state (see
+            // VaultQueueSameEntryConcurrencyTests).
+            var existing = await FindCoalescibleJobAsync(connection, filepathHash, jobType, priority, ct);
+            if (existing is not null)
+            {
+                LogCoalesced(_logger, jobType, filePath, existing.Id);
+
+                // Still a wake signal: the worker may be parked on its 30s health-check wait, and this
+                // caller is about to await the merged job.
+                JobEnqueued?.Invoke(this, existing);
+                return existing;
+            }
+
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO vault_jobs (id, file_path, filepath_hash, job_type, status, priority, queued_at, retry_count, max_retries)
@@ -261,10 +278,18 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                        last_completed_chunk_index
                 FROM vault_jobs
                 WHERE status = @status
+                  AND filepath_hash NOT IN (
+                      SELECT filepath_hash FROM vault_jobs WHERE status = @processing
+                  )
                 ORDER BY priority DESC, queued_at ASC
                 LIMIT 1
                 """;
             selectCmd.Parameters.AddWithValue("@status", (int)VaultJobStatus.Queued);
+            // A git repository in FluxFeed is per entry (VaultEntry.VaultPath = <EntryPath>/vault), so two
+            // jobs for two files are safe to run together and two jobs for ONE file are not: they race the
+            // same working tree and the same index.lock. Excluding entries that already have a job in flight
+            // is what makes MaxConcurrentProcessing > 1 safe without serializing unrelated files.
+            selectCmd.Parameters.AddWithValue("@processing", (int)VaultJobStatus.Processing);
 
             await using var reader = await selectCmd.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct))
@@ -885,6 +910,69 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
     #region Helpers
 
+    /// <summary>
+    /// Returns the Queued job this request should merge into, or null when it should be inserted as a new
+    /// row. Raises the found job's priority first when the incoming request is more urgent, so coalescing
+    /// never demotes an escalation into a low-priority job that happened to be queued first.
+    /// </summary>
+    private static async Task<VaultJob?> FindCoalescibleJobAsync(
+        SqliteConnection connection,
+        string filepathHash,
+        VaultJobType jobType,
+        VaultJobPriority priority,
+        CancellationToken ct)
+    {
+        VaultJob existing;
+
+        await using (var findCmd = connection.CreateCommand())
+        {
+            findCmd.CommandText = """
+                SELECT id, file_path, filepath_hash, job_type, status, priority, queued_at,
+                       started_at, completed_at, retry_count, max_retries, error_message,
+                       last_completed_chunk_index
+                FROM vault_jobs
+                WHERE filepath_hash = @filepath_hash AND job_type = @job_type AND status = @status
+                ORDER BY priority DESC, queued_at ASC
+                LIMIT 1
+                """;
+            findCmd.Parameters.AddWithValue("@filepath_hash", filepathHash);
+            findCmd.Parameters.AddWithValue("@job_type", (int)jobType);
+            findCmd.Parameters.AddWithValue("@status", (int)VaultJobStatus.Queued);
+
+            await using var reader = await findCmd.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct))
+                return null;
+
+            existing = ReadJob(reader);
+        }
+
+        if (priority <= existing.Priority)
+            return existing;
+
+        await using (var raiseCmd = connection.CreateCommand())
+        {
+            raiseCmd.CommandText = "UPDATE vault_jobs SET priority = @priority WHERE id = @id";
+            raiseCmd.Parameters.AddWithValue("@priority", (int)priority);
+            raiseCmd.Parameters.AddWithValue("@id", existing.Id.ToString());
+            await raiseCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        return VaultJob.Restore(
+            id: existing.Id,
+            filePath: existing.FilePath,
+            filepathHash: existing.FilepathHash,
+            jobType: existing.JobType,
+            status: existing.Status,
+            priority: priority,
+            queuedAt: existing.QueuedAt,
+            startedAt: existing.StartedAt,
+            completedAt: existing.CompletedAt,
+            retryCount: existing.RetryCount,
+            maxRetries: existing.MaxRetries,
+            errorMessage: existing.ErrorMessage,
+            lastCompletedChunkIndex: existing.LastCompletedChunkIndex);
+    }
+
     private static VaultJob ReadJob(SqliteDataReader reader)
     {
         return VaultJob.Restore(
@@ -928,6 +1016,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     private static partial void LogDatabaseInitialized(ILogger logger);
     [LoggerMessage(Level = LogLevel.Debug, Message = "Enqueued {JobType} job for {FilePath}")]
     private static partial void LogEnqueued(ILogger logger, VaultJobType jobType, string filePath);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Coalesced {JobType} request for {FilePath} into queued job {JobId}")]
+    private static partial void LogCoalesced(ILogger logger, VaultJobType jobType, string filePath, Guid jobId);
     [LoggerMessage(Level = LogLevel.Debug, Message = "Dequeued job {JobId} for {FilePath}")]
     private static partial void LogDequeued(ILogger logger, Guid jobId, string filePath);
     [LoggerMessage(Level = LogLevel.Debug, Message = "Completed job {JobId}")]

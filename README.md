@@ -418,7 +418,7 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 | `GitExecutablePath` | `git` | Git CLI used for vault history; set an explicit path when git is not on PATH |
 | `AllowMissingGit` | `false` | When true, a missing git CLI degrades to a history-less vault (one warning) instead of failing the first vault operation |
 | `WorkerStartupTimeout` | `5s` | How long `MemorizeAsync(..., waitForCompletion: true)` tolerates the absence of a running queue worker before throwing. The worker is an `IHostedService`, so without a Generic Host (or `EnableBackgroundProcessing = false`) the wait fails fast with the fix in its message instead of hanging |
-| `MaxConcurrentProcessing` | `4` | Concurrent file operations |
+| `MaxConcurrentProcessing` | `4` | Concurrent file operations. Jobs for **different** files run in parallel up to this limit; jobs for the **same** file never do (see below) |
 | `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` | `true` / `3` / `5000` | Retry policy |
 | `AutoCleanupOrphans` | `false` | Remove entries whose source file is gone, during sync |
 | `Chunking.MaxChunkSize` / `OverlapSize` / `Strategy` | `1024` / `128` / `Intelligent` | Chunking defaults, with per-extension overrides via `Chunking.FormatStrategies` |
@@ -427,6 +427,19 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 The background worker (`VaultBackgroundService`) holds a lease from `IVaultQueueService.RegisterWorker()` while it consumes the queue; that lease is
 how `WaitForJobAsync` tells "a worker is busy" from "nobody will ever process this job". A custom `IVaultQueueService` implementation should return a
 real lease from `RegisterWorker()` (the interface default is a no-op lease, which disables the check).
+
+### Same-file work is serialized for you
+
+A vault's git repository lives per **entry** (`VaultEntry.VaultPath` = `<EntryPath>/vault`), not per FileVault. Two jobs for two files
+therefore commit into two different repositories and are safe to run together — that is the parallelism `MaxConcurrentProcessing` buys.
+Two jobs for one file are not: they would write one working tree and race one `index.lock`.
+
+The queue handles this itself, so **a consumer does not need a per-file lock of its own**:
+
+- `DequeueAsync` skips any entry that already has a job in flight, and hands that job out as soon as the running one finishes.
+- Enqueuing work that is already **queued** for the same file and type merges into the waiting job rather than adding a second row —
+  the caller awaits the job that already exists. A more urgent request raises that job's priority instead of being demoted into it.
+  A job already **processing** is not merged into: it read the file as it was, so a later request needs its own run.
 
 ## License
 
