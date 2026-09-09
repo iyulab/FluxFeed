@@ -53,8 +53,8 @@ public class VaultManagerTests : IDisposable
         _pipelineMock.ExtractAsync(Arg.Any<VaultEntry>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         // Setup queue mock
-        _queueServiceMock.EnqueueMemorizeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(callInfo => { var hash = callInfo.ArgAt<string>(0); var path = callInfo.ArgAt<string>(1); return CreateTestJob(hash, path, VaultJobType.Memorize); });
-        _queueServiceMock.EnqueueRefreshAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(callInfo => { var hash = callInfo.ArgAt<string>(0); var path = callInfo.ArgAt<string>(1); return CreateTestJob(hash, path, VaultJobType.Refresh); });
+        _queueServiceMock.EnqueueMemorizeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>()).Returns(callInfo => { var hash = callInfo.ArgAt<string>(0); var path = callInfo.ArgAt<string>(1); return CreateTestJob(hash, path, VaultJobType.Memorize); });
+        _queueServiceMock.EnqueueRefreshAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>()).Returns(callInfo => { var hash = callInfo.ArgAt<string>(0); var path = callInfo.ArgAt<string>(1); return CreateTestJob(hash, path, VaultJobType.Refresh); });
         _queueServiceMock.GetStatisticsAsync(Arg.Any<CancellationToken>()).Returns(new QueueStatistics());
 
         var options = MsOptions.Create(new FileVaultOptions
@@ -140,7 +140,7 @@ public class VaultManagerTests : IDisposable
         await _queueServiceMock.Received(1).EnqueueMemorizeAsync(
             Arg.Any<string>(),
             Path.GetFullPath(filePath),
-            Arg.Any<CancellationToken>());
+            Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -183,7 +183,7 @@ public class VaultManagerTests : IDisposable
 
         result.Should().NotBeNull();
         await _queueServiceMock.Received(1).EnqueueMemorizeAsync(
-            Arg.Any<string>(), Path.GetFullPath(filePath), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Path.GetFullPath(filePath), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
         await _queueServiceMock.Received(1).WaitForJobAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
@@ -195,7 +195,7 @@ public class VaultManagerTests : IDisposable
         await _vault.MemorizeAsync(filePath, waitForCompletion: false, ct: TestContext.Current.CancellationToken);
 
         await _queueServiceMock.Received(1).EnqueueMemorizeAsync(
-            Arg.Any<string>(), Path.GetFullPath(filePath), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Path.GetFullPath(filePath), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
         await _queueServiceMock.DidNotReceive().WaitForJobAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
@@ -264,7 +264,7 @@ public class VaultManagerTests : IDisposable
         await _queueServiceMock.Received(1).EnqueueRefreshAsync(
             Arg.Any<string>(),
             Path.GetFullPath(filePath),
-            Arg.Any<CancellationToken>());
+            Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -572,15 +572,15 @@ public class VaultManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task GetQueueStatusAsync_PropagatesLastProcessedAtAndAverageProcessingTime()
+    public async Task GetQueueStatusAsync_PropagatesLastSucceededAtAndAverageProcessingTime()
     {
         // Arrange — regression guard: the mapping from QueueStatistics (internal) to QueueStatus
-        // (public) previously dropped LastProcessedAt and never carried AverageProcessingTimeMs at
+        // (public) previously dropped LastSucceededAt and never carried AverageProcessingTimeMs at
         // all, so both always read as 0/null regardless of what the queue actually recorded.
         var lastProcessedAt = DateTimeOffset.UtcNow;
         _queueServiceMock.GetStatisticsAsync(Arg.Any<CancellationToken>()).Returns(new QueueStatistics
         {
-            LastProcessedAt = lastProcessedAt,
+            LastSucceededAt = lastProcessedAt,
             AverageProcessingTimeMs = 123.45,
         });
 
@@ -588,7 +588,7 @@ public class VaultManagerTests : IDisposable
         var status = await _vault.GetQueueStatusAsync(TestContext.Current.CancellationToken);
 
         // Assert
-        status.LastProcessedAt.Should().Be(lastProcessedAt);
+        status.LastSucceededAt.Should().Be(lastProcessedAt);
         status.AverageProcessingTimeMs.Should().Be(123.45);
     }
 
@@ -600,7 +600,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadata(filePath);
 
         _pipelineMock.RemoveAsync(Arg.Any<VaultEntry>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _queueServiceMock.EnqueueRemoveAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(callInfo => { var hash = callInfo.ArgAt<string>(0); var path = callInfo.ArgAt<string>(1); return CreateTestJob(hash, path, VaultJobType.Remove); });
+        _queueServiceMock.EnqueueRemoveAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>()).Returns(callInfo => { var hash = callInfo.ArgAt<string>(0); var path = callInfo.ArgAt<string>(1); return CreateTestJob(hash, path, VaultJobType.Remove); });
 
         // Act
         await _vault.RemoveAsync(filePath, TestContext.Current.CancellationToken);
@@ -609,7 +609,7 @@ public class VaultManagerTests : IDisposable
         await _queueServiceMock.Received(1).EnqueueRemoveAsync(
             Arg.Any<string>(),
             Path.GetFullPath(filePath),
-            Arg.Any<CancellationToken>());
+            Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
     }
 
     private string CreateTestFile(string fileName, string content)
@@ -696,7 +696,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadata(path1);
         CreateEntryWithMetadata(path2);
 
-        _queueServiceMock.EnqueueRemoveAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        _queueServiceMock.EnqueueRemoveAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>())
             .Returns(callInfo => CreateTestJob(
                 callInfo.ArgAt<string>(0), callInfo.ArgAt<string>(1), VaultJobType.Remove));
 
@@ -705,9 +705,9 @@ public class VaultManagerTests : IDisposable
 
         // Assert
         await _queueServiceMock.Received(1).EnqueueRemoveAsync(
-            Arg.Any<string>(), Path.GetFullPath(path1), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Path.GetFullPath(path1), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
         await _queueServiceMock.Received(1).EnqueueRemoveAsync(
-            Arg.Any<string>(), Path.GetFullPath(path2), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Path.GetFullPath(path2), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -718,7 +718,7 @@ public class VaultManagerTests : IDisposable
         var missingPath = Path.Combine(_testDir, "does-not-exist.txt");
         CreateEntryWithMetadata(existingPath);
 
-        _queueServiceMock.EnqueueRemoveAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        _queueServiceMock.EnqueueRemoveAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>())
             .Returns(callInfo => CreateTestJob(
                 callInfo.ArgAt<string>(0), callInfo.ArgAt<string>(1), VaultJobType.Remove));
 
@@ -727,9 +727,9 @@ public class VaultManagerTests : IDisposable
 
         // Assert — only the existing path is queued
         await _queueServiceMock.Received(1).EnqueueRemoveAsync(
-            Arg.Any<string>(), Path.GetFullPath(existingPath), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Path.GetFullPath(existingPath), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
         await _queueServiceMock.DidNotReceive().EnqueueRemoveAsync(
-            Arg.Any<string>(), Path.GetFullPath(missingPath), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Path.GetFullPath(missingPath), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -740,7 +740,7 @@ public class VaultManagerTests : IDisposable
 
         // Assert
         await _queueServiceMock.DidNotReceive().EnqueueRemoveAsync(
-            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
     }
 
     #region SyncStatus Query Tests
@@ -1126,7 +1126,7 @@ public class VaultManagerTests : IDisposable
         // Assert
         ex.Message.Should().Contain("Run memorize first");
         await _queueServiceMock.DidNotReceive().EnqueueRefreshAsync(
-            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>());
     }
 
     #endregion

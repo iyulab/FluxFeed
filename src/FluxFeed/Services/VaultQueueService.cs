@@ -128,15 +128,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     public Task<VaultJob> EnqueueMemorizeAsync(
         string filepathHash,
         string filePath,
-        CancellationToken ct = default)
-    {
-        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Memorize, VaultJobPriority.Normal, ct);
-    }
-
-    public Task<VaultJob> EnqueueMemorizeAsync(
-        string filepathHash,
-        string filePath,
-        VaultJobPriority priority,
+        VaultJobPriority priority = VaultJobPriority.Normal,
         CancellationToken ct = default)
     {
         return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Memorize, priority, ct);
@@ -145,15 +137,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     public Task<VaultJob> EnqueueRefreshAsync(
         string filepathHash,
         string filePath,
-        CancellationToken ct = default)
-    {
-        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Refresh, VaultJobPriority.Normal, ct);
-    }
-
-    public Task<VaultJob> EnqueueRefreshAsync(
-        string filepathHash,
-        string filePath,
-        VaultJobPriority priority,
+        VaultJobPriority priority = VaultJobPriority.Normal,
         CancellationToken ct = default)
     {
         return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Refresh, priority, ct);
@@ -162,15 +146,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     public Task<VaultJob> EnqueueRemoveAsync(
         string filepathHash,
         string filePath,
-        CancellationToken ct = default)
-    {
-        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Remove, VaultJobPriority.Normal, ct);
-    }
-
-    public Task<VaultJob> EnqueueRemoveAsync(
-        string filepathHash,
-        string filePath,
-        VaultJobPriority priority,
+        VaultJobPriority priority = VaultJobPriority.Normal,
         CancellationToken ct = default)
     {
         return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Remove, priority, ct);
@@ -628,6 +604,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         VaultJobStatus? statusFilter = null,
         VaultJobType? typeFilter = null,
         int? limit = null,
+        int? offset = null,
+        bool newestFirst = false,
         CancellationToken ct = default)
     {
         await _dbLock.WaitAsync(ct);
@@ -649,10 +627,17 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             if (typeFilter.HasValue)
                 sql += " AND job_type = @job_type";
 
-            sql += " ORDER BY priority DESC, queued_at ASC";
+            // Observation order and dequeue order are different questions. Priority decides what runs next;
+            // it has no business deciding what "the latest fifty failures" means, so newestFirst sorts purely
+            // by recency. The default keeps the historic order so existing callers see no shift.
+            sql += newestFirst
+                ? " ORDER BY queued_at DESC"
+                : " ORDER BY priority DESC, queued_at ASC";
 
-            if (limit.HasValue)
-                sql += $" LIMIT {limit.Value}";
+            // SQLite will not take an OFFSET without a LIMIT; -1 is its documented "no limit" sentinel, so an
+            // offset alone means "skip these, return the rest" rather than silently returning nothing.
+            if (limit.HasValue || offset.HasValue)
+                sql += " LIMIT @limit OFFSET @offset";
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = sql;
@@ -661,6 +646,11 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                 cmd.Parameters.AddWithValue("@status", (int)statusFilter.Value);
             if (typeFilter.HasValue)
                 cmd.Parameters.AddWithValue("@job_type", (int)typeFilter.Value);
+            if (limit.HasValue || offset.HasValue)
+            {
+                cmd.Parameters.AddWithValue("@limit", limit ?? -1);
+                cmd.Parameters.AddWithValue("@offset", offset ?? 0);
+            }
 
             var jobs = new List<VaultJob>();
             await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -703,7 +693,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                 }
             }
 
-            var (lastProcessedAt, avgTime) = await GetCompletionStatsAsync(connection, ct);
+            var (lastSucceededAt, avgTime) = await GetCompletionStatsAsync(connection, ct);
 
             return new QueueStatistics
             {
@@ -713,7 +703,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                 FailedCount = counts.GetValueOrDefault(VaultJobStatus.Failed),
                 CancelledCount = counts.GetValueOrDefault(VaultJobStatus.Cancelled),
                 IsPaused = _isPaused,
-                LastProcessedAt = lastProcessedAt,
+                LastSucceededAt = lastSucceededAt,
+                LastAttemptedAt = await GetLastAttemptAsync(connection, ct),
                 AverageProcessingTimeMs = avgTime
             };
         }
@@ -723,10 +714,10 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         }
     }
 
-    // LastProcessedAt/AverageProcessingTimeMs are derived from the persisted vault_jobs rows (not
+    // LastSucceededAt/AverageProcessingTimeMs are derived from the persisted vault_jobs rows (not
     // an in-memory cache) so a statistics read reflects completions recorded by any process
     // instance, not only ones this instance itself observed via CompleteAsync.
-    private static async Task<(DateTimeOffset? LastProcessedAt, double AverageProcessingTimeMs)> GetCompletionStatsAsync(
+    private static async Task<(DateTimeOffset? LastSucceededAt, double AverageProcessingTimeMs)> GetCompletionStatsAsync(
         SqliteConnection connection, CancellationToken ct)
     {
         await using var cmd = connection.CreateCommand();
@@ -739,7 +730,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             """;
         cmd.Parameters.AddWithValue("@status", (int)VaultJobStatus.Completed);
 
-        DateTimeOffset? lastProcessedAt = null;
+        DateTimeOffset? lastSucceededAt = null;
         var durationsMs = new List<double>();
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -747,12 +738,38 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         {
             var startedAt = DateTimeOffset.Parse(reader.GetString(0), CultureInfo.InvariantCulture);
             var completedAt = DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture);
-            lastProcessedAt ??= completedAt;
+            lastSucceededAt ??= completedAt;
             durationsMs.Add((completedAt - startedAt).TotalMilliseconds);
         }
 
         var avgTime = durationsMs.Count > 0 ? durationsMs.Average() : 0;
-        return (lastProcessedAt, avgTime);
+        return (lastSucceededAt, avgTime);
+    }
+
+    /// <summary>
+    /// The newest of <c>started_at</c> and <c>completed_at</c> over every job, whatever its status — the
+    /// queue's liveness signal.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not "the newest terminal event": a worker that picked a long job up two minutes ago and is
+    /// still inside it is alive, and a definition drawn from completions alone would report it as stopped for
+    /// exactly as long as the job runs — the same false negative that made a failing-but-working queue look
+    /// frozen before <c>LastSucceededAt</c> was named honestly.
+    /// </remarks>
+    private static async Task<DateTimeOffset?> GetLastAttemptAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT MAX(MAX(COALESCE(started_at, ''), COALESCE(completed_at, '')))
+            FROM vault_jobs
+            WHERE started_at IS NOT NULL OR completed_at IS NOT NULL
+            """;
+
+        var value = await cmd.ExecuteScalarAsync(ct);
+        if (value is not string text || text.Length == 0)
+            return null;
+
+        return DateTimeOffset.Parse(text, CultureInfo.InvariantCulture);
     }
 
     #endregion

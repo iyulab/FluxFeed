@@ -9,58 +9,48 @@ namespace FluxFeed.Interfaces;
 public interface IVaultQueueService
 {
     /// <summary>
-    /// Enqueues a memorize job, or merges into one already queued for the same file
-    /// (see <see cref="DequeueAsync"/> for why same-entry work is never run in parallel).
+    /// Enqueues a memorize job, or merges into one already queued for the same file and type —
+    /// raising that job to this priority when this request is the more urgent one.
     /// </summary>
+    /// <remarks>
+    /// One method rather than a with-priority overload beside a without: the two differed only by an
+    /// argument that has a sensible default, which left every caller and every test double picking one
+    /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
+    /// </remarks>
     Task<VaultJob> EnqueueMemorizeAsync(
         string filepathHash,
         string filePath,
+        VaultJobPriority priority = VaultJobPriority.Normal,
         CancellationToken ct = default);
 
     /// <summary>
-    /// Enqueues a memorize job with priority, or merges into one already queued for the
-    /// same file — raising that job to this priority when this request is the more urgent one.
+    /// Enqueues a refresh job, or merges into one already queued for the same file and type —
+    /// raising that job to this priority when this request is the more urgent one.
     /// </summary>
-    Task<VaultJob> EnqueueMemorizeAsync(
-        string filepathHash,
-        string filePath,
-        VaultJobPriority priority,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Enqueues a refresh job, or merges into one already queued for the same file.
-    /// </summary>
+    /// <remarks>
+    /// One method rather than a with-priority overload beside a without: the two differed only by an
+    /// argument that has a sensible default, which left every caller and every test double picking one
+    /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
+    /// </remarks>
     Task<VaultJob> EnqueueRefreshAsync(
         string filepathHash,
         string filePath,
+        VaultJobPriority priority = VaultJobPriority.Normal,
         CancellationToken ct = default);
 
     /// <summary>
-    /// Enqueues a refresh job with priority, or merges into one already queued for the
-    /// same file — raising that job to this priority when this request is the more urgent one.
+    /// Enqueues a remove job, or merges into one already queued for the same file and type —
+    /// raising that job to this priority when this request is the more urgent one.
     /// </summary>
-    Task<VaultJob> EnqueueRefreshAsync(
-        string filepathHash,
-        string filePath,
-        VaultJobPriority priority,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Enqueues a remove job, or merges into one already queued for the same file.
-    /// </summary>
+    /// <remarks>
+    /// One method rather than a with-priority overload beside a without: the two differed only by an
+    /// argument that has a sensible default, which left every caller and every test double picking one
+    /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
+    /// </remarks>
     Task<VaultJob> EnqueueRemoveAsync(
         string filepathHash,
         string filePath,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Enqueues a remove job with priority, or merges into one already queued for the
-    /// same file — raising that job to this priority when this request is the more urgent one.
-    /// </summary>
-    Task<VaultJob> EnqueueRemoveAsync(
-        string filepathHash,
-        string filePath,
-        VaultJobPriority priority,
+        VaultJobPriority priority = VaultJobPriority.Normal,
         CancellationToken ct = default);
 
     /// <summary>
@@ -151,12 +141,28 @@ public interface IVaultQueueService
     }
 
     /// <summary>
-    /// Gets jobs with optional filters.
+    /// Gets jobs with optional filters, ordering and paging in SQL.
     /// </summary>
+    /// <param name="offset">Rows to skip. Paging happens in the database, so a page costs a page.</param>
+    /// <param name="newestFirst">
+    /// Orders by <c>queued_at</c> descending — what an observability caller almost always wants ("the latest
+    /// N failures"). Priority is deliberately not part of this order: it decides what runs next, not what is
+    /// most recent, and letting it in is how a "latest 50" listing ends up returning something else.
+    /// The default (<c>false</c>) is the queue's own order (priority, then oldest first), unchanged.
+    /// </param>
+    /// <remarks>
+    /// <paramref name="offset"/> and <paramref name="newestFirst"/> were added in 0.22.0 <i>before</i>
+    /// <paramref name="ct"/> rather than after, so that the two paging parameters sit next to the filter they
+    /// page. A caller that passed the token positionally as the fourth argument gets a compile error, which is
+    /// the point: the alternative — appending them after <c>ct</c> — would have kept such a call compiling
+    /// while it silently meant something else.
+    /// </remarks>
     Task<IReadOnlyList<VaultJob>> GetJobsAsync(
         VaultJobStatus? statusFilter = null,
         VaultJobType? typeFilter = null,
         int? limit = null,
+        int? offset = null,
+        bool newestFirst = false,
         CancellationToken ct = default);
 
     /// <summary>
@@ -235,6 +241,21 @@ public sealed class QueueStatistics
     public int CancelledCount { get; init; }
     public int TotalCount => QueuedCount + ProcessingCount + CompletedCount + FailedCount + CancelledCount;
     public bool IsPaused { get; init; }
-    public DateTimeOffset? LastProcessedAt { get; init; }
+
+    /// <summary>
+    /// When a job last finished <b>successfully</b>. Named for what it is: this was called
+    /// <c>LastProcessedAt</c> until 0.22.0 while only ever reflecting completions, so a queue that was
+    /// working steadily and failing every job left it frozen and read as stopped. Pair it with
+    /// <see cref="LastAttemptedAt"/>: this one answers "is it getting anywhere".
+    /// </summary>
+    public DateTimeOffset? LastSucceededAt { get; init; }
+
+    /// <summary>
+    /// When the queue last did anything at all — the newest of any job's start or finish, whatever its
+    /// status. This is the liveness signal: a fresh value beside <c>ProcessingCount = 0</c> means "between
+    /// jobs", a stale one means the worker really has stopped.
+    /// </summary>
+    public DateTimeOffset? LastAttemptedAt { get; init; }
+
     public double AverageProcessingTimeMs { get; init; }
 }

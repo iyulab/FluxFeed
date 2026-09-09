@@ -55,7 +55,20 @@ public sealed partial class VaultManager : IVault
 
     #region Core Commands
 
-    public async Task<VaultEntry> MemorizeAsync(string filePath, CancellationToken ct = default)
+    public Task<VaultEntry> MemorizeAsync(string filePath, CancellationToken ct = default)
+        => MemorizeNoWaitAsync(filePath, VaultJobPriority.Normal, ct);
+
+    public Task<VaultEntry> MemorizeAsync(
+        string filePath,
+        VaultJobPriority priority,
+        bool waitForCompletion = false,
+        CancellationToken ct = default)
+        => MemorizeCoreAsync(filePath, priority, waitForCompletion, ct);
+
+    private async Task<VaultEntry> MemorizeNoWaitAsync(
+        string filePath,
+        VaultJobPriority priority,
+        CancellationToken ct)
     {
         var fullPath = Path.GetFullPath(filePath);
 
@@ -68,7 +81,7 @@ public sealed partial class VaultManager : IVault
         if (_options.EnableBackgroundProcessing)
         {
             // Queue memorize job (full pipeline: extract → chunk → embed → commit)
-            await _queue.EnqueueMemorizeAsync(entry.FilepathHash, fullPath, ct);
+            await _queue.EnqueueMemorizeAsync(entry.FilepathHash, fullPath, priority, ct);
             LogQueuedMemorize(_logger, fullPath);
         }
         else
@@ -84,11 +97,18 @@ public sealed partial class VaultManager : IVault
         return entry;
     }
 
-    public async Task<VaultEntry> MemorizeAsync(string filePath, bool waitForCompletion, CancellationToken ct = default)
+    public Task<VaultEntry> MemorizeAsync(string filePath, bool waitForCompletion, CancellationToken ct = default)
+        => MemorizeCoreAsync(filePath, VaultJobPriority.Normal, waitForCompletion, ct);
+
+    private async Task<VaultEntry> MemorizeCoreAsync(
+        string filePath,
+        VaultJobPriority priority,
+        bool waitForCompletion,
+        CancellationToken ct)
     {
         // Without terminal-await, behavior is identical to the single-arg overload (pure additive).
         if (!waitForCompletion)
-            return await MemorizeAsync(filePath, ct);
+            return await MemorizeNoWaitAsync(filePath, priority, ct);
 
         var fullPath = Path.GetFullPath(filePath);
 
@@ -100,7 +120,7 @@ public sealed partial class VaultManager : IVault
         if (_options.EnableBackgroundProcessing)
         {
             // Enqueue, then await the queue's terminal transition (signal-driven, no polling).
-            var job = await _queue.EnqueueMemorizeAsync(entry.FilepathHash, fullPath, ct);
+            var job = await _queue.EnqueueMemorizeAsync(entry.FilepathHash, fullPath, priority, ct);
             LogQueuedMemorize(_logger, fullPath);
 
             var terminal = await _queue.WaitForJobAsync(job.Id, ct);
@@ -126,11 +146,25 @@ public sealed partial class VaultManager : IVault
         return await GetByHashAsync(entry.FilepathHash, ct) ?? entry;
     }
 
-    public async Task<VaultEntry> RefreshAsync(string filePath, bool waitForCompletion, CancellationToken ct = default)
+    public Task<VaultEntry> RefreshAsync(string filePath, bool waitForCompletion, CancellationToken ct = default)
+        => RefreshCoreAsync(filePath, VaultJobPriority.Normal, waitForCompletion, ct);
+
+    public Task<VaultEntry> RefreshAsync(
+        string filePath,
+        VaultJobPriority priority,
+        bool waitForCompletion = false,
+        CancellationToken ct = default)
+        => RefreshCoreAsync(filePath, priority, waitForCompletion, ct);
+
+    private async Task<VaultEntry> RefreshCoreAsync(
+        string filePath,
+        VaultJobPriority priority,
+        bool waitForCompletion,
+        CancellationToken ct)
     {
         // Without terminal-await, behavior is identical to the single-arg overload (pure additive).
         if (!waitForCompletion || !_options.EnableBackgroundProcessing)
-            return await RefreshAsync(filePath, ct);
+            return await RefreshNoWaitAsync(filePath, priority, ct);
 
         var fullPath = Path.GetFullPath(filePath);
 
@@ -144,7 +178,7 @@ public sealed partial class VaultManager : IVault
 
         // Enqueue, then await the queue's terminal transition (signal-driven, no polling) — the
         // same contract as MemorizeAsync(waitForCompletion: true).
-        var job = await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, ct);
+        var job = await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, priority, ct);
         LogQueuedRefresh(_logger, fullPath);
 
         var terminal = await _queue.WaitForJobAsync(job.Id, ct);
@@ -158,7 +192,13 @@ public sealed partial class VaultManager : IVault
         return await GetByHashAsync(entry.FilepathHash, ct) ?? entry;
     }
 
-    public async Task<VaultEntry> RefreshAsync(string filePath, CancellationToken ct = default)
+    public Task<VaultEntry> RefreshAsync(string filePath, CancellationToken ct = default)
+        => RefreshNoWaitAsync(filePath, VaultJobPriority.Normal, ct);
+
+    private async Task<VaultEntry> RefreshNoWaitAsync(
+        string filePath,
+        VaultJobPriority priority,
+        CancellationToken ct)
     {
         var fullPath = Path.GetFullPath(filePath);
 
@@ -178,7 +218,7 @@ public sealed partial class VaultManager : IVault
         if (_options.EnableBackgroundProcessing)
         {
             // Queue refresh job (chunk → embed → commit, skip extraction)
-            await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, ct);
+            await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, priority, ct);
             LogQueuedRefresh(_logger, fullPath);
         }
         else
@@ -194,7 +234,10 @@ public sealed partial class VaultManager : IVault
         return entry;
     }
 
-    public async Task<SyncResult> SyncAsync(CancellationToken ct = default)
+    public Task<SyncResult> SyncAsync(CancellationToken ct = default)
+        => SyncAsync(VaultJobPriority.Normal, ct);
+
+    public async Task<SyncResult> SyncAsync(VaultJobPriority priority, CancellationToken ct = default)
     {
         var startedAt = DateTimeOffset.UtcNow;
         var memorizeCount = 0;
@@ -237,7 +280,7 @@ public sealed partial class VaultManager : IVault
 
                                 await _queue.EnqueueMemorizeAsync(
                                     FilepathHasher.ComputeHash(change.FilePath),
-                                    change.FilePath, ct);
+                                    change.FilePath, priority, ct);
                                 memorizeCount++;
                                 break;
 
@@ -245,7 +288,7 @@ public sealed partial class VaultManager : IVault
                                 changedFilesCount++;
                                 await _queue.EnqueueRefreshAsync(
                                     FilepathHasher.ComputeHash(change.FilePath),
-                                    change.FilePath, ct);
+                                    change.FilePath, priority, ct);
                                 refreshCount++;
                                 break;
 
@@ -256,7 +299,7 @@ public sealed partial class VaultManager : IVault
                                 {
                                     await _queue.EnqueueRemoveAsync(
                                         FilepathHasher.ComputeHash(change.FilePath),
-                                        change.FilePath, ct);
+                                        change.FilePath, priority, ct);
                                     orphansQueued++;
                                     removeCount++;
                                 }
@@ -310,7 +353,7 @@ public sealed partial class VaultManager : IVault
 
             try
             {
-                await _queue.EnqueueRemoveAsync(entry.FilepathHash, entry.SourcePath, ct);
+                await _queue.EnqueueRemoveAsync(entry.FilepathHash, entry.SourcePath, ct: ct);
                 removeCount++;
                 orphansQueued++;
             }
@@ -579,7 +622,7 @@ public sealed partial class VaultManager : IVault
             entry.SaveMetadata();
 
             // Queue remove job
-            await _queue.EnqueueRemoveAsync(entry.FilepathHash, fullPath, ct);
+            await _queue.EnqueueRemoveAsync(entry.FilepathHash, fullPath, ct: ct);
             LogQueuedRemove(_logger, fullPath);
         }
         else
@@ -1144,7 +1187,8 @@ public sealed partial class VaultManager : IVault
             CompletedCount = stats.CompletedCount,
             FailedCount = stats.FailedCount,
             IsPaused = _queue.IsPaused,
-            LastProcessedAt = stats.LastProcessedAt,
+            LastSucceededAt = stats.LastSucceededAt,
+            LastAttemptedAt = stats.LastAttemptedAt,
             AverageProcessingTimeMs = stats.AverageProcessingTimeMs
         };
     }
@@ -1163,7 +1207,7 @@ public sealed partial class VaultManager : IVault
             try
             {
                 // Queue removal job
-                await _queue.EnqueueRemoveAsync(entry.FilepathHash, entry.SourcePath, ct);
+                await _queue.EnqueueRemoveAsync(entry.FilepathHash, entry.SourcePath, ct: ct);
                 cleanedCount++;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

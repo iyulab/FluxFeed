@@ -65,10 +65,45 @@ public interface IVault
     Task<VaultEntry> RefreshAsync(string filePath, bool waitForCompletion, CancellationToken ct = default);
 
     /// <summary>
+    /// Memorizes a file at a given queue priority.
+    /// </summary>
+    /// <remarks>
+    /// The queue has always ordered by priority, but nothing on this interface could set it — every path
+    /// enqueued at <see cref="VaultJobPriority.Normal"/>, so a bulk sync and a user waiting on one file
+    /// competed on equal terms. Reported by a multi-tenant consumer that needed interactive work to overtake
+    /// a background crawl.
+    /// </remarks>
+    Task<VaultEntry> MemorizeAsync(
+        string filePath,
+        VaultJobPriority priority,
+        bool waitForCompletion = false,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Refreshes a file at a given queue priority. Counterpart of
+    /// <see cref="MemorizeAsync(string, VaultJobPriority, bool, CancellationToken)"/>.
+    /// </summary>
+    Task<VaultEntry> RefreshAsync(
+        string filePath,
+        VaultJobPriority priority,
+        bool waitForCompletion = false,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Syncs all watched folders and queues necessary memorize/refresh operations.
     /// Detects changes and queues appropriate jobs.
     /// </summary>
     Task<SyncResult> SyncAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Syncs all watched folders, enqueuing the work it finds at a given priority.
+    /// </summary>
+    /// <remarks>
+    /// A sync can queue thousands of jobs at once. At the default priority those sit ahead of anything a user
+    /// asks for afterwards purely by arriving first; running a crawl at <see cref="VaultJobPriority.Low"/> is
+    /// what lets interactive work through without the consumer building a scheduler of its own.
+    /// </remarks>
+    Task<SyncResult> SyncAsync(VaultJobPriority priority, CancellationToken ct = default);
 
     /// <summary>
     /// Detects what kind of changes exist for a file.
@@ -479,7 +514,13 @@ public sealed class QueueStatus
     public int CompletedCount { get; init; }
     public int FailedCount { get; init; }
     public bool IsPaused { get; init; }
-    public DateTimeOffset? LastProcessedAt { get; init; }
+
+    /// <summary>When a job last finished successfully. See <c>QueueStatistics.LastSucceededAt</c>.</summary>
+    public DateTimeOffset? LastSucceededAt { get; init; }
+
+    /// <summary>When the queue last did anything at all. See <c>QueueStatistics.LastAttemptedAt</c>.</summary>
+    public DateTimeOffset? LastAttemptedAt { get; init; }
+
     public double AverageProcessingTimeMs { get; init; }
 }
 

@@ -187,7 +187,7 @@ public class VaultBackgroundServiceRecordFailureTests : IDisposable
         public Task<bool> CancelAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult(false);
         public Task<VaultJob?> GetJobAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult<VaultJob?>(null);
         public Task<VaultJob> WaitForJobAsync(Guid jobId, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<IReadOnlyList<VaultJob>> GetJobsAsync(VaultJobStatus? s = null, VaultJobType? t = null, int? limit = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<VaultJob>>([]);
+        public Task<IReadOnlyList<VaultJob>> GetJobsAsync(VaultJobStatus? s = null, VaultJobType? t = null, int? limit = null, int? offset = null, bool newestFirst = false, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<VaultJob>>([]);
         public Task<QueueStatistics> GetStatisticsAsync(CancellationToken ct = default) => Task.FromResult(new QueueStatistics());
         public Task<int> ClearCompletedAsync(CancellationToken ct = default) => Task.FromResult(0);
         public Task<int> ClearFailedAsync(CancellationToken ct = default) => Task.FromResult(0);

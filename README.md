@@ -441,6 +441,41 @@ The queue handles this itself, so **a consumer does not need a per-file lock of 
   the caller awaits the job that already exists. A more urgent request raises that job's priority instead of being demoted into it.
   A job already **processing** is not merged into: it read the file as it was, so a later request needs its own run.
 
+### Priority
+
+`MemorizeAsync` / `RefreshAsync` / `SyncAsync` take an optional `VaultJobPriority`. The queue has always ordered by priority; until 0.22.0
+nothing on `IVault` could set it, so a bulk crawl and a user waiting on one file competed purely on arrival order.
+
+```csharp
+await vault.SyncAsync(VaultJobPriority.Low, ct);                              // background crawl, yields
+await vault.MemorizeAsync(path, VaultJobPriority.High, waitForCompletion: true, ct);   // user is waiting
+```
+
+### Observing the queue
+
+`GetStatisticsAsync()` answers two different questions, and conflating them is a reported source of false alarms:
+
+| Field | Question it answers |
+|---|---|
+| `LastSucceededAt` | Is the queue *getting anywhere*? Moves only on a completed job. |
+| `LastAttemptedAt` | Is the queue *alive*? Moves when any job starts or finishes, whatever the result. |
+
+`LastSucceededAt` was called `LastProcessedAt` before 0.22.0 while only ever reflecting successes — a worker that was running steadily and
+failing every job left it frozen and read as stopped. Note that `ProcessingCount` is a point-in-time count and is legitimately `0` between
+jobs; it is the pair (`ProcessingCount` + a fresh `LastAttemptedAt`) that says "between jobs" rather than "stopped".
+
+`GetJobsAsync` orders and pages in SQL:
+
+```csharp
+// the latest 50 failures, not the oldest 50
+var recent = await queue.GetJobsAsync(VaultJobStatus.Failed, limit: 50, newestFirst: true, ct: ct);
+// second page
+var next = await queue.GetJobsAsync(VaultJobStatus.Failed, limit: 50, offset: 50, newestFirst: true, ct: ct);
+```
+
+`newestFirst` sorts by `queued_at` alone — priority decides what runs next, not what is most recent. The default order is unchanged
+(priority, then oldest first).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
