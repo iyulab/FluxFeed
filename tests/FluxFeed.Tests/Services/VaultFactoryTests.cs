@@ -112,13 +112,16 @@ public sealed class VaultFactoryTests : IDisposable
         var source = new FileVaultOptions { VaultBasePath = _basePath, EnableBackgroundProcessing = false };
         var skip = new[] { nameof(FileVaultOptions.VaultBasePath), nameof(FileVaultOptions.VaultId), nameof(FileVaultOptions.EnableBackgroundProcessing) };
         var scalar = typeof(FileVaultOptions).GetProperties()
-            .Where(p => p.CanWrite && !skip.Contains(p.Name) && p.PropertyType != typeof(ChunkingDefaults))
+            .Where(p => p.CanWrite && !skip.Contains(p.Name) && p.PropertyType != typeof(ChunkingDefaults) && p.PropertyType != typeof(ContextualEnrichmentDefaults))
             .ToList();
         foreach (var p in scalar)
             p.SetValue(source, Distinct(p.PropertyType, p.GetValue(source), p.Name));
         var chunkingProps = typeof(ChunkingDefaults).GetProperties().Where(p => p.CanWrite).ToList();
         foreach (var p in chunkingProps)
             p.SetValue(source.Chunking, Distinct(p.PropertyType, p.GetValue(source.Chunking), p.Name));
+        var enrichmentProps = typeof(ContextualEnrichmentDefaults).GetProperties().Where(p => p.CanWrite).ToList();
+        foreach (var p in enrichmentProps)
+            p.SetValue(source.ContextualEnrichment, Distinct(p.PropertyType, p.GetValue(source.ContextualEnrichment), p.Name));
 
         using var factory = new VaultFactory(
             Substitute.For<IServiceProvider>(), NullLoggerFactory.Instance, MsOptions.Create(source),
@@ -130,6 +133,9 @@ public sealed class VaultFactoryTests : IDisposable
             p.GetValue(tenant).Should().BeEquivalentTo(p.GetValue(source), because: $"{p.Name} must survive CloneOptions");
         foreach (var p in chunkingProps)
             p.GetValue(tenant.Chunking).Should().BeEquivalentTo(p.GetValue(source.Chunking), because: $"Chunking.{p.Name} must survive CloneOptions");
+        foreach (var p in enrichmentProps)
+            p.GetValue(tenant.ContextualEnrichment).Should().BeEquivalentTo(p.GetValue(source.ContextualEnrichment), because: $"ContextualEnrichment.{p.Name} must survive CloneOptions");
+        tenant.ContextualEnrichment.Should().NotBeSameAs(source.ContextualEnrichment, "the tenant must get its own copy, not the shared defaults object");
     }
 
     private static object? Distinct(Type type, object? current, string name)

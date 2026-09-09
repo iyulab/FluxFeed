@@ -97,6 +97,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     // before a poisoned chunk is ever embedded and stored, not just at retrieval time. Null by
     // default — nothing changes for consumers who don't supply one.
     private readonly IRAGSecurityPipeline? _ragSecurityPipeline;
+    private readonly IContextualEnrichmentService? _contextualEnrichment;
 
     /// <summary>
     /// Documents whose chunks have already been examined for the "document_id" scope tag by
@@ -125,6 +126,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// </summary>
     public bool SupportsKeywordIndex => _keywordSearchService != null;
 
+    /// <summary>
+    /// Whether contextual enrichment will run for text chunks: a <see cref="IContextualEnrichmentService"/> (FluxIndex.Core port) is wired in
+    /// <em>and</em> <see cref="FileVaultOptions.ContextualEnrichment"/> is enabled. Either one alone is a no-op.
+    /// </summary>
+    public bool SupportsContextualEnrichment => _contextualEnrichment != null && _options.ContextualEnrichment.Enabled;
+
     public VaultPipeline(
         IGitService git,
         IContentHasher hasher,
@@ -139,7 +146,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IGraphRAGService? graphRAGService = null,
         IKeywordSearchService? keywordSearchService = null,
         IVaultImageEnricher? imageEnricher = null,
-        IRAGSecurityPipeline? ragSecurityPipeline = null)
+        IRAGSecurityPipeline? ragSecurityPipeline = null,
+        IContextualEnrichmentService? contextualEnrichment = null)
     {
         _git = git ?? throw new ArgumentNullException(nameof(git));
         _hasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
@@ -158,6 +166,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         _keywordSearchService = keywordSearchService;
         _imageEnricher = imageEnricher;
         _ragSecurityPipeline = ragSecurityPipeline;
+        _contextualEnrichment = contextualEnrichment;
     }
 
     public async Task<MemorizeResult> MemorizeAsync(VaultEntry entry, MemorizeOptions? options = null, CancellationToken ct = default)
@@ -582,6 +591,80 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// A chunk the pipeline suggests blocking is dropped from the batch entirely; one it suggests
     /// sanitizing has its content replaced with the pipeline's sanitized version.
     /// </summary>
+    /// <summary>Metadata key holding the LLM-written context summary that was prepended to an enriched chunk.</summary>
+    public const string ContextSummaryMetadataKey = "context_summary";
+
+    /// <summary>Metadata key recording what happened to a chunk in the enrichment step: <c>contextual</c> or <c>failed</c>.</summary>
+    public const string EnrichmentMetadataKey = "enrichment";
+
+    /// <summary>
+    /// Asks the FluxIndex.Core <see cref="IContextualEnrichmentService"/> port for one context per text chunk and
+    /// prepends it (context + blank line + original) — the same text then goes to the vector store, the keyword index
+    /// and the stored chunk, so retrieval and display agree. The original passage is still on disk in <c>refined.md</c>;
+    /// the context alone is kept in metadata so a consumer can strip it. A blank context leaves the chunk untouched.
+    /// </summary>
+    private async Task<List<VaultChunk>> ApplyContextualEnrichmentAsync(
+        List<VaultChunk> chunks,
+        string fullDocumentText,
+        string sourcePath,
+        CancellationToken ct)
+    {
+        if (chunks.Count == 0 || string.IsNullOrWhiteSpace(fullDocumentText))
+        {
+            return chunks;
+        }
+
+        IReadOnlyList<string> contexts;
+        try
+        {
+            contexts = await _contextualEnrichment!.GenerateContextBatchAsync(
+                chunks.Select(c => c.Content).ToList(),
+                fullDocumentText,
+                ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && _options.ContextualEnrichment.ContinueOnError)
+        {
+            LogContextualEnrichmentFailed(_logger, sourcePath, chunks.Count, ex);
+            return chunks.Select(c => c with { Metadata = WithMetadata(c.Metadata, EnrichmentMetadataKey, "failed") }).ToList();
+        }
+
+        if (contexts.Count != chunks.Count)
+        {
+            throw new InvalidOperationException(
+                $"Contextual enrichment returned {contexts.Count} context(s) for {chunks.Count} chunk(s) of '{sourcePath}'; the port must return exactly one per chunk, in order.");
+        }
+
+        var result = new List<VaultChunk>(chunks.Count);
+        var enrichedCount = 0;
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var chunk = chunks[i];
+            var context = contexts[i]?.Trim();
+            if (string.IsNullOrEmpty(context))
+            {
+                result.Add(chunk);
+                continue;
+            }
+
+            enrichedCount++;
+            var metadata = WithMetadata(chunk.Metadata, ContextSummaryMetadataKey, context);
+            metadata = WithMetadata(metadata, EnrichmentMetadataKey, "contextual");
+            result.Add(chunk with { Content = context + "\n\n" + chunk.Content, Metadata = metadata });
+        }
+
+        LogContextualEnrichmentApplied(_logger, enrichedCount, chunks.Count, sourcePath);
+        return result;
+    }
+
+    private static IReadOnlyDictionary<string, object> WithMetadata(IReadOnlyDictionary<string, object>? existing, string key, object value)
+    {
+        var copy = existing is null
+            ? new Dictionary<string, object>(StringComparer.Ordinal)
+            : new Dictionary<string, object>(existing, StringComparer.Ordinal);
+        copy[key] = value;
+        return copy;
+    }
+
     private async Task<List<VaultChunk>> ApplyRagSecurityAsync(
         List<VaultChunk> chunks,
         string sourcePath,
@@ -1136,8 +1219,14 @@ public sealed partial class VaultPipeline : IVaultPipeline
             chunks = ChunkFallback(combinedContent, options.MaxChunkSize);
         }
 
-        var allChunks = chunks
-            .Select(text => new VaultChunk(text, null))
+        var textChunks = chunks.Select(text => new VaultChunk(text, null)).ToList();
+        if (SupportsContextualEnrichment)
+        {
+            // Text chunks only — image-description chunks are already a description, not a passage of the document.
+            textChunks = await ApplyContextualEnrichmentAsync(textChunks, combinedContent, entry.SourcePath, ct);
+        }
+
+        var allChunks = textChunks
             .Concat(imageChunks)
             .ToList();
 
@@ -1686,6 +1775,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogBuildingGraphRagIndex(ILogger logger, string documentId, int chunkCount);
     [LoggerMessage(Level = LogLevel.Information, Message = "GraphRAG index built for {DocumentId}")]
     private static partial void LogGraphRagIndexBuilt(ILogger logger, string documentId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Contextual enrichment applied to {EnrichedCount}/{ChunkCount} chunks for {SourcePath}")]
+    private static partial void LogContextualEnrichmentApplied(ILogger logger, int enrichedCount, int chunkCount, string sourcePath);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Contextual enrichment failed for {SourcePath}; indexing {ChunkCount} chunks without context")]
+    private static partial void LogContextualEnrichmentFailed(ILogger logger, string sourcePath, int chunkCount, Exception exception);
 
     #endregion
 }

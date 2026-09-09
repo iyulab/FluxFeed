@@ -1,3 +1,4 @@
+using FluxGuard.Remote.RAG;
 using System.Collections.Concurrent;
 using FluxIndex.Core.Application.Interfaces;
 using FluxFeed.Interfaces;
@@ -40,6 +41,8 @@ public sealed partial class VaultFactory : IVaultFactory
     private readonly IGraphRAGService? _sharedGraphRAGService;
     private readonly IKeywordSearchService? _sharedKeywordSearchService;
     private readonly IVaultImageEnricher? _sharedImageEnricher;
+    private readonly IRAGSecurityPipeline? _sharedRagSecurityPipeline;
+    private readonly IContextualEnrichmentService? _sharedContextualEnrichment;
 
     public VaultFactory(
         IServiceProvider serviceProvider,
@@ -55,7 +58,9 @@ public sealed partial class VaultFactory : IVaultFactory
         IHybridSearchService? hybridSearch = null,
         IGraphRAGService? graphRAGService = null,
         IKeywordSearchService? keywordSearchService = null,
-        IVaultImageEnricher? imageEnricher = null)
+        IVaultImageEnricher? imageEnricher = null,
+        IRAGSecurityPipeline? ragSecurityPipeline = null,
+        IContextualEnrichmentService? contextualEnrichment = null)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
@@ -74,6 +79,8 @@ public sealed partial class VaultFactory : IVaultFactory
         _sharedGraphRAGService = graphRAGService;
         _sharedKeywordSearchService = keywordSearchService;
         _sharedImageEnricher = imageEnricher;
+        _sharedRagSecurityPipeline = ragSecurityPipeline;
+        _sharedContextualEnrichment = contextualEnrichment;
     }
 
     public IVault GetOrCreate(string tenantId)
@@ -226,7 +233,9 @@ public sealed partial class VaultFactory : IVaultFactory
             hybridSearch: _sharedHybridSearch,
             graphRAGService: _sharedGraphRAGService,
             keywordSearchService: _sharedKeywordSearchService,
-            imageEnricher: _sharedImageEnricher);
+            imageEnricher: _sharedImageEnricher,
+            ragSecurityPipeline: _sharedRagSecurityPipeline,
+            contextualEnrichment: _sharedContextualEnrichment);
 
         // Create VaultManager with mixed shared/tenant-specific services
         var managerLogger = _loggerFactory.CreateLogger<VaultManager>();
@@ -300,6 +309,11 @@ public sealed partial class VaultFactory : IVaultFactory
             WorkerStartupTimeout = source.WorkerStartupTimeout,
             GitExecutablePath = source.GitExecutablePath,
             AllowMissingGit = source.AllowMissingGit,
+            ContextualEnrichment = new ContextualEnrichmentDefaults
+            {
+                Enabled = source.ContextualEnrichment.Enabled,
+                ContinueOnError = source.ContextualEnrichment.ContinueOnError
+            },
             Chunking = new ChunkingDefaults
             {
                 MaxChunkSize = source.Chunking.MaxChunkSize,

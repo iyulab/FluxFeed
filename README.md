@@ -351,6 +351,34 @@ var pipeline = new VaultPipeline(
     ragSecurityPipeline: new IndirectInjectionDetector());
 ```
 
+### Contextual enrichment — `FluxIndex.Core.Application.Interfaces.IContextualEnrichmentService`
+
+Opt-in. Before a document's text chunks are embedded and keyword-indexed, each one gets a short LLM-written
+context — where it sits in its document — prepended (Anthropic's "contextual retrieval"). The same enriched text is
+what gets stored, embedded and keyword-indexed, so retrieval and display agree; the context alone is also kept in
+chunk metadata (`context_summary`) and the step is recorded as `enrichment=contextual`. Image-description chunks
+are not enriched. Refresh re-runs it, since it happens at the chunk stage.
+
+The port is FluxIndex.Core's own `IContextualEnrichmentService` (`GenerateContextBatchAsync(chunks, fullDocumentText)`
+→ one context per chunk, in order). FluxFeed does not depend on any particular LLM library for it; the FluxImprover-backed
+implementation ships in `FluxIndex.Integrations.FluxImprover`, or implement the two methods yourself.
+
+Two things are required — registering the port alone does nothing, so a container that already has an enrichment
+service for other reasons never pays one LLM call per chunk by accident:
+
+```csharp
+services.AddScoped<IContextualEnrichmentService, MyContextualEnrichment>();   // FluxIndex.Core port
+services.AddFileVaultWithFluxIndex(options =>
+{
+    options.ContextualEnrichment.Enabled = true;          // default false
+    options.ContextualEnrichment.ContinueOnError = true;  // default: warn + index plain chunks tagged enrichment=failed
+});
+```
+
+Cost is whatever the port spends — typically one generation call per chunk with the whole document in the prompt,
+so budget it per document size. With `ContinueOnError = false` an enrichment failure fails the memorize instead of
+degrading; a port that returns the wrong number of contexts is always a failure (never a silent misalignment).
+
 ## Multi-tenant
 
 `AddFileVaultFactoryWithFluxIndex` swaps the single `IVault` for an `IVaultFactory`. Each tenant gets

@@ -119,6 +119,16 @@ public sealed class FileVaultOptions
     public ChunkingDefaults Chunking { get; set; } = new();
 
     /// <summary>
+    /// Opt-in contextual enrichment of text chunks at ingestion (Anthropic-style "contextual retrieval": a short,
+    /// LLM-written summary of where the chunk sits in its document is prepended before embedding and keyword
+    /// indexing). Off by default; needs both <see cref="ContextualEnrichmentDefaults.Enabled"/> and a registered
+    /// <c>FluxIndex.Core.Application.Interfaces.IContextualEnrichmentService</c> (for example the FluxImprover-backed
+    /// one from <c>FluxIndex.Integrations.FluxImprover</c>) — registering the service alone does nothing, so a container
+    /// that has an enrichment service for other reasons never pays an LLM call per chunk by accident.
+    /// </summary>
+    public ContextualEnrichmentDefaults ContextualEnrichment { get; set; } = new();
+
+    /// <summary>
     /// Consecutive failures an <c>IVaultImageEnricher</c> may accumulate for one image before the
     /// pipeline stops offering that image to it. The failure count is persisted in the image
     /// manifest, so it survives a process restart — unlike an in-memory counter, an image that has
@@ -220,4 +230,19 @@ public sealed class ChunkingDefaults
     /// overriding the global Strategy setting.
     /// </summary>
     public Dictionary<string, string> FormatStrategies { get; set; } = [];
+}
+
+/// <summary>
+/// Settings for the opt-in contextual enrichment step (see <see cref="FileVaultOptions.ContextualEnrichment"/>).
+/// </summary>
+public sealed class ContextualEnrichmentDefaults
+{
+    /// <summary>Whether text chunks are enriched at all. Default false — every enrichment costs one LLM call per chunk.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// When true (default), a failed enrichment call logs a warning and the document is indexed with its plain chunks,
+    /// each tagged <c>enrichment=failed</c>. When false, the failure propagates and the memorize fails.
+    /// </summary>
+    public bool ContinueOnError { get; set; } = true;
 }

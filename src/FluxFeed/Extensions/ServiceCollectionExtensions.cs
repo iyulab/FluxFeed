@@ -100,6 +100,8 @@ public static class ServiceCollectionExtensions
     /// Optionally:
     /// - IVaultImageEnricher: To have extracted images described and indexed. Without it images are
     ///   still extracted and stored, they are simply not described.
+    /// - FluxIndex.Core.Application.Interfaces.IContextualEnrichmentService + FileVaultOptions.ContextualEnrichment.Enabled:
+    ///   To prepend an LLM-written context to every text chunk before indexing. Both are required.
     /// </remarks>
     public static IServiceCollection AddFileVaultWithPipeline(
         this IServiceCollection services,
