@@ -615,6 +615,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
 
         IReadOnlyList<string> contexts;
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             contexts = await _contextualEnrichment!.GenerateContextBatchAsync(
@@ -652,7 +653,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             result.Add(chunk with { Content = context + "\n\n" + chunk.Content, Metadata = metadata });
         }
 
-        LogContextualEnrichmentApplied(_logger, enrichedCount, chunks.Count, sourcePath);
+        LogContextualEnrichmentApplied(_logger, enrichedCount, chunks.Count, sourcePath, stopwatch.ElapsedMilliseconds);
         return result;
     }
 
@@ -1776,8 +1777,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
     [LoggerMessage(Level = LogLevel.Information, Message = "GraphRAG index built for {DocumentId}")]
     private static partial void LogGraphRagIndexBuilt(ILogger logger, string documentId);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Contextual enrichment applied to {EnrichedCount}/{ChunkCount} chunks for {SourcePath}")]
-    private static partial void LogContextualEnrichmentApplied(ILogger logger, int enrichedCount, int chunkCount, string sourcePath);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Contextual enrichment applied to {EnrichedCount}/{ChunkCount} chunks for {SourcePath} in {ElapsedMs} ms")]
+    private static partial void LogContextualEnrichmentApplied(ILogger logger, int enrichedCount, int chunkCount, string sourcePath, long elapsedMs);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Contextual enrichment failed for {SourcePath}; indexing {ChunkCount} chunks without context")]
     private static partial void LogContextualEnrichmentFailed(ILogger logger, string sourcePath, int chunkCount, Exception exception);
