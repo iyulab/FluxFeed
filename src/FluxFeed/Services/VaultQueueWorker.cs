@@ -12,7 +12,7 @@ namespace FluxFeed.Services;
 /// A leased <see cref="IVaultPipeline"/> for one job; disposing it releases whatever the lease
 /// holds (a DI scope for the container vault, nothing for a tenant's shared pipeline).
 /// </summary>
-public interface IVaultPipelineLease : IDisposable
+public interface IVaultPipelineLease : IDisposable, IAsyncDisposable
 {
     /// <summary>The pipeline to process the job with.</summary>
     IVaultPipeline Pipeline { get; }
@@ -220,7 +220,10 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
             var entry = LoadForRewrite(job.FilepathHash)
                         ?? VaultEntry.Create(job.FilePath, _storage.BasePath);
 
-            using var lease = _leasePipeline();
+            // Async disposal: a per-job DI scope may hold services that only implement IAsyncDisposable
+            // (e.g. an LLM adapter owning a native model handle behind an optional enrichment port);
+            // IServiceScope.Dispose() throws for those and the job would fail *after* doing its work.
+            await using var lease = _leasePipeline();
             var pipeline = lease.Pipeline;
 
             var memorizeOptions = new MemorizeOptions
@@ -460,12 +463,20 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
         }
         public IVaultPipeline Pipeline { get; }
         public void Dispose() => _scope.Dispose();
+        public ValueTask DisposeAsync()
+        {
+            if (_scope is IAsyncDisposable asyncScope)
+                return asyncScope.DisposeAsync();
+            _scope.Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class SharedPipelineLease(IVaultPipeline pipeline) : IVaultPipelineLease
     {
         public IVaultPipeline Pipeline { get; } = pipeline;
         public void Dispose() { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     #region LoggerMessage Definitions
