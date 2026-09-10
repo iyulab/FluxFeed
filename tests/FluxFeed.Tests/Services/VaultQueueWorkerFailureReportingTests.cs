@@ -172,6 +172,10 @@ public sealed class MemorizeFailureClassifierTests
     [InlineData(nameof(NotSupportedException))]
     [InlineData(nameof(InvalidDataException))]
     [InlineData(nameof(FormatException))]
+    // A password-protected document: no attempt supplies a password, so retrying it only occupies
+    // the queue. Before this it classified as Unknown and was retried - measured by a consumer as
+    // three attempts per protected file, every time.
+    [InlineData(nameof(FileFlux.Core.EncryptedDocumentException))]
     public void DeterministicFailures_ArePermanent(string exceptionType)
     {
         MemorizeFailureClassifier.Classify(exceptionType).Should().Be(MemorizeFailureKind.Permanent);

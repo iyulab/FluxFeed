@@ -59,7 +59,13 @@ public static class MemorizeFailureClassifier
         nameof(ArgumentNullException),
         nameof(ArgumentOutOfRangeException),
         nameof(FormatException),
-        nameof(PathTooLongException)
+        nameof(PathTooLongException),
+        // An encrypted document is the clearest permanent failure the pipeline sees: no attempt
+        // supplies a password. Without this entry it classified as Unknown and was therefore
+        // retried, which is exactly what a consumer measured - three attempts per protected file,
+        // every time. The type is referenced rather than spelled as a string because FluxFeed
+        // consumes FileFlux directly, so a rename cannot silently un-classify it.
+        nameof(FileFlux.Core.EncryptedDocumentException)
     };
 
     private static readonly HashSet<string> TransientTypes = new(StringComparer.Ordinal)
