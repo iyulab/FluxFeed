@@ -86,11 +86,16 @@ public sealed partial class VaultManager : IVault
         }
         else
         {
-            // Execute pipeline directly (synchronous for tests/CLI)
+            // Execute pipeline directly (synchronous for tests/CLI). Inline mode is terminal even on
+            // the no-wait overload - the operation is over by the time this returns - so a failure is
+            // surfaced rather than logged and papered over with an entry that reads as done. Same
+            // contract as the waitForCompletion path below; the queued branch above is unaffected.
             var result = await _pipeline.MemorizeAsync(entry, ct: ct);
             if (!result.Success)
             {
                 LogMemorizeFailed(_logger, entry.SourcePath, result.ErrorMessage ?? "Unknown error");
+                throw new InvalidOperationException(
+                    $"Memorize failed for {fullPath}: {result.ErrorMessage ?? "unknown error"}");
             }
         }
 
@@ -223,11 +228,14 @@ public sealed partial class VaultManager : IVault
         }
         else
         {
-            // Execute pipeline directly (synchronous for tests/CLI)
+            // Execute pipeline directly (synchronous for tests/CLI). Terminal here, so the failure is
+            // surfaced rather than returned as a healthy-looking entry - see MemorizeCoreAsync.
             var result = await _pipeline.RefreshAsync(entry, ct: ct);
             if (!result.Success)
             {
                 LogRefreshFailed(_logger, entry.SourcePath, result.ErrorMessage ?? "Unknown error");
+                throw new InvalidOperationException(
+                    $"Refresh failed for {fullPath}: {result.ErrorMessage ?? "unknown error"}");
             }
         }
 

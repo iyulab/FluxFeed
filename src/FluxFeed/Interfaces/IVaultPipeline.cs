@@ -212,6 +212,28 @@ public sealed class MemorizeResult
     /// </summary>
     public string? ErrorMessage { get; init; }
 
+    /// <summary>
+    /// Name of the exception type that caused the failure, e.g. <c>TimeoutException</c>. Null when
+    /// the operation succeeded.
+    /// </summary>
+    /// <remarks>
+    /// Present on the result itself, not only inside <see cref="Failure"/>, because a failure that
+    /// happens before any indexing stage is identified has no <see cref="IndexingFailure"/> and would
+    /// otherwise arrive unclassifiable.
+    /// </remarks>
+    public string? FailureExceptionType { get; init; }
+
+    /// <summary>
+    /// Whether this failure is worth attempting again. <see cref="MemorizeFailureKind.Unknown"/>
+    /// for a success, and for a failure whose cause is not recognised.
+    /// </summary>
+    /// <remarks>
+    /// Derived rather than stored so it cannot disagree with the exception type it is derived from.
+    /// See <see cref="MemorizeFailureClassifier"/> for why the library owns this judgment.
+    /// </remarks>
+    public MemorizeFailureKind FailureKind =>
+        MemorizeFailureClassifier.Classify(FailureExceptionType ?? Failure?.ExceptionType);
+
     public static MemorizeResult Succeeded(int chunkCount, int contentLength, TimeSpan duration, string? commitHash = null) => new()
     {
         Success = true,
@@ -240,6 +262,18 @@ public sealed class MemorizeResult
     };
 
     /// <summary>
+    /// A failure that carries the exception type behind it, so the caller can tell a deterministic
+    /// failure from a transient one without parsing the message.
+    /// </summary>
+    public static MemorizeResult Failed(string errorMessage, TimeSpan duration, string? exceptionType) => new()
+    {
+        Success = false,
+        ErrorMessage = errorMessage,
+        Duration = duration,
+        FailureExceptionType = exceptionType
+    };
+
+    /// <summary>
     /// A failure with the stage and scale attached, so the caller does not have to read the message.
     /// </summary>
     public static MemorizeResult Failed(string errorMessage, TimeSpan duration, IndexingFailure failure) => new()
@@ -247,7 +281,8 @@ public sealed class MemorizeResult
         Success = false,
         ErrorMessage = errorMessage,
         Duration = duration,
-        Failure = failure
+        Failure = failure,
+        FailureExceptionType = failure?.ExceptionType
     };
 }
 

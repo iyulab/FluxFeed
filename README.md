@@ -229,6 +229,24 @@ if (entry.ExtractionHints?.TryGetValue("extraction_failure_reason", out var reas
   its own reason overwrites the latter but not the former. Both clear on a successful stage or reset,
   and neither is cleared by sync-status transitions — so use `Stage`/`SyncStatus`, not
   `FirstError != null`, to decide whether an entry is currently broken.
+- **Deterministic failures are not retried** (since 0.23.0). Whether a failure can succeed on a later
+  attempt is decided from the exception type behind it, not from the message: a missing file, an
+  extension no reader handles, or a corrupt archive fails identically every time, and each attempt
+  holds the queue head for as long as the first did. A failure the library does not recognise stays
+  retryable, so narrowing this cannot silently drop a recoverable job. `MemorizeResult.FailureKind`
+  exposes the judgment (`Permanent` / `Transient` / `Unknown`) if you want to act on it yourself.
+- **A failed memorize is reported as failed** (fixed in 0.23.0). `MemorizeAsync`/`RefreshAsync` signal
+  failure by *returning* `MemorizeResult.Failed(...)`, not by throwing. Before 0.23.0 the queue worker
+  discarded that result and marked the job completed, so a document that failed to index still raised
+  `completedCount` and never appeared in `failedCount`. If you built a workaround that re-checks
+  entries the queue claims are done, it is no longer needed. The same release makes the **inline**
+  paths agree: with `EnableBackgroundProcessing = false` the call is terminal, so a failed
+  `MemorizeAsync`/`RefreshAsync` now throws on every overload rather than only on
+  `waitForCompletion: true`. The queued path is unchanged — that failure belongs to the worker.
+- **Auto-retry actually runs now** (fixed in 0.23.0). `CanRetry` requires a job in `Failed` state, but
+  the worker held a snapshot left in `Processing` by dequeue, so the condition was never true and
+  `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` did nothing on that path. If your deployment
+  appeared to never retry, this is why.
 - **Refresh has a precondition.** It needs refined content to exist, which `ProcessingStage` does not
   imply — a memorize with nothing to index skips the refine step, so a `Memorized` entry legitimately
   may have none. `RefreshAsync` rejects those, and `DetectChangesAsync` recommends `Memorize`
@@ -419,7 +437,7 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 | `AllowMissingGit` | `false` | When true, a missing git CLI degrades to a history-less vault (one warning) instead of failing the first vault operation |
 | `WorkerStartupTimeout` | `5s` | How long `MemorizeAsync(..., waitForCompletion: true)` tolerates the absence of a running queue worker before throwing. The worker is an `IHostedService`, so without a Generic Host (or `EnableBackgroundProcessing = false`) the wait fails fast with the fix in its message instead of hanging |
 | `MaxConcurrentProcessing` | `4` | Concurrent file operations. Jobs for **different** files run in parallel up to this limit; jobs for the **same** file never do (see below) |
-| `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` | `true` / `3` / `5000` | Retry policy |
+| `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` | `true` / `3` / `5000` | Retry policy — how many attempts and how long to wait. **Whether an attempt can help is not configurable**: a deterministic failure is never retried (see below) |
 | `AutoCleanupOrphans` | `false` | Remove entries whose source file is gone, during sync |
 | `Chunking.MaxChunkSize` / `OverlapSize` / `Strategy` | `1024` / `128` / `Intelligent` | Chunking defaults, with per-extension overrides via `Chunking.FormatStrategies` |
 | `DefaultIncludePatterns` / `DefaultExcludePatterns` | common document / temp-file globs | See [File selection patterns](#file-selection-patterns) |

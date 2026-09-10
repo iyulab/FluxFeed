@@ -285,7 +285,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             return ex is IndexingFailedException indexingFailure
                 ? MemorizeResult.Failed(indexingFailure.InnerException?.Message ?? ex.Message,
                                         sw.Elapsed, indexingFailure.Failure)
-                : MemorizeResult.Failed(ex.Message, sw.Elapsed);
+                : MemorizeResult.Failed(ex.Message, sw.Elapsed, ex.GetType().Name);
         }
     }
 
@@ -338,7 +338,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             return ex is IndexingFailedException indexingFailure
                 ? MemorizeResult.Failed(indexingFailure.InnerException?.Message ?? ex.Message,
                                         sw.Elapsed, indexingFailure.Failure)
-                : MemorizeResult.Failed(ex.Message, sw.Elapsed);
+                : MemorizeResult.Failed(ex.Message, sw.Elapsed, ex.GetType().Name);
         }
     }
 

@@ -16,4 +16,8 @@
     <!-- FluxGuard (opt-in ingestion-time RAG security pipeline) -->
     <PackageReference Include="FluxGuard.Remote" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="FluxFeed.Tests" />
+  </ItemGroup>
+
 </Project>

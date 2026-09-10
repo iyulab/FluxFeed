@@ -221,7 +221,15 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task ProcessJobAsync(VaultJob job, CancellationToken ct)
+    /// <summary>
+    /// Runs one job to completion: resolve the entry, lease a pipeline, dispatch by job type, and
+    /// report the outcome to the queue.
+    /// </summary>
+    /// <remarks>
+    /// Internal rather than private so the outcome reporting can be pinned by tests without driving
+    /// the consume loop's timing. This is the real method the loop calls, not a test-only path.
+    /// </remarks>
+    internal async Task ProcessJobAsync(VaultJob job, CancellationToken ct)
     {
         try
         {
@@ -252,14 +260,19 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
                     await _queueService.UpdateCheckpointAsync(job.Id, chunkIndex, callbackCt),
             };
 
+            // The pipeline reports failure by returning, not by throwing - it catches everything and
+            // hands back MemorizeResult.Failed. Discarding that result marked a failed document as
+            // completed: nothing was indexed, failedCount never moved, and the queue said it was done.
+            MemorizeResult? result = null;
+
             switch (job.JobType)
             {
                 case VaultJobType.Memorize:
-                    await pipeline.MemorizeAsync(entry, memorizeOptions, ct);
+                    result = await pipeline.MemorizeAsync(entry, memorizeOptions, ct);
                     break;
 
                 case VaultJobType.Refresh:
-                    await pipeline.RefreshAsync(entry, memorizeOptions, ct);
+                    result = await pipeline.RefreshAsync(entry, memorizeOptions, ct);
                     break;
 
                 case VaultJobType.Remove:
@@ -268,6 +281,12 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
 
                 default:
                     throw new InvalidOperationException($"Unknown job type: {job.JobType}");
+            }
+
+            if (result is { Success: false })
+            {
+                await ReportFailureAsync(job, result.ErrorMessage ?? "Memorize failed", result.FailureKind, ct);
+                return;
             }
 
             await _queueService.CompleteAsync(job.Id, ct);
@@ -281,14 +300,44 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
         catch (Exception ex)
         {
             LogFailedJob(_logger, ex, job.JobType, job.Id, job.FilePath);
-            await _queueService.FailAsync(job.Id, ex.Message, ct);
+            await ReportFailureAsync(
+                job, ex.Message, MemorizeFailureClassifier.Classify(ex.GetType().Name), ct);
+        }
+    }
 
-            // Auto-retry if enabled
-            if (_options.EnableAutoRetry && job.CanRetry)
-            {
-                await Task.Delay(_options.RetryDelayMs, ct);
-                await _queueService.RetryAsync(job.Id, ct);
-            }
+    /// <summary>
+    /// Records a failed job and retries it unless the failure is one that cannot succeed on a
+    /// later attempt.
+    /// </summary>
+    /// <remarks>
+    /// Retrying a deterministic failure - a missing file, an extension no reader handles, a corrupt
+    /// archive - cannot change its outcome, and each attempt holds the queue head for as long as the
+    /// first one did. One consumer measured ~26 seconds per attempt across four attempts per job,
+    /// which turned a 30-second problem into a 37-minute one for every other tenant sharing the queue.
+    /// How many attempts and how long to wait stay configurable; whether an attempt can possibly
+    /// help does not, because that is a property of the failure rather than of the deployment.
+    /// </remarks>
+    private async Task ReportFailureAsync(
+        VaultJob job, string errorMessage, MemorizeFailureKind kind, CancellationToken ct)
+    {
+        await _queueService.FailAsync(job.Id, errorMessage, ct);
+
+        // FailAsync writes the row; this snapshot is detached from it. Without transitioning the
+        // snapshot too, CanRetry (which requires Status == Failed) is false for every dequeued job -
+        // TryStart left it Processing - so EnableAutoRetry, RetryDelayMs and MaxRetries had no
+        // effect on this path at all.
+        job.Fail(errorMessage);
+
+        if (kind == MemorizeFailureKind.Permanent)
+        {
+            LogPermanentFailureNotRetried(_logger, job.JobType, job.Id, errorMessage);
+            return;
+        }
+
+        if (_options.EnableAutoRetry && job.CanRetry)
+        {
+            await Task.Delay(_options.RetryDelayMs, ct);
+            await _queueService.RetryAsync(job.Id, ct);
         }
     }
 
@@ -519,6 +568,9 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed {JobType} job {JobId}: {FilePath}")]
     private static partial void LogFailedJob(ILogger logger, Exception exception, VaultJobType jobType, Guid jobId, string filePath);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{JobType} job {JobId} failed for a reason that cannot succeed on a retry; not retrying: {Reason}")]
+    private static partial void LogPermanentFailureNotRetried(ILogger logger, VaultJobType jobType, Guid jobId, string reason);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Processing remove job for {SourcePath}")]
     private static partial void LogProcessingRemove(ILogger logger, string sourcePath);
