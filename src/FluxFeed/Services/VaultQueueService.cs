@@ -27,6 +27,13 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     // worker (VaultBackgroundService), so WaitForJobAsync consults this instead of waiting forever
     // when the hosted service was registered but never started (no Generic Host).
     private readonly TimeSpan _workerStartupTimeout;
+
+    /// <summary>
+    /// How many jobs of one group may be Processing at once while another group has work queued.
+    /// Read once at construction: a queue's fairness policy is fixed for its lifetime, and re-reading
+    /// per dequeue would make the policy change under jobs already picked under the old one.
+    /// </summary>
+    private readonly int _maxInFlightPerGroup;
     private readonly object _workerLock = new();
     private int _activeWorkers;
     private TaskCompletionSource _workerAvailable = NewWorkerSignal();
@@ -52,6 +59,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
         var opts = options?.Value ?? new FileVaultOptions();
         _workerStartupTimeout = opts.WorkerStartupTimeout;
+        _maxInFlightPerGroup = opts.MaxInFlightPerGroup;
         var basePath = opts.VaultBasePath ?? Path.Combine(Directory.GetCurrentDirectory(), opts.VaultDirectoryName);
         Directory.CreateDirectory(basePath);
 
@@ -90,7 +98,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                     retry_count INTEGER NOT NULL DEFAULT 0,
                     max_retries INTEGER NOT NULL DEFAULT 3,
                     error_message TEXT,
-                    last_completed_chunk_index INTEGER NOT NULL DEFAULT -1
+                    last_completed_chunk_index INTEGER NOT NULL DEFAULT -1,
+                    group_key TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_jobs_status ON vault_jobs(status);
@@ -100,13 +109,18 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             cmd.ExecuteNonQuery();
         }
 
-        // Migration: add last_completed_chunk_index column to pre-existing databases (idempotent).
-        // CREATE TABLE IF NOT EXISTS above only includes the column for fresh databases;
-        // existing tables from older versions need ALTER TABLE.
-        using (var migrateCmd = connection.CreateCommand())
+        // Migrations: CREATE TABLE IF NOT EXISTS above only adds new columns to fresh databases;
+        // existing tables from older versions need ALTER TABLE. Each one is idempotent.
+        foreach (var alter in new[]
         {
-            migrateCmd.CommandText =
-                "ALTER TABLE vault_jobs ADD COLUMN last_completed_chunk_index INTEGER NOT NULL DEFAULT -1";
+            "ALTER TABLE vault_jobs ADD COLUMN last_completed_chunk_index INTEGER NOT NULL DEFAULT -1",
+            // Nullable with no default: rows written before group fairness existed are ungrouped, and
+            // an ungrouped job is never capped, so upgrading changes no behaviour on its own.
+            "ALTER TABLE vault_jobs ADD COLUMN group_key TEXT"
+        })
+        {
+            using var migrateCmd = connection.CreateCommand();
+            migrateCmd.CommandText = alter;
             try
             {
                 migrateCmd.ExecuteNonQuery();
@@ -116,6 +130,16 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             {
                 // Column already exists — expected on every run after the first migration.
             }
+        }
+
+        // After the migrations, never with the CREATE TABLE batch: on a database that already has the
+        // table, CREATE TABLE IF NOT EXISTS is a no-op and an index over a newly added column would
+        // reference a column that does not exist yet.
+        using (var indexCmd = connection.CreateCommand())
+        {
+            indexCmd.CommandText =
+                "CREATE INDEX IF NOT EXISTS idx_jobs_group_key ON vault_jobs(group_key, status)";
+            indexCmd.ExecuteNonQuery();
         }
 
         LogDatabaseInitialized(_logger);
@@ -129,27 +153,30 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         string filepathHash,
         string filePath,
         VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
         CancellationToken ct = default)
     {
-        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Memorize, priority, ct);
+        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Memorize, priority, groupKey, ct);
     }
 
     public Task<VaultJob> EnqueueRefreshAsync(
         string filepathHash,
         string filePath,
         VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
         CancellationToken ct = default)
     {
-        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Refresh, priority, ct);
+        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Refresh, priority, groupKey, ct);
     }
 
     public Task<VaultJob> EnqueueRemoveAsync(
         string filepathHash,
         string filePath,
         VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
         CancellationToken ct = default)
     {
-        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Remove, priority, ct);
+        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Remove, priority, groupKey, ct);
     }
 
     private async Task<VaultJob> EnqueueJobAsync(
@@ -157,10 +184,11 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         string filePath,
         VaultJobType jobType,
         VaultJobPriority priority,
+        string? groupKey,
         CancellationToken ct)
     {
         var fullPath = Path.GetFullPath(filePath);
-        var job = VaultJob.Create(fullPath, filepathHash, jobType, priority);
+        var job = VaultJob.Create(fullPath, filepathHash, jobType, priority, groupKey: groupKey);
 
         await _dbLock.WaitAsync(ct);
         try
@@ -187,8 +215,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO vault_jobs (id, file_path, filepath_hash, job_type, status, priority, queued_at, retry_count, max_retries)
-                VALUES (@id, @file_path, @filepath_hash, @job_type, @status, @priority, @queued_at, @retry_count, @max_retries)
+                INSERT INTO vault_jobs (id, file_path, filepath_hash, job_type, status, priority, queued_at, retry_count, max_retries, group_key)
+                VALUES (@id, @file_path, @filepath_hash, @job_type, @status, @priority, @queued_at, @retry_count, @max_retries, @group_key)
                 """;
 
             cmd.Parameters.AddWithValue("@id", job.Id.ToString());
@@ -197,6 +225,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             cmd.Parameters.AddWithValue("@job_type", (int)job.JobType);
             cmd.Parameters.AddWithValue("@status", (int)job.Status);
             cmd.Parameters.AddWithValue("@priority", (int)job.Priority);
+            cmd.Parameters.AddWithValue("@group_key", (object?)job.GroupKey ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@queued_at", job.QueuedAt.ToString("O"));
             cmd.Parameters.AddWithValue("@retry_count", job.RetryCount);
             cmd.Parameters.AddWithValue("@max_retries", 3);
@@ -218,13 +247,14 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         IEnumerable<(string FilepathHash, string FilePath)> files,
         VaultJobType jobType = VaultJobType.Memorize,
         VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
         CancellationToken ct = default)
     {
         var jobs = new List<VaultJob>();
 
         foreach (var (filepathHash, filePath) in files)
         {
-            var job = await EnqueueJobAsync(filepathHash, filePath, jobType, priority, ct);
+            var job = await EnqueueJobAsync(filepathHash, filePath, jobType, priority, groupKey, ct);
             jobs.Add(job);
         }
 
@@ -251,13 +281,26 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             selectCmd.CommandText = """
                 SELECT id, file_path, filepath_hash, job_type, status, priority, queued_at,
                        started_at, completed_at, retry_count, max_retries, error_message,
-                       last_completed_chunk_index
-                FROM vault_jobs
-                WHERE status = @status
-                  AND filepath_hash NOT IN (
+                       last_completed_chunk_index, group_key
+                FROM vault_jobs AS j
+                WHERE j.status = @status
+                  AND j.filepath_hash NOT IN (
                       SELECT filepath_hash FROM vault_jobs WHERE status = @processing
                   )
-                ORDER BY priority DESC, queued_at ASC
+                  AND (
+                      j.group_key IS NULL
+                      OR @max_in_flight_per_group <= 0
+                      OR (
+                          SELECT COUNT(*) FROM vault_jobs p
+                          WHERE p.status = @processing AND p.group_key = j.group_key
+                      ) < @max_in_flight_per_group
+                      OR NOT EXISTS (
+                          SELECT 1 FROM vault_jobs o
+                          WHERE o.status = @status
+                            AND (o.group_key IS NULL OR o.group_key <> j.group_key)
+                      )
+                  )
+                ORDER BY j.priority DESC, j.queued_at ASC
                 LIMIT 1
                 """;
             selectCmd.Parameters.AddWithValue("@status", (int)VaultJobStatus.Queued);
@@ -266,6 +309,12 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             // same working tree and the same index.lock. Excluding entries that already have a job in flight
             // is what makes MaxConcurrentProcessing > 1 safe without serializing unrelated files.
             selectCmd.Parameters.AddWithValue("@processing", (int)VaultJobStatus.Processing);
+            // Group fairness generalises the exclusion above: same-entry is a per-group cap whose
+            // group is the entry and whose cap is 1. The last clause makes this cap work-conserving -
+            // a group alone on the queue may exceed its share, so fairness never idles a worker that
+            // has nothing else to do. Without it, a single-tenant deployment would lose
+            // MaxConcurrentProcessing - 1 slots for no one's benefit and nobody would enable it.
+            selectCmd.Parameters.AddWithValue("@max_in_flight_per_group", _maxInFlightPerGroup);
 
             await using var reader = await selectCmd.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct))
@@ -1005,7 +1054,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             retryCount: reader.GetInt32(9),
             maxRetries: reader.GetInt32(10),
             errorMessage: reader.IsDBNull(11) ? null : reader.GetString(11),
-            lastCompletedChunkIndex: reader.IsDBNull(12) ? -1 : reader.GetInt32(12)
+            lastCompletedChunkIndex: reader.IsDBNull(12) ? -1 : reader.GetInt32(12),
+            groupKey: reader.FieldCount > 13 && !reader.IsDBNull(13) ? reader.GetString(13) : null
         );
     }
 

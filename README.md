@@ -229,6 +229,31 @@ if (entry.ExtractionHints?.TryGetValue("extraction_failure_reason", out var reas
   its own reason overwrites the latter but not the former. Both clear on a successful stage or reset,
   and neither is cleared by sync-status transitions — so use `Stage`/`SyncStatus`, not
   `FirstError != null`, to decide whether an entry is currently broken.
+### Queue fairness
+
+One `IVaultQueueService` shared across vaults is the default registration, and until 0.23.0 nothing
+stopped one owner's backlog from occupying the whole worker pool: everyone else waited behind it in
+arrival order, however small their work was.
+
+Jobs carry an optional **group key** — `QueueGroupKey`, defaulting to the vault's own `VaultId`, so a
+multi-tenant setup built on `VaultFactory` gets this without wiring anything. `MaxInFlightPerGroup`
+(default `1`) is how many of one group's jobs may run at once.
+
+The cap is **work-conserving**: it binds only while *another* group has work queued. A vault alone on
+the queue still uses the full `MaxConcurrentProcessing`, so nothing is paid for having fairness on —
+and the moment a second vault enqueues, the first is held to its share and the newcomer is dequeued
+ahead of the backlog that arrived before it.
+
+```csharp
+o.MaxInFlightPerGroup = 2;      // each owner may hold two slots while others wait
+o.MaxInFlightPerGroup = 0;      // off: arrival order and priority only
+o.QueueGroupKey = "team-a";     // group several vaults together
+```
+
+What it deliberately does not do: no preemption (a job already running is never interrupted, so one
+long document still holds its slot for as long as it takes — fairness is about the *other* slots), and
+no per-group weights. Ungrouped jobs are never capped, and priority still orders whatever is eligible.
+
 - **Deterministic failures are not retried** (since 0.23.0). Whether a failure can succeed on a later
   attempt is decided from the exception type behind it, not from the message: a missing file, an
   extension no reader handles, or a corrupt archive fails identically every time, and each attempt
@@ -437,6 +462,7 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 | `AllowMissingGit` | `false` | When true, a missing git CLI degrades to a history-less vault (one warning) instead of failing the first vault operation |
 | `WorkerStartupTimeout` | `5s` | How long `MemorizeAsync(..., waitForCompletion: true)` tolerates the absence of a running queue worker before throwing. The worker is an `IHostedService`, so without a Generic Host (or `EnableBackgroundProcessing = false`) the wait fails fast with the fix in its message instead of hanging |
 | `MaxConcurrentProcessing` | `4` | Concurrent file operations. Jobs for **different** files run in parallel up to this limit; jobs for the **same** file never do (see below) |
+| `MaxInFlightPerGroup` / `QueueGroupKey` | `1` / `null` (falls back to `VaultId`) | Fair share of a shared queue — see [Queue fairness](#queue-fairness) |
 | `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` | `true` / `3` / `5000` | Retry policy — how many attempts and how long to wait. **Whether an attempt can help is not configurable**: a deterministic failure is never retried (see below) |
 | `AutoCleanupOrphans` | `false` | Remove entries whose source file is gone, during sync |
 | `Chunking.MaxChunkSize` / `OverlapSize` / `Strategy` | `1024` / `128` / `Intelligent` | Chunking defaults, with per-extension overrides via `Chunking.FormatStrategies` |

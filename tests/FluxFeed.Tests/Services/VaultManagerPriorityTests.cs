@@ -46,7 +46,7 @@ public class VaultManagerPriorityTests : IDisposable
         _storage.EntryStorageExists(Arg.Any<VaultEntry>()).Returns(false);
         _storage.InitializeEntryAsync(Arg.Any<VaultEntry>(), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
         _storage.GetStorageSizeAsync(Arg.Any<VaultEntry>(), Arg.Any<CancellationToken>()).Returns(0L);
-        _queue.EnqueueMemorizeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<CancellationToken>())
+        _queue.EnqueueMemorizeAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<VaultJobPriority>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(ci => VaultJob.Create(ci.ArgAt<string>(1), ci.ArgAt<string>(0), VaultJobType.Memorize, ci.ArgAt<VaultJobPriority>(2)));
 
         _vault = new VaultManager(
@@ -86,6 +86,7 @@ public class VaultManagerPriorityTests : IDisposable
             Arg.Any<string>(),
             Path.GetFullPath(_file),
             VaultJobPriority.High,
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -98,6 +99,7 @@ public class VaultManagerPriorityTests : IDisposable
             Arg.Any<string>(),
             Path.GetFullPath(_file),
             VaultJobPriority.Normal,
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>());
     }
 }

@@ -81,7 +81,7 @@ public sealed partial class VaultManager : IVault
         if (_options.EnableBackgroundProcessing)
         {
             // Queue memorize job (full pipeline: extract → chunk → embed → commit)
-            await _queue.EnqueueMemorizeAsync(entry.FilepathHash, fullPath, priority, ct);
+            await _queue.EnqueueMemorizeAsync(entry.FilepathHash, fullPath, priority, _options.EffectiveQueueGroupKey, ct);
             LogQueuedMemorize(_logger, fullPath);
         }
         else
@@ -125,7 +125,7 @@ public sealed partial class VaultManager : IVault
         if (_options.EnableBackgroundProcessing)
         {
             // Enqueue, then await the queue's terminal transition (signal-driven, no polling).
-            var job = await _queue.EnqueueMemorizeAsync(entry.FilepathHash, fullPath, priority, ct);
+            var job = await _queue.EnqueueMemorizeAsync(entry.FilepathHash, fullPath, priority, _options.EffectiveQueueGroupKey, ct);
             LogQueuedMemorize(_logger, fullPath);
 
             var terminal = await _queue.WaitForJobAsync(job.Id, ct);
@@ -183,7 +183,7 @@ public sealed partial class VaultManager : IVault
 
         // Enqueue, then await the queue's terminal transition (signal-driven, no polling) — the
         // same contract as MemorizeAsync(waitForCompletion: true).
-        var job = await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, priority, ct);
+        var job = await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, priority, _options.EffectiveQueueGroupKey, ct);
         LogQueuedRefresh(_logger, fullPath);
 
         var terminal = await _queue.WaitForJobAsync(job.Id, ct);
@@ -223,7 +223,7 @@ public sealed partial class VaultManager : IVault
         if (_options.EnableBackgroundProcessing)
         {
             // Queue refresh job (chunk → embed → commit, skip extraction)
-            await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, priority, ct);
+            await _queue.EnqueueRefreshAsync(entry.FilepathHash, fullPath, priority, _options.EffectiveQueueGroupKey, ct);
             LogQueuedRefresh(_logger, fullPath);
         }
         else
@@ -288,7 +288,7 @@ public sealed partial class VaultManager : IVault
 
                                 await _queue.EnqueueMemorizeAsync(
                                     FilepathHasher.ComputeHash(change.FilePath),
-                                    change.FilePath, priority, ct);
+                                    change.FilePath, priority, _options.EffectiveQueueGroupKey, ct);
                                 memorizeCount++;
                                 break;
 
@@ -296,7 +296,7 @@ public sealed partial class VaultManager : IVault
                                 changedFilesCount++;
                                 await _queue.EnqueueRefreshAsync(
                                     FilepathHasher.ComputeHash(change.FilePath),
-                                    change.FilePath, priority, ct);
+                                    change.FilePath, priority, _options.EffectiveQueueGroupKey, ct);
                                 refreshCount++;
                                 break;
 
@@ -307,7 +307,7 @@ public sealed partial class VaultManager : IVault
                                 {
                                     await _queue.EnqueueRemoveAsync(
                                         FilepathHasher.ComputeHash(change.FilePath),
-                                        change.FilePath, priority, ct);
+                                        change.FilePath, priority, _options.EffectiveQueueGroupKey, ct);
                                     orphansQueued++;
                                     removeCount++;
                                 }

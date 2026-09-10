@@ -17,10 +17,18 @@ public interface IVaultQueueService
     /// argument that has a sensible default, which left every caller and every test double picking one
     /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
     /// </remarks>
+    /// <param name="groupKey">
+    /// Optional fairness group, e.g. the owner this file belongs to. Jobs sharing a group are held to
+    /// <c>FileVaultOptions.MaxInFlightPerGroup</c> concurrent jobs while another group has work
+    /// waiting, so one owner's backlog cannot occupy the whole queue. Null (the default) means
+    /// ungrouped and is never capped. The queue does not derive this from the path - what counts as
+    /// an owner is the caller's concept.
+    /// </param>
     Task<VaultJob> EnqueueMemorizeAsync(
         string filepathHash,
         string filePath,
         VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -32,10 +40,18 @@ public interface IVaultQueueService
     /// argument that has a sensible default, which left every caller and every test double picking one
     /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
     /// </remarks>
+    /// <param name="groupKey">
+    /// Optional fairness group, e.g. the owner this file belongs to. Jobs sharing a group are held to
+    /// <c>FileVaultOptions.MaxInFlightPerGroup</c> concurrent jobs while another group has work
+    /// waiting, so one owner's backlog cannot occupy the whole queue. Null (the default) means
+    /// ungrouped and is never capped. The queue does not derive this from the path - what counts as
+    /// an owner is the caller's concept.
+    /// </param>
     Task<VaultJob> EnqueueRefreshAsync(
         string filepathHash,
         string filePath,
         VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -47,10 +63,18 @@ public interface IVaultQueueService
     /// argument that has a sensible default, which left every caller and every test double picking one
     /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
     /// </remarks>
+    /// <param name="groupKey">
+    /// Optional fairness group, e.g. the owner this file belongs to. Jobs sharing a group are held to
+    /// <c>FileVaultOptions.MaxInFlightPerGroup</c> concurrent jobs while another group has work
+    /// waiting, so one owner's backlog cannot occupy the whole queue. Null (the default) means
+    /// ungrouped and is never capped. The queue does not derive this from the path - what counts as
+    /// an owner is the caller's concept.
+    /// </param>
     Task<VaultJob> EnqueueRemoveAsync(
         string filepathHash,
         string filePath,
         VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -60,6 +84,7 @@ public interface IVaultQueueService
         IEnumerable<(string FilepathHash, string FilePath)> files,
         VaultJobType jobType = VaultJobType.Memorize,
         VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
         CancellationToken ct = default);
 
     /// <summary>

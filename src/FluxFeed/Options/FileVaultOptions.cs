@@ -160,6 +160,61 @@ public sealed class FileVaultOptions
     public bool EnableAutoRetry { get; set; } = true;
 
     /// <summary>
+    /// How many jobs sharing a <c>groupKey</c> may be processing at once. Default: 1.
+    /// Zero or less disables the cap entirely.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One queue shared across tenants is the default registration, and without a cap one owner's
+    /// backlog occupies the whole worker pool: every other owner waits behind it in arrival order,
+    /// however small their work is.
+    /// </para>
+    /// <para>
+    /// The cap is <b>work-conserving</b> - it binds only while some other group has work queued. A
+    /// group alone on the queue may exceed its share and use the full
+    /// <see cref="MaxConcurrentProcessing"/>, so a single-tenant deployment pays nothing for having
+    /// this on. That is also why the default is the strictest useful value rather than off.
+    /// </para>
+    /// <para>
+    /// Jobs enqueued without a group key are never capped, so this setting does nothing until a
+    /// caller starts passing one.
+    /// </para>
+    /// </remarks>
+    public int MaxInFlightPerGroup { get; set; } = 1;
+
+    /// <summary>
+    /// Fairness group this vault's jobs belong to on a shared queue. Null (the default) means
+    /// ungrouped, and an ungrouped job is never capped.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A group is a property of the vault, not of each call: one vault is one owner, so the value is
+    /// set once here and every enqueue path inherits it. Requiring it per call would mean repeating
+    /// the same value at every call site and would reintroduce the failure mode that made priority
+    /// unreachable - one path quietly not passing it.
+    /// </para>
+    /// <para>
+    /// Falls back to <see cref="VaultId"/> when unset, so a multi-tenant deployment built on
+    /// <c>VaultFactory</c> - which stamps the tenant id there - gets a fair share of a shared queue
+    /// without wiring anything. That is the vault's own identity rather than something inferred from
+    /// a path: what counts as an owner stays the caller's concept, and setting this explicitly
+    /// overrides the fallback (to group several vaults together, for instance).
+    /// </para>
+    /// <para>
+    /// The queue-level <c>IVaultQueueService.Enqueue*</c> methods still take the group per call,
+    /// because one queue serves many vaults.
+    /// </para>
+    /// </remarks>
+    public string? QueueGroupKey { get; set; }
+
+    /// <summary>
+    /// The group key this vault's jobs are actually enqueued with: <see cref="QueueGroupKey"/> when
+    /// set, otherwise <see cref="VaultId"/>.
+    /// </summary>
+    public string? EffectiveQueueGroupKey =>
+        string.IsNullOrEmpty(QueueGroupKey) ? VaultId : QueueGroupKey;
+
+    /// <summary>
     /// Maximum retry attempts for failed items.
     /// </summary>
     public int MaxRetryCount { get; set; } = 3;

@@ -463,6 +463,7 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
                     entry.FilepathHash,
                     entry.SourcePath,
                     VaultJobPriority.High,
+                    _options.EffectiveQueueGroupKey,
                     ct);
 
                 recovered++;
@@ -476,6 +477,7 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
                     entry.FilepathHash,
                     entry.SourcePath,
                     VaultJobPriority.Normal,
+                    _options.EffectiveQueueGroupKey,
                     ct);
 
                 recovered++;

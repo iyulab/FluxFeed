@@ -303,6 +303,8 @@ public sealed partial class VaultFactory : IVaultFactory
             MaxConcurrentProcessing = source.MaxConcurrentProcessing,
             QueuePollingIntervalMs = source.QueuePollingIntervalMs,
             EnableAutoRetry = source.EnableAutoRetry,
+            MaxInFlightPerGroup = source.MaxInFlightPerGroup,
+            QueueGroupKey = source.QueueGroupKey,
             MaxRetryCount = source.MaxRetryCount,
             RetryDelayMs = source.RetryDelayMs,
             EnableBackgroundProcessing = source.EnableBackgroundProcessing,

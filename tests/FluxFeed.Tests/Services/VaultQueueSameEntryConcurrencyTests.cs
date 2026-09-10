@@ -122,8 +122,8 @@ public class VaultQueueSameEntryConcurrencyTests : IDisposable
         const string hash = "hash-priority";
         var path = Path.Combine(_testDir, "notes.md");
 
-        await queue.EnqueueMemorizeAsync(hash, path, VaultJobPriority.Low, TestContext.Current.CancellationToken);
-        var escalated = await queue.EnqueueMemorizeAsync(hash, path, VaultJobPriority.High, TestContext.Current.CancellationToken);
+        await queue.EnqueueMemorizeAsync(hash, path, VaultJobPriority.Low, ct: TestContext.Current.CancellationToken);
+        var escalated = await queue.EnqueueMemorizeAsync(hash, path, VaultJobPriority.High, ct: TestContext.Current.CancellationToken);
 
         escalated.Priority.Should().Be(VaultJobPriority.High,
             "coalescing must not silently discard an urgent request into a low-priority one already queued");

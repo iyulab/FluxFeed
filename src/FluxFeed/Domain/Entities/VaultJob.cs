@@ -32,6 +32,16 @@ public sealed class VaultJob
     public VaultJobStatus Status { get; private set; }
 
     /// <summary>
+    /// Optional fairness group this job belongs to, supplied by the caller at enqueue.
+    /// Null means ungrouped, and an ungrouped job is never held back by a group's share.
+    /// </summary>
+    /// <remarks>
+    /// The queue does not interpret the value or derive it from the path - what constitutes an owner
+    /// is the caller's concept, not the queue's. See <c>FileVaultOptions.MaxInFlightPerGroup</c>.
+    /// </remarks>
+    public string? GroupKey { get; private set; }
+
+    /// <summary>
     /// Processing priority.
     /// </summary>
     public VaultJobPriority Priority { get; private set; }
@@ -82,7 +92,8 @@ public sealed class VaultJob
         string filepathHash,
         VaultJobType jobType,
         VaultJobPriority priority = VaultJobPriority.Normal,
-        int maxRetries = 3)
+        int maxRetries = 3,
+        string? groupKey = null)
     {
         return new VaultJob
         {
@@ -93,7 +104,8 @@ public sealed class VaultJob
             Status = VaultJobStatus.Queued,
             Priority = priority,
             QueuedAt = DateTimeOffset.UtcNow,
-            MaxRetries = maxRetries
+            MaxRetries = maxRetries,
+            GroupKey = groupKey
         };
     }
 
@@ -113,7 +125,8 @@ public sealed class VaultJob
         int retryCount,
         int maxRetries,
         string? errorMessage,
-        int lastCompletedChunkIndex = -1)
+        int lastCompletedChunkIndex = -1,
+        string? groupKey = null)
     {
         return new VaultJob
         {
@@ -129,7 +142,8 @@ public sealed class VaultJob
             RetryCount = retryCount,
             MaxRetries = maxRetries,
             ErrorMessage = errorMessage,
-            LastCompletedChunkIndex = lastCompletedChunkIndex
+            LastCompletedChunkIndex = lastCompletedChunkIndex,
+            GroupKey = groupKey
         };
     }
 
