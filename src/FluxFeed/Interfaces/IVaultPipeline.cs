@@ -324,6 +324,19 @@ public sealed class IndexingFailure
     /// stable across releases in a way the message is not.
     /// </summary>
     public string? ExceptionType { get; init; }
+
+    /// <summary>
+    /// Chunk ids this run wrote and could not remove again when it rolled back. Empty when the
+    /// rollback completed, which is the ordinary case.
+    /// </summary>
+    /// <remarks>
+    /// A non-empty list means the store still holds rows from the generation that failed, alongside
+    /// the previous one — the document can be returned twice by search until it is re-indexed. That
+    /// used to be visible only as a log line, so a caller had no way to tell a clean failure from
+    /// one that left the index inconsistent. These ids are what a caller would delete, or re-index
+    /// over, to make it clean.
+    /// </remarks>
+    public IReadOnlyList<string> OrphanedChunkIds { get; init; } = [];
 }
 
 /// <summary>Stages a memorize can fail in.</summary>

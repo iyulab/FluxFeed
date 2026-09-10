@@ -1246,9 +1246,14 @@ public sealed partial class VaultPipeline : IVaultPipeline
         if (_vectorStore != null && _embeddingService != null)
         {
             IReadOnlyList<DocumentChunk> written;
+
+            // Every id this run tries to write, recorded before the write is attempted. This is what
+            // the rollback deletes: the run already knows what it produced, so undoing it must not
+            // be a discovery problem (see TryRollbackAsync).
+            var attemptedChunkIds = new List<string>();
             try
             {
-                written = await IndexChunksAsync(entry, allChunks, options, ct);
+                written = await IndexChunksAsync(entry, allChunks, options, attemptedChunkIds, ct);
             }
             catch (Exception ex)
             {
@@ -1263,7 +1268,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 // Rollback is best-effort by construction: if it fails there is nothing further to
                 // try, and letting its exception escape would replace the real indexing failure
                 // with a cleanup failure - the caller would be told the wrong thing went wrong.
-                await TryRollbackAsync(entry, supersededChunkIds);
+                var orphaned = await TryRollbackAsync(entry, attemptedChunkIds);
 
                 // Carried on the exception rather than in a field: this method's caller is an async
                 // frame above, and mutable state written here does not travel back up to it.
@@ -1274,7 +1279,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
                         Stage = IndexingStage.Indexing,
                         ChunkCount = allChunks.Count,
                         ContentLength = allChunks.Sum(c => c.Content?.Length ?? 0),
-                        ExceptionType = ex.GetType().Name
+                        ExceptionType = ex.GetType().Name,
+                        OrphanedChunkIds = orphaned
                     },
                     ex);
             }
@@ -1308,8 +1314,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
             return [];
         }
 
-        var existing = await _vectorStore.GetByDocumentIdAsync(entry.FilepathHash, ct);
-        return existing.Select(c => c.Id).ToList();
+        // Ids only: this call resolves which rows to supersede and uses nothing else about them.
+        // Fetching each chunk in full made the response grow with the document, which is how an
+        // ordinary few-MB file could exceed a store's transport limit here (FluxIndex 0.35.0).
+        return await _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
     }
 
     /// <summary>
@@ -1338,32 +1346,70 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// Drops whatever the failed run managed to write, leaving the previous generation as the only
     /// one indexed. Swallows its own failures on purpose — see the call site.
     /// </summary>
-    /// <param name="previousGeneration">
-    /// Ids captured before indexing began. These are precisely what must SURVIVE — the rollback is
-    /// "everything present now, minus these". Re-reading is what makes it correct: the resumable
-    /// path stores chunk by chunk and a failure can land anywhere in that loop, so the store's own
-    /// contents are the only reliable account of what the run managed to write.
+    /// <param name="attemptedChunkIds">
+    /// Every id this run tried to write, recorded before each write was attempted. This — not a
+    /// re-read of the store — is what the rollback deletes.
     /// </param>
-    private async Task TryRollbackAsync(VaultEntry entry, IReadOnlyList<string> previousGeneration)
+    /// <returns>
+    /// The ids the rollback could not remove, so the caller can report that the store still holds
+    /// them. Empty when the rollback completed.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This used to discover what to undo by re-reading the document's ids and subtracting the
+    /// previous generation. Two things were wrong with that, and they are why the parameter changed.
+    /// </para>
+    /// <para>
+    /// It could not run at all when the read failed. The rollback exists precisely because something
+    /// has already gone wrong, so it is the path most likely to meet a store that is contended or
+    /// refusing calls — and a single failed lookup left BOTH generations in the store with nothing
+    /// recording which points belonged to which. Reported from a deployment where a keyword-index
+    /// deadlock started the rollback and the vector-store lookup then exceeded a transport limit.
+    /// The run already knew every id it produced; asking the store to tell it back converted
+    /// information it held into information it had to request.
+    /// </para>
+    /// <para>
+    /// It was also wrong on a resumed run. There the previous generation is deliberately empty —
+    /// chunks 0..N are this generation's committed prefix, not a superseded one — so "everything
+    /// present, minus nothing" meant the rollback deleted the prefix the resume is built on, while
+    /// the checkpoint still claimed those chunks were committed. The next resume then wrote only the
+    /// tail: the same silent truncation the swap above was introduced to end, reached through the
+    /// failure path instead. Deleting only what THIS run attempted cannot touch the prefix.
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlyList<string>> TryRollbackAsync(
+        VaultEntry entry,
+        IReadOnlyList<string> attemptedChunkIds)
     {
-        try
+        if (attemptedChunkIds.Count == 0)
         {
-            // CancellationToken.None throughout: a cancelled indexing run is exactly when the
-            // rollback must still happen, and a token that is already cancelled would abort it.
-            var present = await GetIndexedChunkIdsAsync(entry, CancellationToken.None);
-
-            var survivors = new HashSet<string>(previousGeneration, StringComparer.Ordinal);
-            var partial = present.Where(id => !survivors.Contains(id)).ToList();
-
-            await DeleteChunksAsync(partial, CancellationToken.None);
+            return [];
         }
-        catch (Exception ex)
+
+        // Deleted one at a time, continuing past a failure: a single id the store refuses must not
+        // orphan every id after it. What could not be removed is returned rather than logged only,
+        // so the failure the caller reports can say the store is still holding rows.
+        var orphaned = new List<string>();
+
+        foreach (var chunkId in attemptedChunkIds)
         {
-            LogRollbackFailed(_logger, entry.SourcePath, ex);
+            try
+            {
+                // CancellationToken.None throughout: a cancelled indexing run is exactly when the
+                // rollback must still happen, and a token that is already cancelled would abort it.
+                await DeleteChunksAsync([chunkId], CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                orphaned.Add(chunkId);
+                LogRollbackFailed(_logger, entry.SourcePath, ex);
+            }
         }
+
+        return orphaned;
     }
 
-    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, MemorizeOptions options, CancellationToken ct)
+    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, MemorizeOptions options, ICollection<string> attemptedChunkIds, CancellationToken ct)
     {
         // Branch: when CheckpointCallback is set (job-queue path), use per-chunk processing
         // for crash-resilient resume. Otherwise, use the existing batch path (faster for the
@@ -1371,11 +1417,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IReadOnlyList<DocumentChunk> indexedChunks;
         if (options.CheckpointCallback != null)
         {
-            indexedChunks = await IndexChunksResumableAsync(entry, chunks, options.StartFromChunkIndex, options.CheckpointCallback, ct);
+            indexedChunks = await IndexChunksResumableAsync(entry, chunks, options.StartFromChunkIndex, options.CheckpointCallback, attemptedChunkIds, ct);
         }
         else
         {
-            indexedChunks = await IndexChunksBatchAsync(entry, chunks, ct);
+            indexedChunks = await IndexChunksBatchAsync(entry, chunks, attemptedChunkIds, ct);
         }
 
         // Keyword indexing — the third search backend alongside vector and graph. Unconditional
@@ -1451,7 +1497,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// Used by direct callers of MemorizeAsync (no checkpoint hooks).
     /// </summary>
     /// <returns>The embedded chunks that were stored, for downstream GraphRAG indexing.</returns>
-    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksBatchAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, CancellationToken ct)
+    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksBatchAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, ICollection<string> attemptedChunkIds, CancellationToken ct)
     {
         var documentId = entry.FilepathHash;
 
@@ -1482,6 +1528,14 @@ public sealed partial class VaultPipeline : IVaultPipeline
             documentChunks.Add(chunk);
         }
 
+        // Recorded before the write, not after: deleting an id that never landed is a no-op, while
+        // missing one that did leaves a row nobody will ever look for again. The asymmetry decides
+        // the order.
+        foreach (var chunk in documentChunks)
+        {
+            attemptedChunkIds.Add(chunk.Id);
+        }
+
         // Store in vector store
         var storedIds = await _vectorStore!.StoreBatchAsync(documentChunks, ct);
         var storedCount = storedIds.Count();
@@ -1507,6 +1561,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IReadOnlyList<VaultChunk> chunks,
         int startFromChunk,
         Func<int, CancellationToken, Task> checkpointCallback,
+        ICollection<string> attemptedChunkIds,
         CancellationToken ct)
     {
         var documentId = entry.FilepathHash;
@@ -1537,6 +1592,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
             chunk.SetEmbedding(embedding);
 
             ApplyChunkMetadata(chunk, entry, chunks[i].Metadata);
+
+            // Recorded before the write for the same reason as the batch path: a chunk that lands
+            // and is not recorded is a row the rollback will never delete.
+            attemptedChunkIds.Add(chunk.Id);
 
             // Store single chunk (1-element batch — uses the same transactional path).
             // On commit success, the chunk row is durably in vector_chunks before we update the checkpoint.

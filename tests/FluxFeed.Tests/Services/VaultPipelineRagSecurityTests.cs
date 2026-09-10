@@ -55,6 +55,12 @@ public sealed class VaultPipelineRagSecurityTests : IDisposable
         _vectorStore = Substitute.For<IVectorStore>();
         _vectorStore.GetByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(new List<DocumentChunk>());
+        // Stubbed alongside GetByDocumentIdAsync deliberately. It has a default implementation on
+        // IVectorStore that derives ids from GetByDocumentIdAsync, but a substitute intercepts the
+        // member rather than running that default - so a harness that stubs only the first gets an
+        // empty id list here and the swap silently stops superseding anything.
+        _vectorStore.GetChunkIdsByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<string>>([]));
         _vectorStore.StoreBatchAsync(Arg.Any<IEnumerable<DocumentChunk>>(), Arg.Any<CancellationToken>())
             .Returns(callInfo => Task.FromResult(((IEnumerable<DocumentChunk>)callInfo[0]).Select(c => c.Id)));
 

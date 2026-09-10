@@ -76,6 +76,13 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
         _vectorStore.GetByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult<IEnumerable<DocumentChunk>>(
                 _vectorRows.Where(c => c.DocumentId == (string)ci[0]).ToList()));
+        // Stubbed alongside GetByDocumentIdAsync deliberately. It has a default implementation on
+        // IVectorStore that derives ids from GetByDocumentIdAsync, but a substitute intercepts the
+        // member rather than running that default - so a harness that stubs only the first gets an
+        // empty id list here and the swap silently stops superseding anything.
+        _vectorStore.GetChunkIdsByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult<IReadOnlyList<string>>(
+                _vectorRows.Where(c => c.DocumentId == (string)ci[0]).Select(c => c.Id).ToList()));
         _vectorStore.DeleteAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci => Task.FromResult(_vectorRows.RemoveAll(c => c.Id == (string)ci[0]) > 0));
 
