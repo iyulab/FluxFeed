@@ -320,7 +320,7 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
     private async Task ReportFailureAsync(
         VaultJob job, string errorMessage, MemorizeFailureKind kind, CancellationToken ct)
     {
-        await _queueService.FailAsync(job.Id, errorMessage, ct);
+        await _queueService.FailAsync(job.Id, errorMessage, kind, ct);
 
         // FailAsync writes the row; this snapshot is detached from it. Without transitioning the
         // snapshot too, CanRetry (which requires Status == Failed) is false for every dequeued job -

@@ -118,6 +118,11 @@ public class VaultBackgroundServiceSignalingTests
         public Task<IReadOnlyList<VaultJob>> EnqueueBatchAsync(IEnumerable<(string, string)> files, VaultJobType jobType = VaultJobType.Memorize, VaultJobPriority priority = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task CompleteAsync(Guid jobId, CancellationToken ct = default) => Task.CompletedTask;
         public Task FailAsync(Guid jobId, string errorMessage, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task FailAsync(Guid jobId, string errorMessage, MemorizeFailureKind? failureKind, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task RequeueAsync(Guid jobId, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> RetryAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult(false);
         public Task<bool> CancelAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult(false);
         public Task<VaultJob?> GetJobAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult<VaultJob?>(null);

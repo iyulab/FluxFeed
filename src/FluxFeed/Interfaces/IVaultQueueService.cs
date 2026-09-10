@@ -113,6 +113,41 @@ public interface IVaultQueueService
     Task FailAsync(Guid jobId, string errorMessage, CancellationToken ct = default);
 
     /// <summary>
+    /// Marks a job failed and records how the failure was classified.
+    /// </summary>
+    /// <remarks>
+    /// The classification is persisted because it is read later, by a different caller: a rerun
+    /// request has to know whether another attempt can possibly differ, and by then the exception
+    /// that would answer that is gone. Passing null records "not classified", which is not the same
+    /// as classifying it as retryable.
+    /// </remarks>
+    Task FailAsync(
+        Guid jobId, string errorMessage, MemorizeFailureKind? failureKind, CancellationToken ct = default);
+
+    /// <summary>
+    /// Puts a failed job back in the queue on explicit instruction, clearing the automatic retry
+    /// budget.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the operator's path, and it is deliberately not <see cref="RetryAsync"/>. That method
+    /// enforces the automatic retry budget, which is correct for the worker deciding whether to keep
+    /// going unattended - and wrong for a person, because the jobs a person asks about are precisely
+    /// the ones that have used the budget up. Gated on it, the request succeeded only when it was
+    /// not needed.
+    /// </para>
+    /// <para>
+    /// Throws rather than returning a status: <see cref="Domain.Exceptions.VaultJobNotFoundException"/>
+    /// when no such job exists, and <see cref="Domain.Exceptions.VaultJobNotRetryableException"/>
+    /// carrying a <see cref="Domain.Exceptions.VaultRetryRefusal"/> when the job exists but will not
+    /// be run - it is not in a failed state, or it failed for a reason no attempt can change. A
+    /// single bool could not tell those apart, and each calls for a different answer to the person
+    /// who pressed the button.
+    /// </para>
+    /// </remarks>
+    Task RequeueAsync(Guid jobId, CancellationToken ct = default);
+
+    /// <summary>
     /// Retries a failed job.
     /// </summary>
     Task<bool> RetryAsync(Guid jobId, CancellationToken ct = default);

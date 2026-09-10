@@ -26,7 +26,7 @@ document's extracted content, see its commit history, and edit it without touchi
 - **File-source vault** — per-file git-tracked directory (`refined.md`, `append-text.md`, `qa.md`)
 - **Change detection** — content hash for source changes, git status for vault edits
 - **Folder watching** — real-time `FileSystemWatcher` with debounce and glob include/exclude patterns
-- **Background queue** — bounded concurrency, automatic retry, pause/resume, SQLite-persisted
+- **Background queue** — bounded concurrency, automatic retry, operator requeue, pause/resume, SQLite-persisted
 - **Multi-tenant** — isolated vaults via `IVaultFactory`, with single-call vector purge per tenant
 - **Extraction diagnostics** — a legitimate zero-chunk result (scanned PDF, blank page) says so
 - **Damage-aware records** — records are swapped in atomically, and an unreadable one is reported rather than dropped from listings
@@ -272,6 +272,22 @@ no per-group weights. Ungrouped jobs are never capped, and priority still orders
   the worker held a snapshot left in `Processing` by dequeue, so the condition was never true and
   `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` did nothing on that path. If your deployment
   appeared to never retry, this is why.
+- **An operator can put a failed job back in the queue** (since 0.24.0). `RetryAsync` enforces the
+  automatic retry budget, which is right for the worker deciding whether to keep going unattended and
+  wrong for a person: the jobs someone reaches for a retry button over are precisely the ones that
+  have used the budget up, so that call succeeded only when it was not needed. `RequeueAsync` is the
+  operator's path — it clears `RetryCount` and re-queues, and it throws rather than returning a bool,
+  because the ways it can decline call for different answers. `VaultJobNotFoundException` means the
+  list is stale; `VaultJobNotRetryableException` carries a `VaultRetryRefusal` of `NotFailed` (someone
+  already dealt with it) or `PermanentFailure` (running it again would fail identically). Those map
+  onto 404 / 409 / 409 directly.
+
+  The `PermanentFailure` case is new information, not a new restriction. A permanent failure never
+  spends retry budget — the worker stops before the auto-retry branch — so before 0.24.0 the ordinary
+  retry path saw a failed job with attempts to spare and re-queued a password-protected document
+  quite happily, and the operator saw a button that appeared to work. The classification is now
+  written to the job row so the question can still be answered later; a job that failed before the
+  column existed reads as unclassified, and unclassified is allowed through.
 - **Refresh has a precondition.** It needs refined content to exist, which `ProcessingStage` does not
   imply — a memorize with nothing to index skips the refine step, so a `Memorized` entry legitimately
   may have none. `RefreshAsync` rejects those, and `DetectChangesAsync` recommends `Memorize`

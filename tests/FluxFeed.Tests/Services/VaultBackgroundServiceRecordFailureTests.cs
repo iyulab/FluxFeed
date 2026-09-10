@@ -160,10 +160,18 @@ public class VaultBackgroundServiceRecordFailureTests : IDisposable
         }
 
         public Task FailAsync(Guid jobId, string errorMessage, CancellationToken ct = default)
+            => FailAsync(jobId, errorMessage, failureKind: null, ct);
+
+        public Task FailAsync(Guid jobId, string errorMessage, MemorizeFailureKind? failureKind, CancellationToken ct = default)
         {
+            RecordedFailureKind = failureKind;
             JobSettled.TrySetResult(false);
             return Task.CompletedTask;
         }
+
+        public MemorizeFailureKind? RecordedFailureKind { get; private set; }
+
+        public Task RequeueAsync(Guid jobId, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<VaultJob> EnqueueRemoveAsync(string h, string p, CancellationToken ct = default)
         {

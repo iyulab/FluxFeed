@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Data;
 using FluxFeed.Domain.Entities;
+using FluxFeed.Domain.Exceptions;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using Microsoft.Data.Sqlite;
@@ -99,7 +100,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                     max_retries INTEGER NOT NULL DEFAULT 3,
                     error_message TEXT,
                     last_completed_chunk_index INTEGER NOT NULL DEFAULT -1,
-                    group_key TEXT
+                    group_key TEXT,
+                    failure_kind INTEGER
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_jobs_status ON vault_jobs(status);
@@ -116,7 +118,12 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             "ALTER TABLE vault_jobs ADD COLUMN last_completed_chunk_index INTEGER NOT NULL DEFAULT -1",
             // Nullable with no default: rows written before group fairness existed are ungrouped, and
             // an ungrouped job is never capped, so upgrading changes no behaviour on its own.
-            "ALTER TABLE vault_jobs ADD COLUMN group_key TEXT"
+            "ALTER TABLE vault_jobs ADD COLUMN group_key TEXT",
+            // Nullable with no default on purpose: a row written before this existed has no recorded
+            // classification, and "not recorded" must stay distinguishable from "classified as
+            // retryable". The rerun path reads null as permission to try, so upgrading refuses
+            // nothing it did not refuse before.
+            "ALTER TABLE vault_jobs ADD COLUMN failure_kind INTEGER"
         })
         {
             using var migrateCmd = connection.CreateCommand();
@@ -281,7 +288,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             selectCmd.CommandText = """
                 SELECT id, file_path, filepath_hash, job_type, status, priority, queued_at,
                        started_at, completed_at, retry_count, max_retries, error_message,
-                       last_completed_chunk_index, group_key
+                       last_completed_chunk_index, group_key, failure_kind
                 FROM vault_jobs AS j
                 WHERE j.status = @status
                   AND j.filepath_hash NOT IN (
@@ -383,7 +390,11 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         }
     }
 
-    public async Task FailAsync(Guid jobId, string errorMessage, CancellationToken ct = default)
+    public Task FailAsync(Guid jobId, string errorMessage, CancellationToken ct = default)
+        => FailAsync(jobId, errorMessage, failureKind: null, ct);
+
+    public async Task FailAsync(
+        Guid jobId, string errorMessage, MemorizeFailureKind? failureKind, CancellationToken ct = default)
     {
         await _dbLock.WaitAsync(ct);
         try
@@ -392,15 +403,22 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             await connection.OpenAsync(ct);
 
             await using var cmd = connection.CreateCommand();
+            // The classification is written here rather than only logged, because the question it
+            // answers is asked later and by someone else: an operator asking for this job to be run
+            // again needs to know whether another attempt can possibly differ. Reclassifying at that
+            // point is impossible - the exception is long gone.
             cmd.CommandText = """
                 UPDATE vault_jobs
-                SET status = @status, completed_at = @completed_at, error_message = @error_message
+                SET status = @status, completed_at = @completed_at, error_message = @error_message,
+                    failure_kind = @failure_kind
                 WHERE id = @id
                 """;
             cmd.Parameters.AddWithValue("@id", jobId.ToString());
             cmd.Parameters.AddWithValue("@status", (int)VaultJobStatus.Failed);
             cmd.Parameters.AddWithValue("@completed_at", DateTimeOffset.UtcNow.ToString("O"));
             cmd.Parameters.AddWithValue("@error_message", errorMessage);
+            cmd.Parameters.AddWithValue(
+                "@failure_kind", failureKind is null ? DBNull.Value : (int)failureKind.Value);
 
             await cmd.ExecuteNonQueryAsync(ct);
             LogFailed(_logger, jobId, errorMessage);
@@ -448,6 +466,62 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             }
 
             return false;
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
+    }
+
+    public async Task RequeueAsync(Guid jobId, CancellationToken ct = default)
+    {
+        await _dbLock.WaitAsync(ct);
+        try
+        {
+            await using var connection = CreateConnection();
+            await connection.OpenAsync(ct);
+
+            var job = await GetJobInternalAsync(connection, jobId, ct)
+                ?? throw new VaultJobNotFoundException(jobId);
+
+            if (job.Status != VaultJobStatus.Failed)
+                throw new VaultJobNotRetryableException(jobId, VaultRetryRefusal.NotFailed);
+
+            // A recorded Permanent is the only classification that refuses. Unknown and Transient
+            // both allow the attempt, and so does a row written before the classification was
+            // persisted - "not recorded" is not evidence of anything.
+            if (job.FailureKind == MemorizeFailureKind.Permanent)
+            {
+                throw new VaultJobNotRetryableException(
+                    jobId,
+                    VaultRetryRefusal.PermanentFailure,
+                    job.ErrorMessage is null ? null : $"Last failure: {job.ErrorMessage}");
+            }
+
+            await using var cmd = connection.CreateCommand();
+            // No retry_count guard here, unlike RetryAsync. The budget exists to stop the worker
+            // looping unattended; a person asking for this job has already made that decision, and
+            // the jobs they ask about are by definition the ones that used it all up.
+            cmd.CommandText = """
+                UPDATE vault_jobs
+                SET status = @status, started_at = NULL, completed_at = NULL,
+                    error_message = NULL, retry_count = 0, failure_kind = NULL
+                WHERE id = @id AND status = @failed_status
+                """;
+            cmd.Parameters.AddWithValue("@id", jobId.ToString());
+            cmd.Parameters.AddWithValue("@status", (int)VaultJobStatus.Queued);
+            cmd.Parameters.AddWithValue("@failed_status", (int)VaultJobStatus.Failed);
+
+            var rows = await cmd.ExecuteNonQueryAsync(ct);
+            if (rows == 0)
+            {
+                // Someone moved it between the read above and this write.
+                throw new VaultJobNotRetryableException(jobId, VaultRetryRefusal.NotFailed);
+            }
+
+            LogRequeuedByRequest(_logger, jobId);
+            job.TryRequeueByRequest();
+            SignalWaiter(job);
         }
         finally
         {
@@ -636,7 +710,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         cmd.CommandText = """
             SELECT id, file_path, filepath_hash, job_type, status, priority, queued_at,
                    started_at, completed_at, retry_count, max_retries, error_message,
-                   last_completed_chunk_index
+                   last_completed_chunk_index, group_key, failure_kind
             FROM vault_jobs
             WHERE id = @id
             """;
@@ -666,7 +740,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             var sql = """
                 SELECT id, file_path, filepath_hash, job_type, status, priority, queued_at,
                        started_at, completed_at, retry_count, max_retries, error_message,
-                       last_completed_chunk_index
+                       last_completed_chunk_index, group_key, failure_kind
                 FROM vault_jobs
                 WHERE 1=1
                 """;
@@ -995,7 +1069,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             findCmd.CommandText = """
                 SELECT id, file_path, filepath_hash, job_type, status, priority, queued_at,
                        started_at, completed_at, retry_count, max_retries, error_message,
-                       last_completed_chunk_index
+                       last_completed_chunk_index, group_key, failure_kind
                 FROM vault_jobs
                 WHERE filepath_hash = @filepath_hash AND job_type = @job_type AND status = @status
                 ORDER BY priority DESC, queued_at ASC
@@ -1055,8 +1129,37 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             maxRetries: reader.GetInt32(10),
             errorMessage: reader.IsDBNull(11) ? null : reader.GetString(11),
             lastCompletedChunkIndex: reader.IsDBNull(12) ? -1 : reader.GetInt32(12),
-            groupKey: reader.FieldCount > 13 && !reader.IsDBNull(13) ? reader.GetString(13) : null
+            // By name, not by position. Not every query here selects the same trailing columns, so
+            // an ordinal that means group_key in one statement means something else in the next -
+            // and a mis-read column is silent, which is the failure mode this whole item is about.
+            groupKey: ReadOptionalString(reader, "group_key"),
+            failureKind: ReadOptionalInt32(reader, "failure_kind") is int kind
+                ? (MemorizeFailureKind)kind
+                : null
         );
+    }
+
+    private static int IndexOfColumn(SqliteDataReader reader, string name)
+    {
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (string.Equals(reader.GetName(i), name, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static string? ReadOptionalString(SqliteDataReader reader, string name)
+    {
+        var i = IndexOfColumn(reader, name);
+        return i < 0 || reader.IsDBNull(i) ? null : reader.GetString(i);
+    }
+
+    private static int? ReadOptionalInt32(SqliteDataReader reader, string name)
+    {
+        var i = IndexOfColumn(reader, name);
+        return i < 0 || reader.IsDBNull(i) ? null : reader.GetInt32(i);
     }
 
     public void Dispose()
@@ -1091,6 +1194,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     private static partial void LogCompleted(ILogger logger, Guid jobId);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed job {JobId}: {Error}")]
     private static partial void LogFailed(ILogger logger, Guid jobId, string error);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Requeued job {JobId} on request; the automatic retry budget was cleared")]
+    private static partial void LogRequeuedByRequest(ILogger logger, Guid jobId);
     [LoggerMessage(Level = LogLevel.Debug, Message = "Retrying job {JobId}, attempt {RetryCount}")]
     private static partial void LogRetrying(ILogger logger, Guid jobId, int retryCount);
     [LoggerMessage(Level = LogLevel.Debug, Message = "Cancelled job {JobId}")]

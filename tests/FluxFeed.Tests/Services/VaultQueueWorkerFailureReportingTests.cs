@@ -65,6 +65,7 @@ public sealed class VaultQueueWorkerFailureReportingTests
         await queue.Received(1).FailAsync(
             job.Id,
             Arg.Is<string>(m => m.Contains("Embedding provider rejected the batch", StringComparison.Ordinal)),
+            Arg.Any<MemorizeFailureKind?>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -79,7 +80,7 @@ public sealed class VaultQueueWorkerFailureReportingTests
         await worker.ProcessJobAsync(job, CancellationToken.None);
 
         await queue.Received(1).CompleteAsync(job.Id, Arg.Any<CancellationToken>());
-        await queue.DidNotReceive().FailAsync(job.Id, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await queue.DidNotReceive().FailAsync(job.Id, Arg.Any<string>(), Arg.Any<MemorizeFailureKind?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -93,7 +94,7 @@ public sealed class VaultQueueWorkerFailureReportingTests
         await worker.ProcessJobAsync(job, CancellationToken.None);
 
         await queue.DidNotReceive().CompleteAsync(job.Id, Arg.Any<CancellationToken>());
-        await queue.Received(1).FailAsync(job.Id, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await queue.Received(1).FailAsync(job.Id, Arg.Any<string>(), Arg.Any<MemorizeFailureKind?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -117,7 +118,10 @@ public sealed class VaultQueueWorkerFailureReportingTests
 
         await worker.ProcessJobAsync(job, CancellationToken.None);
 
-        await queue.Received(1).FailAsync(job.Id, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        // The classification is now recorded, not merely acted on: a rerun requested later has no
+        // other way to learn that another attempt cannot differ.
+        await queue.Received(1).FailAsync(
+            job.Id, Arg.Any<string>(), MemorizeFailureKind.Permanent, Arg.Any<CancellationToken>());
         await queue.DidNotReceive().RetryAsync(job.Id, Arg.Any<CancellationToken>());
     }
 
@@ -140,7 +144,8 @@ public sealed class VaultQueueWorkerFailureReportingTests
 
         await worker.ProcessJobAsync(job, CancellationToken.None);
 
-        await queue.Received(1).FailAsync(job.Id, Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await queue.Received(1).FailAsync(
+            job.Id, Arg.Any<string>(), MemorizeFailureKind.Transient, Arg.Any<CancellationToken>());
         await queue.Received(1).RetryAsync(job.Id, Arg.Any<CancellationToken>());
     }
 

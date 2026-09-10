@@ -1,3 +1,5 @@
+using FluxFeed.Interfaces;
+
 namespace FluxFeed.Domain.Entities;
 
 /// <summary>
@@ -126,7 +128,8 @@ public sealed class VaultJob
         int maxRetries,
         string? errorMessage,
         int lastCompletedChunkIndex = -1,
-        string? groupKey = null)
+        string? groupKey = null,
+        MemorizeFailureKind? failureKind = null)
     {
         return new VaultJob
         {
@@ -143,7 +146,8 @@ public sealed class VaultJob
             MaxRetries = maxRetries,
             ErrorMessage = errorMessage,
             LastCompletedChunkIndex = lastCompletedChunkIndex,
-            GroupKey = groupKey
+            GroupKey = groupKey,
+            FailureKind = failureKind
         };
     }
 
@@ -237,7 +241,46 @@ public sealed class VaultJob
     /// <summary>
     /// Whether retry is still possible.
     /// </summary>
+    /// <remarks>
+    /// This is the <em>automatic</em> budget, consulted by the worker. It is deliberately not the
+    /// test an operator-requested rerun applies: a job an operator wants to run again has, by
+    /// definition, already exhausted the budget, so gating on this made the request succeed only
+    /// when it was unnecessary.
+    /// </remarks>
     public bool CanRetry => Status == VaultJobStatus.Failed && RetryCount < MaxRetries;
+
+    /// <summary>
+    /// How the last failure was classified, if it was recorded.
+    /// </summary>
+    /// <remarks>
+    /// Null on a job that has not failed, and on a row written before this was persisted. Null is
+    /// not "transient" and not "permanent" — it is "not known", and the rerun path treats an unknown
+    /// classification as permission to try, so upgrading refuses nothing it did not refuse before.
+    /// </remarks>
+    public MemorizeFailureKind? FailureKind { get; private set; }
+
+    /// <summary>
+    /// Puts a failed job back in the queue on explicit instruction, clearing the automatic retry
+    /// budget so the worker will attempt it as if it were new.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="TryRetry"/>, which spends the budget rather than clearing it. The
+    /// two callers want opposite things: the worker is deciding whether to keep going unattended,
+    /// and a person has already decided.
+    /// </remarks>
+    public bool TryRequeueByRequest()
+    {
+        if (Status != VaultJobStatus.Failed)
+            return false;
+
+        RetryCount = 0;
+        Status = VaultJobStatus.Queued;
+        StartedAt = null;
+        CompletedAt = null;
+        ErrorMessage = null;
+        FailureKind = null;
+        return true;
+    }
 }
 
 /// <summary>
