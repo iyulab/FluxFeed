@@ -200,24 +200,20 @@ public sealed partial class VaultFactory : IVaultFactory
         var queueLogger = _loggerFactory.CreateLogger<VaultQueueService>();
         var queue = new VaultQueueService(queueLogger, optionsWrapper);
 
-        // Create tenant-specific pipeline (needs tenant-specific storage)
+        // Create tenant-specific pipeline. The tenant-specific pieces (storage, options, logger) and
+        // the shared services this factory holds are passed in; every other constructor parameter -
+        // the optional processing services - is resolved from the tenant's scope by the container,
+        // exactly as it would be for the non-factory registration. Listing them by hand here is how
+        // a newly added optional service went missing from every tenant vault while the plain
+        // registration had it: the constructor is the one place that knows what the pipeline takes.
         var pipelineLogger = _loggerFactory.CreateLogger<VaultPipeline>();
-        var pipeline = new VaultPipeline(
+        var pipeline = ActivatorUtilities.CreateInstance<VaultPipeline>(
+            scoped,
             _sharedGitService,
             _sharedHasher,
             storage,
             pipelineLogger,
-            optionsWrapper,
-            scoped.GetService<IExtractor>(),
-            scoped.GetService<IChunker>(),
-            scoped.GetService<IVectorStore>(),
-            scoped.GetService<IEmbeddingService>(),
-            hybridSearch: scoped.GetService<IHybridSearchService>(),
-            graphRAGService: scoped.GetService<IGraphRAGService>(),
-            keywordSearchService: scoped.GetService<IKeywordSearchService>(),
-            imageEnricher: scoped.GetService<IVaultImageEnricher>(),
-            ragSecurityPipeline: scoped.GetService<IRAGSecurityPipeline>(),
-            contextualEnrichment: scoped.GetService<IContextualEnrichmentService>());
+            optionsWrapper);
 
         // Create VaultManager with mixed shared/tenant-specific services
         var managerLogger = _loggerFactory.CreateLogger<VaultManager>();

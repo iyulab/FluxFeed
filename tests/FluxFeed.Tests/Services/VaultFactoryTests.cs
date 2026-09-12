@@ -15,12 +15,13 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace FluxFeed.Tests.Services;
 
 /// <summary>
-/// VaultFactory threads five optional shared services (IVectorStore, IEmbeddingService,
-/// IHybridSearchService, IGraphRAGService, IKeywordSearchService) from DI into every tenant's
-/// VaultPipeline via a hand-built constructor call rather than plain DI resolution - none of
-/// that threading had direct test coverage before this suite. It exists because cycle-235 found
-/// one of the five (IHybridSearchService) silently hardcoded to null despite the other four
-/// already being wired, which a test at this level would have caught immediately.
+/// VaultFactory hands every tenant's VaultPipeline its optional processing services (IVectorStore,
+/// IEmbeddingService, IHybridSearchService, IGraphRAGService, IKeywordSearchService, ...) from the
+/// tenant's DI scope. It used to do so through a hand-built constructor call, and one of the five
+/// then-optional services (IHybridSearchService) was found silently hardcoded to null while the
+/// other four were wired; the pipeline is now assembled by the container (ActivatorUtilities), and
+/// the last test in this suite pins that every optional constructor parameter arrives - whatever
+/// gets added to the constructor later.
 /// </summary>
 public sealed class VaultFactoryTests : IDisposable
 {
@@ -209,6 +210,55 @@ public sealed class VaultFactoryTests : IDisposable
         await _vectorStore.Received(1).StoreBatchAsync(
             Arg.Is<IEnumerable<DocumentChunk>>(c => c.Any()),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public void GetOrCreate_SuppliesEveryOptionalPipelineDependencyFromTheScope()
+    {
+        // Structural: derived from the constructor rather than from a list kept here, so a
+        // parameter added to VaultPipeline is covered the moment it exists. A hand-built call in
+        // the factory would leave the new parameter at its default and this test red.
+        var optionalParameters = typeof(VaultPipeline).GetConstructors().Single().GetParameters()
+            // IOptions<FileVaultOptions> is optional too, but it is the tenant's options, handed in by
+            // the factory rather than resolved from the scope; the processing services are the rest.
+            .Where(p => p.HasDefaultValue && p.ParameterType.IsInterface
+                        && !(p.ParameterType.IsGenericType
+                             && p.ParameterType.GetGenericTypeDefinition() == typeof(Microsoft.Extensions.Options.IOptions<>)))
+            .ToList();
+        optionalParameters.Should().HaveCountGreaterThan(5, "the pipeline takes several optional services");
+
+        var services = new ServiceCollection();
+        var substitutes = new Dictionary<Type, object>();
+        foreach (var parameter in optionalParameters)
+        {
+            var substitute = Substitute.For([parameter.ParameterType], []);
+            substitutes[parameter.ParameterType] = substitute;
+            services.AddSingleton(parameter.ParameterType, substitute);
+        }
+        ((IEmbeddingService)substitutes[typeof(IEmbeddingService)]).GetIdentity()
+            .Returns(new EmbeddingIdentity { Provider = "Test", Model = "test", Dimension = 3 });
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var factory = new VaultFactory(
+            provider,
+            NullLoggerFactory.Instance,
+            MsOptions.Create(new FileVaultOptions { VaultBasePath = _basePath, EnableBackgroundProcessing = false }),
+            new ContentHasher(),
+            _git,
+            _fileWatcher);
+
+        factory.GetOrCreate(TenantId);
+        var pipeline = (VaultPipeline)factory.GetContext(TenantId)!.Pipeline;
+
+        foreach (var parameter in optionalParameters)
+        {
+            var field = typeof(VaultPipeline)
+                .GetFields(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                .Where(f => f.FieldType == parameter.ParameterType)
+                .ToList();
+            field.Should().ContainSingle($"the pipeline keeps its {parameter.ParameterType.Name} in exactly one field");
+            field[0].GetValue(pipeline).Should().BeSameAs(substitutes[parameter.ParameterType],
+                $"the {parameter.ParameterType.Name} registered in the tenant scope must reach the pipeline");
+        }
     }
 
     [Fact]
