@@ -41,6 +41,31 @@ public class VaultEntryTests : IDisposable
     }
 
     [Fact]
+    public void IsSearchable_FollowsTheIndex_NotTheLastAttempt()
+    {
+        var sourcePath = Path.Combine(_testDir, "manual.txt");
+        File.WriteAllText(sourcePath, "Hello");
+        var entry = VaultEntry.Create(sourcePath, _testDir);
+
+        entry.IsSearchable.Should().BeFalse("nothing has been indexed yet");
+        entry.MarkError("extractor failed");
+        entry.IsSearchable.Should().BeFalse("a first memorize that failed left no rows");
+
+        entry.MarkMemorized(3);
+        entry.IsSearchable.Should().BeTrue();
+
+        entry.MarkExtracted(ContentHash.FromBytes(new byte[32]));
+        entry.IsSearchable.Should().BeTrue("a re-index in progress keeps the previous generation in the index");
+        entry.MarkError("embedding provider rejected a chunk");
+        entry.IsSearchable.Should().BeTrue("a failed re-index rolls back to the previous generation, which still answers");
+
+        entry.MarkStale();
+        entry.IsSearchable.Should().BeFalse("stale means the vectors are gone");
+        entry.MarkMemorized(0);
+        entry.IsSearchable.Should().BeTrue("a memorized entry is in scope even when it has no chunks");
+    }
+
+    [Fact]
     public void Create_SetsFilepathHashCorrectly()
     {
         // Arrange

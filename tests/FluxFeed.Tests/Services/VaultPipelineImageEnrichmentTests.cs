@@ -250,6 +250,28 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
     }
 
     [Fact]
+    public async Task MemorizeAsync_RunTwice_WritesTheImageChunkUnderTheSameId()
+    {
+        // An image-description chunk is identified by the image, not by its description: the same
+        // image memorized again is an update of the same row, and a re-captioned one still is.
+        var entry = CreateEntry("figures.pdf");
+        var enricher = new RecordingEnricher(_ => "A chart.");
+        var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000")] };
+
+        await CreatePipeline(extraction, enricher).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+        await CreatePipeline(extraction, enricher).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        var imageChunks = _capture.Chunks
+            .Where(c => c.Metadata is not null
+                        && c.Metadata.TryGetValue("chunk_kind", out var kind)
+                        && Equals(kind, VaultPipeline.ImageDescriptionChunkKind))
+            .ToList();
+        imageChunks.Should().HaveCount(2, "one image chunk per memorize reached the store");
+        imageChunks.Select(c => c.Id).Distinct().Should().ContainSingle()
+            .Which.Should().Be(ChunkIdentity.ForImage(entry.FilepathHash, "img_000", 0));
+    }
+
+    [Fact]
     public async Task MemorizeAsync_OneImageFails_OthersSucceedAndOnlyTheFailedOneIsRetried()
     {
         // Partial failure must not cost the document its other descriptions, nor abort the memorize,

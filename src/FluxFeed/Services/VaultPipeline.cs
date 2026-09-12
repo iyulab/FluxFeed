@@ -568,10 +568,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 parts = ChunkFallback(description, options.MaxChunkSize);
             }
 
-            foreach (var part in parts)
+            for (var part = 0; part < parts.Count; part++)
             {
                 chunks.Add(new VaultChunk(
-                    part,
+                    ChunkIdentity.ForImage(entry.FilepathHash, image.Id, part),
+                    parts[part],
                     new Dictionary<string, object>
                     {
                         ["chunk_kind"] = ImageDescriptionChunkKind,
@@ -1129,10 +1130,17 @@ public sealed partial class VaultPipeline : IVaultPipeline
         MemorizeOptions options,
         CancellationToken ct)
     {
-        // Indexing a document REPLACES every row previously written for it, and the replacement is
+        // Indexing a document REPLACES the rows previously written for it, and the replacement is
         // a SWAP: the previous rows are identified now and deleted only once the new ones are
         // durably written. Both callers reach the backends through here, so this belongs here
         // rather than at either call site.
+        //
+        // Chunk ids are derived from the document and the passage (ChunkIdentity), so the two
+        // generations are compared as ID SETS rather than replaced wholesale: a passage that did not
+        // change is written again under its old id - an update in place, one row before and after -
+        // and only previous minus attempted is superseded, only attempted minus previous is rolled
+        // back. Rows written before this scheme carry store-minted ids, so the first memorize after
+        // upgrading finds nothing in common and replaces everything, exactly as before. No migration.
         //
         // Why not delete first (as this did until 2026-08-06): the delete succeeded, then indexing
         // threw - an embedding failure on ONE chunk fails the whole batch - and the document was
@@ -1160,10 +1168,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // document to its tail.
         var isResumedRun = options.CheckpointCallback != null && options.StartFromChunkIndex >= 0;
 
-        IReadOnlyList<string> supersededChunkIds = [];
+        IReadOnlyList<string> previousChunkIds = [];
         if (!isResumedRun)
         {
-            supersededChunkIds = await GetIndexedChunkIdsAsync(entry, ct);
+            previousChunkIds = await GetIndexedChunkIdsAsync(entry, ct);
         }
 
         // Get all vault content (refined.md + append-text.md + qa.md)
@@ -1180,7 +1188,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // Replacing content with nothing is still a replacement: a document whose content is
             // gone must lose its rows rather than keep serving text it no longer has. This is the
             // one path where the swap commits with no new generation to swap to.
-            await DeleteChunksAsync(supersededChunkIds, ct);
+            await DeleteChunksAsync(previousChunkIds, ct);
             LogNoContentToIndex(_logger, entry.SourcePath);
             return (0, 0);
         }
@@ -1220,7 +1228,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
             chunks = ChunkFallback(combinedContent, options.MaxChunkSize);
         }
 
-        var textChunks = chunks.Select(text => new VaultChunk(text, null)).ToList();
+        // Identity is taken from the chunker's raw output, before enrichment prepends a context or
+        // security sanitizes: those change the wording of a passage, not which passage it is.
+        var textIds = ChunkIdentity.ForTexts(entry.FilepathHash, chunks);
+        var textChunks = chunks.Select((text, i) => new VaultChunk(textIds[i], text, null)).ToList();
         if (SupportsContextualEnrichment)
         {
             // Text chunks only — image-description chunks are already a description, not a passage of the document.
@@ -1264,11 +1275,21 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 // Roll the half-written generation back so the previous one is the only one left.
                 // Without this the failure would leave both generations present and search would
                 // return a mix of old chunks and whichever new ones landed before the throw.
+                // Only the ids this run ADDED are removed: an id both generations share was updated
+                // in place with the same passage, and deleting it would punch a hole in the
+                // previous generation.
                 //
                 // Rollback is best-effort by construction: if it fails there is nothing further to
                 // try, and letting its exception escape would replace the real indexing failure
                 // with a cleanup failure - the caller would be told the wrong thing went wrong.
-                var orphaned = await TryRollbackAsync(entry, attemptedChunkIds);
+                var orphaned = await TryRollbackAsync(
+                    entry, attemptedChunkIds.Except(previousChunkIds, StringComparer.Ordinal).ToList());
+
+                // The rollback just removed rows the resume checkpoint may claim as committed (the
+                // per-chunk path advances it after every store). Rewind it to where this run started,
+                // or the retry resumes past chunks that are no longer there and the document is
+                // silently truncated - the failure the checkpoint exists to prevent.
+                await TryRewindCheckpointAsync(entry, options);
 
                 // Carried on the exception rather than in a field: this method's caller is an async
                 // frame above, and mutable state written here does not travel back up to it.
@@ -1285,7 +1306,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
                     ex);
             }
 
-            // Only now is the previous generation superseded.
+            // Only now is the previous generation superseded - the part of it this run did not
+            // write again.
+            var supersededChunkIds = previousChunkIds.Except(attemptedChunkIds, StringComparer.Ordinal).ToList();
             await DeleteChunksAsync(supersededChunkIds, ct);
 
             if (written.Count == 0 && supersededChunkIds.Count > 0)
@@ -1347,8 +1370,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// one indexed. Swallows its own failures on purpose — see the call site.
     /// </summary>
     /// <param name="attemptedChunkIds">
-    /// Every id this run tried to write, recorded before each write was attempted. This — not a
-    /// re-read of the store — is what the rollback deletes.
+    /// Every id this run tried to write that the previous generation did not own, recorded before
+    /// each write was attempted. This — not a re-read of the store — is what the rollback deletes.
     /// </param>
     /// <returns>
     /// The ids the rollback could not remove, so the caller can report that the store still holds
@@ -1407,6 +1430,30 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
 
         return orphaned;
+    }
+
+    /// <summary>
+    /// Puts the resume checkpoint back to the value this run started from, after a rollback removed
+    /// the rows the run had checkpointed. Best-effort like the rollback itself: a failure here is
+    /// logged rather than allowed to replace the indexing failure being reported.
+    /// </summary>
+    private async Task TryRewindCheckpointAsync(VaultEntry entry, MemorizeOptions options)
+    {
+        if (options.CheckpointCallback == null)
+        {
+            return;
+        }
+
+        try
+        {
+            // CancellationToken.None for the same reason as the rollback: a cancelled run is exactly
+            // when the checkpoint must not be left pointing past rows that were just removed.
+            await options.CheckpointCallback(options.StartFromChunkIndex, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            LogCheckpointRewindFailed(_logger, entry.SourcePath, options.StartFromChunkIndex, ex);
+        }
     }
 
     private async Task<IReadOnlyList<DocumentChunk>> IndexChunksAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, MemorizeOptions options, ICollection<string> attemptedChunkIds, CancellationToken ct)
@@ -1493,6 +1540,23 @@ public sealed partial class VaultPipeline : IVaultPipeline
     }
 
     /// <summary>
+    /// Builds the store-bound chunk for a <see cref="VaultChunk"/>, keyed under the id the pipeline
+    /// derived for it rather than the fresh GUID <see cref="DocumentChunk.Create"/> mints. The store
+    /// keeps that id (IVectorStore contract: the caller's id is the row key), which is what makes a
+    /// re-memorize an update and lets the generation swap work on id sets.
+    /// </summary>
+    private static DocumentChunk CreateDocumentChunk(string documentId, VaultChunk source, int chunkIndex, int totalChunks)
+    {
+        var chunk = DocumentChunk.Create(
+            documentId: documentId,
+            content: source.Content,
+            chunkIndex: chunkIndex,
+            totalChunks: totalChunks);
+        chunk.Id = source.Id;
+        return chunk;
+    }
+
+    /// <summary>
     /// Batch indexing path: one embedding call + one store call for all chunks.
     /// Used by direct callers of MemorizeAsync (no checkpoint hooks).
     /// </summary>
@@ -1515,16 +1579,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
         var documentChunks = new List<DocumentChunk>();
         for (var i = 0; i < chunks.Count; i++)
         {
-            var chunk = DocumentChunk.Create(
-                documentId: documentId,
-                content: chunks[i].Content,
-                chunkIndex: i,
-                totalChunks: chunks.Count);
-
+            var chunk = CreateDocumentChunk(documentId, chunks[i], i, chunks.Count);
             chunk.SetEmbedding(embeddingList[i]);
-
             ApplyChunkMetadata(chunk, entry, chunks[i].Metadata);
-
             documentChunks.Add(chunk);
         }
 
@@ -1582,15 +1639,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // Embed single chunk
             var embedding = await _embeddingService!.GenerateEmbeddingAsync(chunks[i].Content, ct);
 
-            // Build DocumentChunk
-            var chunk = DocumentChunk.Create(
-                documentId: documentId,
-                content: chunks[i].Content,
-                chunkIndex: i,
-                totalChunks: chunks.Count);
-
+            var chunk = CreateDocumentChunk(documentId, chunks[i], i, chunks.Count);
             chunk.SetEmbedding(embedding);
-
             ApplyChunkMetadata(chunk, entry, chunks[i].Metadata);
 
             // Recorded before the write for the same reason as the batch path: a chunk that lands
@@ -1793,6 +1843,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogRemovedChunks(ILogger logger, string documentId);
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to roll back the partial index for {SourcePath}; both the previous and the partial generation may be present")]
     private static partial void LogRollbackFailed(ILogger logger, string sourcePath, Exception exception);
+    [LoggerMessage(Level = LogLevel.Error, Message = "Failed to rewind the resume checkpoint for {SourcePath} to {StartFromChunkIndex} after a rollback; a retry may skip chunks the rollback removed")]
+    private static partial void LogCheckpointRewindFailed(ILogger logger, string sourcePath, int startFromChunkIndex, Exception exception);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Vector store or embedding service not configured, cannot search")]
     private static partial void LogNoVectorStoreCannotSearch(ILogger logger);
     [LoggerMessage(Level = LogLevel.Information, Message = "Search for '{Query}' returned {Count} results")]
@@ -1848,8 +1900,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
 /// <summary>
 /// A unit of content on its way to the index, with any provenance metadata that applies to this
 /// chunk alone. Document text chunks carry none; an image-description chunk carries its image tags.
+/// <see cref="Id"/> is the id it is indexed under — derived from what the chunk is
+/// (<see cref="ChunkIdentity"/>) before enrichment or sanitizing transform its <see cref="Content"/>,
+/// so the same passage keeps the same id from one memorize to the next.
 /// </summary>
-internal sealed record VaultChunk(string Content, IReadOnlyDictionary<string, object>? Metadata);
+internal sealed record VaultChunk(string Id, string Content, IReadOnlyDictionary<string, object>? Metadata);
 
 /// <summary>
 /// Interface for content extraction (FileFlux integration).

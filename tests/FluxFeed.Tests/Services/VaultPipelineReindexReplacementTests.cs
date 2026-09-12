@@ -59,9 +59,15 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
         _vectorStore.StoreBatchAsync(Arg.Any<IEnumerable<DocumentChunk>>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
+                // The store contract from FluxIndex 0.36.2: the caller's id is the row key, and
+                // re-storing an id replaces its row rather than adding a second one.
                 var stored = ((IEnumerable<DocumentChunk>)ci[0]).ToList();
-                _vectorRows.AddRange(stored);
-                return Task.FromResult<IEnumerable<string>>(stored.Select(_ => Guid.NewGuid().ToString()).ToList());
+                foreach (var chunk in stored)
+                {
+                    _vectorRows.RemoveAll(r => r.Id == chunk.Id);
+                    _vectorRows.Add(chunk);
+                }
+                return Task.FromResult<IEnumerable<string>>(stored.Select(c => c.Id).ToList());
             });
         _vectorStore.DeleteByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
@@ -110,7 +116,11 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
         keyword.IndexChunksAsync(Arg.Any<IEnumerable<DocumentChunk>>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
-                _keywordRows.AddRange((IEnumerable<DocumentChunk>)ci[0]);
+                foreach (var chunk in (IEnumerable<DocumentChunk>)ci[0])
+                {
+                    _keywordRows.RemoveAll(r => r.Id == chunk.Id);
+                    _keywordRows.Add(chunk);
+                }
                 return Task.CompletedTask;
             });
         keyword.DeleteByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())

@@ -69,8 +69,13 @@ public sealed class VaultPipelineRollbackResilienceTests : IDisposable
         _vectorStore.StoreBatchAsync(Arg.Any<IEnumerable<DocumentChunk>>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
+                // Replace-by-id, as every FluxIndex store does from 0.36.2.
                 var stored = ((IEnumerable<DocumentChunk>)ci[0]).ToList();
-                _vectorRows.AddRange(stored);
+                foreach (var chunk in stored)
+                {
+                    _vectorRows.RemoveAll(r => r.Id == chunk.Id);
+                    _vectorRows.Add(chunk);
+                }
                 return Task.FromResult<IEnumerable<string>>(stored.Select(c => c.Id).ToList());
             });
         _vectorStore.GetByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -236,6 +241,50 @@ public sealed class VaultPipelineRollbackResilienceTests : IDisposable
     }
 
     [Fact]
+    public async Task Rollback_RewindsTheResumeCheckpointToWhereTheRunStarted()
+    {
+        // The per-chunk path checkpoints after every stored chunk; the rollback then removes those
+        // rows. Without a rewind, the retry resumed from the last checkpoint and skipped chunks that
+        // were no longer in the store - the document came back truncated, silently.
+        var pipeline = CreatePipeline();
+        var entry = await CreateEntryAsync(
+            "manual.txt",
+            string.Join(" ", Enumerable.Range(0, 40).Select(i => $"Section {i} describes a procedure in detail.")));
+
+        var checkpoints = new List<int>();
+        var failAfter = 2;
+        _embeddingService.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ => --failAfter < 0
+                ? Task.FromException<float[]>(new InvalidOperationException("embedding provider rejected a chunk"))
+                : Task.FromResult(new[] { 0.1f, 0.2f, 0.3f }));
+
+        var freshRun = new MemorizeOptions
+        {
+            MaxChunkSize = 200,
+            StartFromChunkIndex = -1,
+            CheckpointCallback = (i, _) => { checkpoints.Add(i); return Task.CompletedTask; }
+        };
+        var result = await pipeline.MemorizeAsync(entry, freshRun, TestContext.Current.CancellationToken);
+
+        result.Success.Should().BeFalse();
+        checkpoints.Should().Contain(1, "two chunks were stored and checkpointed before the failure");
+        checkpoints[^1].Should().Be(-1, "the rollback removed those rows, so the checkpoint goes back to where the run started");
+        _vectorRows.Should().BeEmpty();
+
+        // A resumed run that fails goes back to the prefix's checkpoint, not to -1.
+        checkpoints.Clear();
+        failAfter = 1;
+        var resumedRun = new MemorizeOptions
+        {
+            MaxChunkSize = 200,
+            StartFromChunkIndex = 3,
+            CheckpointCallback = (i, _) => { checkpoints.Add(i); return Task.CompletedTask; }
+        };
+        (await pipeline.MemorizeAsync(entry, resumedRun, TestContext.Current.CancellationToken)).Success.Should().BeFalse();
+        checkpoints[^1].Should().Be(3);
+    }
+
+    [Fact]
     public async Task Rollback_ThatCannotDeleteEverything_ReportsWhatTheStoreStillHolds()
     {
         // "Unrecoverable now" and "unrecoverable forever" differ by whether it was written down. A
@@ -255,9 +304,12 @@ public sealed class VaultPipelineRollbackResilienceTests : IDisposable
             .Returns(ci =>
             {
                 var stored = ((IEnumerable<DocumentChunk>)ci[0]).ToList();
-                _vectorRows.AddRange(stored);
                 foreach (var c in stored)
+                {
+                    _vectorRows.RemoveAll(r => r.Id == c.Id);
+                    _vectorRows.Add(c);
                     _undeletableIds.Add(c.Id);
+                }
                 return Task.FromResult<IEnumerable<string>>(stored.Select(c => c.Id).ToList());
             });
 

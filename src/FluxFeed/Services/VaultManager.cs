@@ -1288,8 +1288,10 @@ public sealed partial class VaultManager : IVault
 
         try
         {
-            // Get all entries to filter by path scope
-            var allEntries = await ListAsync(ProcessingStage.Memorized, ct);
+            // Every entry whose rows are in the index - not only Stage == Memorized. An entry whose
+            // re-index failed (or is still running) keeps its previous generation, and must keep
+            // answering; scoping by stage hid exactly those documents.
+            var allEntries = (await ListAsync(null, ct)).Where(e => e.IsSearchable).ToList();
             var entriesDict = allEntries.ToDictionary(e => e.FilepathHash, e => e);
 
             // Filter entries by path scope

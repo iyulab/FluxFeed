@@ -157,6 +157,26 @@ With background processing on, both only enqueue a job and return the entry as i
 `waitForCompletion: true` (`MemorizeAsync(path, waitForCompletion: true)`,
 `RefreshAsync(path, waitForCompletion: true)`) to get the re-indexed entry — and its new commit — back.
 
+### Re-indexing: chunk identity, swap, rollback
+
+Every chunk is indexed under an id derived from what it is — the entry's path hash plus the passage
+(`ChunkIdentity.ForText`), or the image it describes (`ChunkIdentity.ForImage`) — not a fresh GUID per
+run. Memorizing an unchanged file therefore rewrites the same rows in place; editing one paragraph
+replaces that paragraph's rows and leaves the rest untouched. The stored id is the one you read back
+from the vector store, so anything keyed on chunk ids (GraphRAG entity provenance, your own
+bookkeeping) survives a re-index. Contextual enrichment and RAG sanitizing change a chunk's stored
+text, not its id: identity is taken from the chunker's raw output. Two identical passages in one
+document get distinct ids (by occurrence), so neither shadows the other.
+
+Re-indexing is a swap. The previous generation's rows are identified first, the new generation is
+written, and only the previous rows this run did not write again are deleted. If indexing fails halfway
+— an embedding error on one chunk — the rows this run added are removed and the previous generation is
+left whole: the entry lands on `Error`, but it keeps answering searches with its last good index
+(`VaultEntry.IsSearchable`), and the job's resume checkpoint is rewound to where the run started so a
+retry cannot skip rows the rollback removed. Vaults indexed before 0.26.0 hold GUID ids; their first
+re-index after upgrading finds nothing in common and replaces everything, exactly as before — no
+migration.
+
 Each entry lives under the vault base path, keyed by a hash of its absolute file path:
 
 ```

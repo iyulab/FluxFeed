@@ -103,9 +103,26 @@ public sealed class VaultEntry
     public int RetryCount { get; private set; }
 
     /// <summary>
-    /// Number of chunks indexed to DB.
+    /// Number of chunks the last successful memorize indexed. A later failure leaves it as it was:
+    /// re-indexing swaps generations only once the new one is durably written, so the rows it counts
+    /// are still in the index (see <see cref="IsSearchable"/>).
     /// </summary>
     public int ChunkCount { get; private set; }
+
+    /// <summary>
+    /// True when the index currently holds rows for this entry, whatever the outcome of the last
+    /// attempt: a memorized entry, or one whose re-index is in progress or failed while its previous
+    /// generation stays in place. <see cref="ProcessingStage.Stale"/> is excluded by definition (the
+    /// vectors are gone), and so is anything never successfully indexed.
+    /// </summary>
+    /// <remarks>
+    /// Search scopes by this rather than by <c>Stage == Memorized</c>. Scoping by stage made a failed
+    /// re-index hide the document from search even though the rollback had left its previous
+    /// generation intact — the index still answered, the entry just was not asked.
+    /// </remarks>
+    public bool IsSearchable =>
+        Stage == ProcessingStage.Memorized
+        || (ChunkCount > 0 && Stage is ProcessingStage.Error or ProcessingStage.Extracted or ProcessingStage.Refined);
 
     /// <summary>
     /// Embedding dimension used when this entry was memorized.

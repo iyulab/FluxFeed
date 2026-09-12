@@ -2,6 +2,7 @@ using FluxIndex.Core.Application.Interfaces;
 using FluxIndex.Core.Domain.Entities;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Interfaces;
+using FluxFeed.Services;
 using Microsoft.Extensions.Logging;
 
 namespace FluxFeed.Adapters;
@@ -51,7 +52,9 @@ public sealed partial class FluxIndexMemorizer
                 $"Embedding count mismatch: expected {chunks.Count}, got {embeddingList.Count}");
         }
 
-        // Create DocumentChunk entities
+        // Create DocumentChunk entities, keyed the same way VaultPipeline keys its chunks so that a
+        // re-memorize through either path lands on the same rows.
+        var chunkIds = ChunkIdentity.ForTexts(documentId, chunks);
         for (var i = 0; i < chunks.Count; i++)
         {
             var chunk = DocumentChunk.Create(
@@ -59,6 +62,7 @@ public sealed partial class FluxIndexMemorizer
                 content: chunks[i],
                 chunkIndex: i,
                 totalChunks: chunks.Count);
+            chunk.Id = chunkIds[i];
 
             chunk.SetEmbedding(embeddingList[i]);
 

@@ -65,8 +65,13 @@ public sealed class VaultPipelineIndexSwapTests : IDisposable
         _vectorStore.StoreBatchAsync(Arg.Any<IEnumerable<DocumentChunk>>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
+                // Replace-by-id, as every FluxIndex store does from 0.36.2.
                 var stored = ((IEnumerable<DocumentChunk>)ci[0]).ToList();
-                _vectorRows.AddRange(stored);
+                foreach (var chunk in stored)
+                {
+                    _vectorRows.RemoveAll(r => r.Id == chunk.Id);
+                    _vectorRows.Add(chunk);
+                }
                 return Task.FromResult<IEnumerable<string>>(stored.Select(c => c.Id).ToList());
             });
         _vectorStore.GetByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
