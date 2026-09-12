@@ -3,11 +3,11 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="FluxIndex.Core" Version="0.35.3" />
+    <PackageVersion Include="FluxIndex.Core" Version="0.36.0" />
     <!-- 0.14.0+ is load-bearing: structured extraction diagnostics
          (RawContent.Hints["extraction_failure_reason"] = no_text_layer / blank_page)
          only exist from 0.13.0/0.14.0 and are propagated to VaultEntry. -->
-    <PackageVersion Include="FileFlux" Version="0.23.3" />
+    <PackageVersion Include="FileFlux" Version="0.23.4" />
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.8" />
     <!-- Explicit lift: Microsoft.Data.Sqlite 10.0.8 pulls SQLitePCLRaw 2.1.11
          (NU1903 high, GHSA-2m69-gcr7-jv3q); upstream 2.1.12 stable landed 2026-07-09. -->
@@ -26,6 +26,6 @@
     <PackageVersion Include="AwesomeAssertions" Version="9.6.0" />
     <PackageVersion Include="NSubstitute" Version="6.2.0" />
     <!-- Real sqlite-vec store for the README default-stack integration test (same family version as FluxIndex.Core) -->
-    <PackageVersion Include="FluxIndex.Storage.SQLite" Version="0.35.3" />
+    <PackageVersion Include="FluxIndex.Storage.SQLite" Version="0.36.0" />
   </ItemGroup>
 </Project>
