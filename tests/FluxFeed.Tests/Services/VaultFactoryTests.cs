@@ -6,6 +6,7 @@ using FluxFeed.Domain.Enums;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using FluxFeed.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Xunit;
@@ -68,25 +69,39 @@ public sealed class VaultFactoryTests : IDisposable
         catch { /* ignore cleanup errors */ }
     }
 
+    /// <summary>
+    /// The factory resolves a vault's processing services from a scope of the container it was
+    /// built in, so the shared services are registered here rather than handed to the constructor.
+    /// Scope validation is on: a captive dependency would fail these tests, not hide in them.
+    /// </summary>
+    private ServiceProvider BuildProvider(
+        IVectorStore? vectorStore = null,
+        IEmbeddingService? embeddingService = null,
+        IHybridSearchService? hybridSearch = null,
+        IGraphRAGService? graphRAGService = null,
+        IKeywordSearchService? keywordSearchService = null)
+    {
+        var services = new ServiceCollection();
+        if (vectorStore is not null) services.AddSingleton(vectorStore);
+        if (embeddingService is not null) services.AddSingleton(embeddingService);
+        if (hybridSearch is not null) services.AddSingleton(hybridSearch);
+        if (graphRAGService is not null) services.AddSingleton(graphRAGService);
+        if (keywordSearchService is not null) services.AddSingleton(keywordSearchService);
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+    }
+
     private VaultFactory CreateFactory(
         IHybridSearchService? hybridSearch = null,
         IGraphRAGService? graphRAGService = null,
         IKeywordSearchService? keywordSearchService = null,
         bool backgroundProcessing = false) =>
         new(
-            Substitute.For<IServiceProvider>(),
+            BuildProvider(_vectorStore, _embeddingService, hybridSearch, graphRAGService, keywordSearchService),
             NullLoggerFactory.Instance,
             MsOptions.Create(new FileVaultOptions { VaultBasePath = _basePath, EnableBackgroundProcessing = backgroundProcessing }),
             new ContentHasher(),
             _git,
-            _fileWatcher,
-            extractor: null,
-            chunker: null,
-            vectorStore: _vectorStore,
-            embeddingService: _embeddingService,
-            hybridSearch: hybridSearch,
-            graphRAGService: graphRAGService,
-            keywordSearchService: keywordSearchService);
+            _fileWatcher);
 
     private async Task MemorizeThroughTenantAsync(IVaultFactory factory)
     {
@@ -124,8 +139,8 @@ public sealed class VaultFactoryTests : IDisposable
             p.SetValue(source.ContextualEnrichment, Distinct(p.PropertyType, p.GetValue(source.ContextualEnrichment), p.Name));
 
         using var factory = new VaultFactory(
-            Substitute.For<IServiceProvider>(), NullLoggerFactory.Instance, MsOptions.Create(source),
-            new ContentHasher(), _git, _fileWatcher, vectorStore: _vectorStore, embeddingService: _embeddingService);
+            BuildProvider(_vectorStore, _embeddingService), NullLoggerFactory.Instance, MsOptions.Create(source),
+            new ContentHasher(), _git, _fileWatcher);
         factory.GetOrCreate(TenantId);
         var tenant = factory.GetContext(TenantId)!.Options;
 
@@ -266,7 +281,7 @@ public sealed class VaultFactoryTests : IDisposable
     public async Task GetOrCreate_WithoutAnyOptionalSharedServices_StillCreatesUsableVault()
     {
         using var factory = new VaultFactory(
-            Substitute.For<IServiceProvider>(),
+            BuildProvider(),
             NullLoggerFactory.Instance,
             MsOptions.Create(new FileVaultOptions { VaultBasePath = _basePath }),
             new ContentHasher(),

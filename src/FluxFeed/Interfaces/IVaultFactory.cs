@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using FluxFeed.Options;
 
 namespace FluxFeed.Interfaces;
@@ -139,4 +140,12 @@ public sealed class VaultContext
     /// is enabled and stopped when the tenant is disposed. <c>null</c> when processing runs inline.
     /// </summary>
     public Services.VaultQueueWorker? Worker { get; init; }
+
+    /// <summary>
+    /// The service scope this vault's processing services (extractor, chunker, vector store,
+    /// GraphRAG, ...) were resolved from. Owned by the vault: disposed when the tenant is disposed,
+    /// so scoped registrations live exactly as long as the vault. <c>null</c> for contexts created
+    /// without a container.
+    /// </summary>
+    public IServiceScope? Scope { get; init; }
 }

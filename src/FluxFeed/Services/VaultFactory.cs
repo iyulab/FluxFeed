@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using FluxIndex.Core.Application.Interfaces;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MicrosoftOptions = Microsoft.Extensions.Options.Options;
@@ -13,9 +14,17 @@ namespace FluxFeed.Services;
 /// Factory for creating tenant-scoped IVault instances.
 ///
 /// Architecture:
-/// - Shared services (stateless): IContentHasher, IGitService, IFileWatcherService
-/// - Shared integration services: IExtractor, IChunker, IVectorStore, IEmbeddingService
-/// - Tenant-scoped services: IVaultStorageService, IVaultQueueService, IVaultPipeline, IVault
+/// - Shared services (stateless singletons): IContentHasher, IGitService, IFileWatcherService
+/// - Per-vault processing services, resolved from a service scope the vault owns: IExtractor,
+///   IChunker, IVectorStore, IEmbeddingService, IHybridSearchService, IGraphRAGService,
+///   IKeywordSearchService, IVaultImageEnricher, IRAGSecurityPipeline, IContextualEnrichmentService
+/// - Tenant-scoped services built here: IVaultStorageService, IVaultQueueService, IVaultPipeline, IVault
+///
+/// The factory is a singleton and the processing services are commonly registered scoped (FileFlux
+/// adapters, FluxIndex's GraphRAG and stores), so it must not receive them through its constructor:
+/// the container refuses that under scope validation, and without validation one scoped instance
+/// would be shared by every tenant for the life of the process. Each vault opens its own scope at
+/// creation and disposes it with the tenant, so scoped services live exactly as long as the vault.
 /// </summary>
 public sealed partial class VaultFactory : IVaultFactory
 {
@@ -32,35 +41,13 @@ public sealed partial class VaultFactory : IVaultFactory
     private readonly IGitService _sharedGitService;
     private readonly IFileWatcherService _sharedFileWatcher;
 
-    // Shared integration services (for document processing)
-    private readonly IExtractor? _sharedExtractor;
-    private readonly IChunker? _sharedChunker;
-    private readonly IVectorStore? _sharedVectorStore;
-    private readonly IEmbeddingService? _sharedEmbeddingService;
-    private readonly IHybridSearchService? _sharedHybridSearch;
-    private readonly IGraphRAGService? _sharedGraphRAGService;
-    private readonly IKeywordSearchService? _sharedKeywordSearchService;
-    private readonly IVaultImageEnricher? _sharedImageEnricher;
-    private readonly IRAGSecurityPipeline? _sharedRagSecurityPipeline;
-    private readonly IContextualEnrichmentService? _sharedContextualEnrichment;
-
     public VaultFactory(
         IServiceProvider serviceProvider,
         ILoggerFactory loggerFactory,
         IOptions<FileVaultOptions> options,
         IContentHasher hasher,
         IGitService gitService,
-        IFileWatcherService fileWatcher,
-        IExtractor? extractor = null,
-        IChunker? chunker = null,
-        IVectorStore? vectorStore = null,
-        IEmbeddingService? embeddingService = null,
-        IHybridSearchService? hybridSearch = null,
-        IGraphRAGService? graphRAGService = null,
-        IKeywordSearchService? keywordSearchService = null,
-        IVaultImageEnricher? imageEnricher = null,
-        IRAGSecurityPipeline? ragSecurityPipeline = null,
-        IContextualEnrichmentService? contextualEnrichment = null)
+        IFileWatcherService fileWatcher)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
@@ -71,16 +58,6 @@ public sealed partial class VaultFactory : IVaultFactory
         _sharedHasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
         _sharedGitService = gitService ?? throw new ArgumentNullException(nameof(gitService));
         _sharedFileWatcher = fileWatcher ?? throw new ArgumentNullException(nameof(fileWatcher));
-        _sharedExtractor = extractor;
-        _sharedChunker = chunker;
-        _sharedVectorStore = vectorStore;
-        _sharedEmbeddingService = embeddingService;
-        _sharedHybridSearch = hybridSearch;
-        _sharedGraphRAGService = graphRAGService;
-        _sharedKeywordSearchService = keywordSearchService;
-        _sharedImageEnricher = imageEnricher;
-        _sharedRagSecurityPipeline = ragSecurityPipeline;
-        _sharedContextualEnrichment = contextualEnrichment;
     }
 
     public IVault GetOrCreate(string tenantId)
@@ -210,6 +187,11 @@ public sealed partial class VaultFactory : IVaultFactory
 
         var optionsWrapper = MicrosoftOptions.Create(tenantOptions);
 
+        // The vault's processing services come from a scope the vault owns (disposed with the
+        // tenant), so scoped registrations are honoured instead of captured by this singleton.
+        var scope = _serviceProvider.CreateScope();
+        var scoped = scope.ServiceProvider;
+
         // Create tenant-specific storage service
         var storageLogger = _loggerFactory.CreateLogger<VaultStorageService>();
         var storage = new VaultStorageService(storageLogger, _sharedGitService, optionsWrapper);
@@ -226,16 +208,16 @@ public sealed partial class VaultFactory : IVaultFactory
             storage,
             pipelineLogger,
             optionsWrapper,
-            _sharedExtractor,
-            _sharedChunker,
-            _sharedVectorStore,
-            _sharedEmbeddingService,
-            hybridSearch: _sharedHybridSearch,
-            graphRAGService: _sharedGraphRAGService,
-            keywordSearchService: _sharedKeywordSearchService,
-            imageEnricher: _sharedImageEnricher,
-            ragSecurityPipeline: _sharedRagSecurityPipeline,
-            contextualEnrichment: _sharedContextualEnrichment);
+            scoped.GetService<IExtractor>(),
+            scoped.GetService<IChunker>(),
+            scoped.GetService<IVectorStore>(),
+            scoped.GetService<IEmbeddingService>(),
+            hybridSearch: scoped.GetService<IHybridSearchService>(),
+            graphRAGService: scoped.GetService<IGraphRAGService>(),
+            keywordSearchService: scoped.GetService<IKeywordSearchService>(),
+            imageEnricher: scoped.GetService<IVaultImageEnricher>(),
+            ragSecurityPipeline: scoped.GetService<IRAGSecurityPipeline>(),
+            contextualEnrichment: scoped.GetService<IContextualEnrichmentService>());
 
         // Create VaultManager with mixed shared/tenant-specific services
         var managerLogger = _loggerFactory.CreateLogger<VaultManager>();
@@ -272,7 +254,8 @@ public sealed partial class VaultFactory : IVaultFactory
             StorageService = storage,
             Pipeline = pipeline,
             Options = tenantOptions,
-            Worker = worker
+            Worker = worker,
+            Scope = scope
         };
     }
 
@@ -341,6 +324,16 @@ public sealed partial class VaultFactory : IVaultFactory
             disposableQueue.Dispose();
         }
 
+        // Release the vault's scoped services last — the pipeline and worker above used them.
+        if (context.Scope is IAsyncDisposable asyncScope)
+        {
+            await asyncScope.DisposeAsync();
+        }
+        else
+        {
+            context.Scope?.Dispose();
+        }
+
         // Give a moment for any pending operations
         await Task.Delay(100);
     }
@@ -360,6 +353,7 @@ public sealed partial class VaultFactory : IVaultFactory
             {
                 disposable.Dispose();
             }
+            context.Scope?.Dispose();
         }
 
         _vaults.Clear();

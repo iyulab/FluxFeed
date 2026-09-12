@@ -442,7 +442,10 @@ degrading; a port that returns the wrong number of contexts is always a failure 
 
 `AddFileVaultFactoryWithFluxIndex` swaps the single `IVault` for an `IVaultFactory`. Each tenant gets
 its own `.vault/` directory, processing queue **and queue worker** (started by the factory, stopped when
-the tenant is disposed - no host involvement), while stateless services and the vector store are shared.
+the tenant is disposed - no host involvement). The processing services a vault uses (extractor, chunker,
+vector store, embedder, GraphRAG, ...) are resolved from a service scope the vault owns and released
+when the tenant is disposed, so scoped registrations are honoured per tenant — the factory itself
+holds only the stateless singletons (hasher, git, file watcher) and is valid under scope validation.
 
 ```csharp
 services.AddFileVaultFactoryWithFluxIndex(o => o.VaultBasePath = "./data");
