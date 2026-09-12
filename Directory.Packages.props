@@ -3,7 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="FluxIndex.Core" Version="0.36.2" />
+    <PackageVersion Include="FluxIndex.Core" Version="0.37.0" />
     <!-- 0.14.0+ is load-bearing: structured extraction diagnostics
          (RawContent.Hints["extraction_failure_reason"] = no_text_layer / blank_page)
          only exist from 0.13.0/0.14.0 and are propagated to VaultEntry. -->
@@ -26,6 +26,6 @@
     <PackageVersion Include="AwesomeAssertions" Version="9.6.0" />
     <PackageVersion Include="NSubstitute" Version="6.2.0" />
     <!-- Real sqlite-vec store for the README default-stack integration test (same family version as FluxIndex.Core) -->
-    <PackageVersion Include="FluxIndex.Storage.SQLite" Version="0.36.2" />
+    <PackageVersion Include="FluxIndex.Storage.SQLite" Version="0.37.0" />
   </ItemGroup>
 </Project>
