@@ -537,6 +537,10 @@ The background worker (`VaultBackgroundService`) holds a lease from `IVaultQueue
 how `WaitForJobAsync` tells "a worker is busy" from "nobody will ever process this job". A custom `IVaultQueueService` implementation should return a
 real lease from `RegisterWorker()` (the interface default is a no-op lease, which disables the check).
 
+`RecoverStuckJobsAsync()` returns jobs left `Processing` by work that is no longer running to the queue (the worker calls it on startup).
+It never resets a job this process dequeued and has not yet reported, so a host that runs its own dequeue loop may also call it periodically
+without the running job being handed out a second time. The queue knows its own process only: **one `queue.db` is consumed by one process**.
+
 ### Same-file work is serialized for you
 
 A vault's git repository lives per **entry** (`VaultEntry.VaultPath` = `<EntryPath>/vault`), not per FileVault. Two jobs for two files

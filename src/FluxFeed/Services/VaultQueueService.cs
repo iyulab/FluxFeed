@@ -24,6 +24,16 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     // caller registers a TCS keyed by jobId; Complete/Fail/Cancel resolve and remove it.
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<VaultJob>> _waiters = new();
 
+    // Jobs this process has dequeued from this database and not yet reported. Recovery consults it to
+    // tell a job a dead process abandoned from one a live pipeline is still running: resetting the
+    // latter hands it out a second time, because DequeueAsync judges "in flight" by the very status
+    // the reset clears. Shared by every instance over the same queue.db in the process, so a tenant
+    // queue re-created while the previous worker is still finishing a job does not reset that job.
+    private readonly ConcurrentDictionary<Guid, byte> _heldJobs;
+
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, byte>> s_heldJobsByDatabase =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
     // Worker presence. A pending job can only ever reach a terminal state through a registered
     // worker (VaultBackgroundService), so WaitForJobAsync consults this instead of waiting forever
     // when the hosted service was registered but never started (no Generic Host).
@@ -65,6 +75,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         Directory.CreateDirectory(basePath);
 
         var dbPath = Path.Combine(basePath, "queue.db");
+        _heldJobs = s_heldJobsByDatabase.GetOrAdd(Path.GetFullPath(dbPath), _ => new ConcurrentDictionary<Guid, byte>());
         _connectionString = $"Data Source={dbPath};Mode=ReadWriteCreate;Cache=Shared";
 
         InitializeDatabase();
@@ -329,6 +340,10 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
             var job = ReadJob(reader);
 
+            // Held before the row says Processing, not after: recovery through another instance over the
+            // same database takes a different lock, and must never see the row Processing but unheld.
+            _heldJobs.TryAdd(job.Id, 0);
+
             // Update to processing
             await using var updateCmd = connection.CreateCommand();
             updateCmd.CommandText = """
@@ -340,7 +355,15 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             updateCmd.Parameters.AddWithValue("@status", (int)VaultJobStatus.Processing);
             updateCmd.Parameters.AddWithValue("@started_at", DateTimeOffset.UtcNow.ToString("O"));
 
-            await updateCmd.ExecuteNonQueryAsync(ct);
+            try
+            {
+                await updateCmd.ExecuteNonQueryAsync(ct);
+            }
+            catch
+            {
+                _heldJobs.TryRemove(job.Id, out _);
+                throw;
+            }
 
             job.TryStart();
             LogDequeued(_logger, job.Id, job.FilePath);
@@ -354,6 +377,18 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     }
 
     public async Task CompleteAsync(Guid jobId, CancellationToken ct = default)
+    {
+        try
+        {
+            await CompleteCoreAsync(jobId, ct);
+        }
+        finally
+        {
+            ReleaseHold(jobId);
+        }
+    }
+
+    private async Task CompleteCoreAsync(Guid jobId, CancellationToken ct)
     {
         await _dbLock.WaitAsync(ct);
         try
@@ -395,6 +430,19 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
     public async Task FailAsync(
         Guid jobId, string errorMessage, MemorizeFailureKind? failureKind, CancellationToken ct = default)
+    {
+        try
+        {
+            await FailCoreAsync(jobId, errorMessage, failureKind, ct);
+        }
+        finally
+        {
+            ReleaseHold(jobId);
+        }
+    }
+
+    private async Task FailCoreAsync(
+        Guid jobId, string errorMessage, MemorizeFailureKind? failureKind, CancellationToken ct)
     {
         await _dbLock.WaitAsync(ct);
         try
@@ -691,6 +739,15 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Ends this process's hold on a job once its outcome report is over — after the row is written, so
+    /// recovery never sees the job Processing and unheld while the report is still on its way, and in a
+    /// <c>finally</c>, so a report that throws (a worker stopped mid-job reports with its
+    /// already-cancelled token) still frees the job: it has stopped running, and recovery must be able to
+    /// hand it out again.
+    /// </summary>
+    private void ReleaseHold(Guid jobId) => _heldJobs.TryRemove(jobId, out _);
+
     private static bool IsTerminal(VaultJobStatus status) =>
         status is VaultJobStatus.Completed or VaultJobStatus.Failed or VaultJobStatus.Cancelled;
 
@@ -907,16 +964,36 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             await using var connection = CreateConnection();
             await connection.OpenAsync(ct);
 
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                UPDATE vault_jobs
-                SET status = @queued, started_at = NULL
-                WHERE status = @processing
-                """;
-            cmd.Parameters.AddWithValue("@queued", (int)VaultJobStatus.Queued);
-            cmd.Parameters.AddWithValue("@processing", (int)VaultJobStatus.Processing);
+            var processing = new List<Guid>();
+            await using (var selectCmd = connection.CreateCommand())
+            {
+                selectCmd.CommandText = "SELECT id FROM vault_jobs WHERE status = @processing";
+                selectCmd.Parameters.AddWithValue("@processing", (int)VaultJobStatus.Processing);
+                await using var reader = await selectCmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                    processing.Add(Guid.Parse(reader.GetString(0)));
+            }
 
-            var recovered = await cmd.ExecuteNonQueryAsync(ct);
+            var recovered = 0;
+            foreach (var jobId in processing)
+            {
+                // Read at the moment of the write, not once up front: a report that lands between the two
+                // releases the hold and moves the row out of Processing, which the status guard below sees.
+                if (_heldJobs.ContainsKey(jobId))
+                    continue;
+
+                await using var cmd = connection.CreateCommand();
+                cmd.CommandText = """
+                    UPDATE vault_jobs
+                    SET status = @queued, started_at = NULL
+                    WHERE id = @id AND status = @processing
+                    """;
+                cmd.Parameters.AddWithValue("@id", jobId.ToString());
+                cmd.Parameters.AddWithValue("@queued", (int)VaultJobStatus.Queued);
+                cmd.Parameters.AddWithValue("@processing", (int)VaultJobStatus.Processing);
+
+                recovered += await cmd.ExecuteNonQueryAsync(ct);
+            }
 
             if (recovered > 0)
             {

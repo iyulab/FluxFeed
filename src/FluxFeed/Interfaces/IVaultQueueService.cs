@@ -231,10 +231,29 @@ public interface IVaultQueueService
     Task<QueueStatistics> GetStatisticsAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Recovers stuck jobs (Processing → Queued) after crash.
-    /// Should be called on startup. Preserves last_completed_chunk_index so that
-    /// the embedding pipeline can resume from the checkpoint instead of restarting from chunk 0.
+    /// Returns jobs left <see cref="VaultJobStatus.Processing"/> by work that is no longer running to
+    /// <see cref="VaultJobStatus.Queued"/> — jobs a previous process dequeued before it died, and jobs this
+    /// process dequeued whose outcome report was attempted but did not land. Preserves
+    /// last_completed_chunk_index so that the embedding pipeline can resume from the checkpoint instead of
+    /// restarting from chunk 0.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A job this process has dequeued and not yet reported through <see cref="CompleteAsync"/> or
+    /// <c>FailAsync</c> is left alone: resetting it would hand it out a second time while its pipeline is
+    /// still running, and two pipelines over one entry race its files. The call is therefore safe at any
+    /// time, not only at startup — periodic self-healing may call it.
+    /// </para>
+    /// <para>
+    /// "This process" is what the queue can know. One <c>queue.db</c> is consumed by one process: a job a
+    /// different process is running looks abandoned from here, and <see cref="DequeueAsync"/> does not
+    /// coordinate across processes either.
+    /// </para>
+    /// <para>
+    /// A job dequeued and never reported at all stays Processing until the process that dequeued it exits.
+    /// </para>
+    /// </remarks>
+    /// <returns>The number of jobs returned to the queue.</returns>
     Task<int> RecoverStuckJobsAsync(CancellationToken ct = default);
 
     /// <summary>

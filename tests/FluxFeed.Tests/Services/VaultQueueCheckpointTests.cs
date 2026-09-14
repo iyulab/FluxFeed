@@ -58,7 +58,17 @@ public class VaultQueueCheckpointTests : IDisposable
         // Simulate per-chunk progress
         await queue.UpdateCheckpointAsync(job.Id, 14);
 
-        // Simulate host restart: stuck-job recovery resets status but preserves checkpoint
+        // Simulate the worker being stopped mid-job: its failure report carries the already-cancelled
+        // stopping token, so the row stays Processing while the job is no longer running. (Recovery
+        // leaves a job this process is still running alone, so a bare recover here would reset nothing.)
+        using (var stopping = new CancellationTokenSource())
+        {
+            await stopping.CancelAsync();
+            var report = () => queue.FailAsync(job.Id, "worker stopped", stopping.Token);
+            await report.Should().ThrowAsync<OperationCanceledException>();
+        }
+
+        // Stuck-job recovery resets status but preserves checkpoint
         var recovered = await queue.RecoverStuckJobsAsync();
         recovered.Should().Be(1);
 
@@ -138,6 +148,7 @@ public class VaultQueueCheckpointTests : IDisposable
         public Task<VaultJob?> DequeueAsync() => inner.DequeueAsync();
         public Task UpdateCheckpointAsync(Guid id, int idx) => inner.UpdateCheckpointAsync(id, idx);
         public Task<int> RecoverStuckJobsAsync() => inner.RecoverStuckJobsAsync();
+        public Task FailAsync(Guid id, string error, CancellationToken ct) => inner.FailAsync(id, error, ct);
 
         public ValueTask DisposeAsync()
         {
