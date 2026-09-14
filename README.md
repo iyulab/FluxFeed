@@ -276,6 +276,18 @@ keyword ids differ from its vector ids, so every entry counts as mismatched even
 number of rows. Expect it to be much larger than a per-document row-count comparison on the same database, and to fall by one
 per re-indexed entry.
 
+An entry that is never re-indexed keeps its mismatch. `RepairKeywordIndexAsync` rebuilds the keyword rows of every mismatched
+entry from the rows the vector store already holds — nothing is re-embedded — and leaves entries whose legs agree alone. Run it
+once after upgrading such a vault, with the queue paused:
+
+```csharp
+await vault.PauseQueueAsync();
+var repair = await vault.RepairKeywordIndexAsync();   // EntriesChecked, EntriesRepaired, KeywordRowsWritten, KeywordRowsRemoved
+await vault.ResumeQueueAsync();
+```
+
+It throws when no keyword index is registered rather than reporting nothing to repair.
+
 ```csharp
 var status = await vault.StatusAsync();
 if (status.IndexMismatchedEntryCount > 0)

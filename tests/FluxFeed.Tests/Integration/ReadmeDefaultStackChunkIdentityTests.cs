@@ -182,6 +182,93 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
     }
 
     [Fact]
+    public async Task RepairKeywordIndex_RebuildsADriftedKeywordLegFromTheVectorLeg_WithoutReembedding()
+    {
+        // A document indexed before the stores honoured caller ids and never re-indexed since keeps its
+        // stale keyword rows forever. Re-memorizing it pays for every embedding again; the vector leg
+        // already holds exactly the rows the keyword leg should.
+        await using var provider = BuildStack(withKeywordIndex: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var store = scope.ServiceProvider.GetRequiredService<IVectorStore>();
+        var keyword = scope.ServiceProvider.GetRequiredService<IKeywordSearchService>();
+
+        var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+
+        // The legacy shape: the keyword leg holds the document only under ids the vector store never held.
+        var vectorIds = await store.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken);
+        await keyword.DeleteChunksAsync(vectorIds, TestContext.Current.CancellationToken);
+        await keyword.IndexChunksAsync(
+            [new DocumentChunk { Id = Guid.NewGuid().ToString(), DocumentId = entry.FilepathHash, ChunkIndex = 0, Content = "Coolant pressure gauge on the south wall (stale wording).", TokenCount = 8 }],
+            TestContext.Current.CancellationToken);
+        (await vault.StatusAsync(TestContext.Current.CancellationToken)).IndexMismatchedEntryCount.Should().Be(1);
+        var embeddedBefore = _embedder.EmbeddedTexts;
+
+        var result = await vault.RepairKeywordIndexAsync(TestContext.Current.CancellationToken);
+
+        result.EntriesChecked.Should().Be(1);
+        result.EntriesRepaired.Should().Be(1);
+        result.KeywordRowsWritten.Should().Be(vectorIds.Count);
+        result.KeywordRowsRemoved.Should().Be(1);
+        _embedder.EmbeddedTexts.Should().Be(embeddedBefore, "the keyword leg is rebuilt from rows the vector leg already holds");
+
+        var healed = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        healed.IndexMismatchedEntryCount.Should().Be(0);
+        (await keyword.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken))
+            .Should().BeEquivalentTo(vectorIds);
+
+        var keywordOnly = new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Keyword, TopK = 10 };
+        var current = await vault.SearchAsync("marmalade", keywordOnly, TestContext.Current.CancellationToken);
+        current.Items.Should().Contain(i => i.Content != null && i.Content.Contains("marmalade", StringComparison.Ordinal),
+            "the rebuilt keyword leg answers with the document's current wording");
+        // Scoped to the file: the scope is a metadata filter on the keyword leg, so the rebuilt rows must carry
+        // the filterable metadata the pipeline wrote, not just the text.
+        var scoped = await vault.SearchAsync(
+            "marmalade",
+            new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Keyword, TopK = 10, PathScope = [_file] },
+            TestContext.Current.CancellationToken);
+        scoped.Items.Should().Contain(i => i.Content != null && i.Content.Contains("marmalade", StringComparison.Ordinal),
+            "a file-scoped keyword search must still find the document after its keyword leg is rebuilt");
+        scoped.ExecutedStrategy.Should().Be(VaultSearchStrategy.Keyword);
+
+        var stale = await vault.SearchAsync("south wall", keywordOnly, TestContext.Current.CancellationToken);
+        stale.Items.Should().NotContain(i => i.Content != null && i.Content.Contains("stale wording", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RepairKeywordIndex_LeavesEntriesWhoseLegsAgreeAlone()
+    {
+        await using var provider = BuildStack(withKeywordIndex: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+
+        var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+
+        var result = await vault.RepairKeywordIndexAsync(TestContext.Current.CancellationToken);
+
+        result.EntriesChecked.Should().Be(1);
+        result.EntriesRepaired.Should().Be(0);
+        result.KeywordRowsWritten.Should().Be(0);
+        result.KeywordRowsRemoved.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RepairKeywordIndex_WithoutAKeywordIndex_SaysSoInsteadOfReportingNothingToRepair()
+    {
+        await using var provider = BuildStack();
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+
+        var repair = () => vault.RepairKeywordIndexAsync(TestContext.Current.CancellationToken);
+
+        await repair.Should().ThrowAsync<InvalidOperationException>().WithMessage("*keyword index*");
+    }
+
+    [Fact]
     public async Task Status_WithoutAKeywordIndex_ReportsThatLegAsAbsentNotEmpty()
     {
         await using var provider = BuildStack();

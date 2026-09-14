@@ -23,8 +23,12 @@ internal sealed class FailableEmbeddingService : IEmbeddingService
 
     public void Disarm() => _failOnCall = null;
 
+    /// <summary>Texts embedded since construction, through either the single or the batch call.</summary>
+    public int EmbeddedTexts { get; private set; }
+
     public Task<float[]> GenerateEmbeddingAsync(string text, CancellationToken ct = default)
     {
+        EmbeddedTexts++;
         _calls++;
         if (_calls == _failOnCall)
             throw new InvalidOperationException("embedding provider rejected a chunk");
@@ -32,7 +36,11 @@ internal sealed class FailableEmbeddingService : IEmbeddingService
     }
 
     public Task<IEnumerable<float[]>> GenerateEmbeddingsBatchAsync(IEnumerable<string> texts, CancellationToken ct = default)
-        => _inner.GenerateEmbeddingsBatchAsync(texts, ct);
+    {
+        var list = texts.ToList();
+        EmbeddedTexts += list.Count;
+        return _inner.GenerateEmbeddingsBatchAsync(list, ct);
+    }
 
     public int GetEmbeddingDimension() => _inner.GetEmbeddingDimension();
     public string GetModelName() => _inner.GetModelName();

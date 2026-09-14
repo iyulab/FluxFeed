@@ -170,6 +170,15 @@ public interface IVault
     Task<VaultStatus> StatusAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Rebuilds the keyword-index rows of every searchable entry whose keyword leg disagrees with its vector
+    /// leg (<see cref="VaultStatus.IndexMismatchedEntryCount"/>), from the rows the vector store already holds.
+    /// Nothing is re-embedded. Use it once after upgrading a vault whose documents are not all re-indexed;
+    /// pause the queue while it runs.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Gets the diff between the working tree and HEAD for a vault entry's vault/ directory — i.e.
     /// uncommitted changes only. This vault normally auto-commits after every successful
     /// Memorize/RefreshAsync, so the working tree is typically clean by the time a caller gets around

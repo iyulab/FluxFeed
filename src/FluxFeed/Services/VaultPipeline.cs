@@ -1402,6 +1402,63 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return new IndexRowCounts(vectorRows, keywordRows, mismatched);
     }
 
+    /// <inheritdoc />
+    public async Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        if (_keywordSearchService == null)
+        {
+            throw new InvalidOperationException(
+                "No keyword index is registered, so there is no keyword leg to repair. Register an IKeywordSearchService " +
+                "before calling RepairKeywordIndexAsync, or check IVaultPipeline.SupportsKeywordIndex first.");
+        }
+
+        if (_vectorStore == null)
+        {
+            throw new InvalidOperationException(
+                "The keyword index is rebuilt from the vector store, and no IVectorStore is registered.");
+        }
+
+        var repaired = 0;
+        var written = 0;
+        var removed = 0;
+
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var vectorIds = await _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
+            var keywordIds = await _keywordSearchService.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
+            var vectorIdSet = vectorIds.ToHashSet(StringComparer.Ordinal);
+            if (vectorIdSet.SetEquals(keywordIds))
+            {
+                continue;
+            }
+
+            // Write before removing, as a re-index swap does: the entry keeps answering keyword searches
+            // throughout, and a failure partway leaves the previous rows rather than none.
+            var chunks = (await _vectorStore.GetByDocumentIdAsync(entry.FilepathHash, ct)).ToList();
+            if (chunks.Count > 0)
+            {
+                await _keywordSearchService.IndexChunksAsync(chunks, ct);
+            }
+
+            var stale = keywordIds.Where(id => !vectorIdSet.Contains(id)).ToList();
+            if (stale.Count > 0)
+            {
+                await _keywordSearchService.DeleteChunksAsync(stale, ct);
+            }
+
+            repaired++;
+            written += chunks.Count;
+            removed += stale.Count;
+            LogRepairedKeywordLeg(_logger, entry.FilepathHash, chunks.Count, stale.Count);
+        }
+
+        return new KeywordIndexRepairResult(entries.Count, repaired, written, removed);
+    }
+
     /// <summary>
     /// Deletes the given chunk ids from every backend they were written to. Used for both halves of
     /// the swap: dropping the superseded generation on success, and dropping the partial one on
@@ -1951,6 +2008,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Contextual enrichment applied to {EnrichedCount}/{ChunkCount} chunks for {SourcePath} in {ElapsedMs} ms")]
     private static partial void LogContextualEnrichmentApplied(ILogger logger, int enrichedCount, int chunkCount, string sourcePath, long elapsedMs);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Rebuilt keyword leg of {FilepathHash} from the vector leg: {Written} rows written, {Removed} stale rows removed")]
+    private static partial void LogRepairedKeywordLeg(ILogger logger, string filepathHash, int written, int removed);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Contextual enrichment failed for {SourcePath}; indexing {ChunkCount} chunks without context")]
     private static partial void LogContextualEnrichmentFailed(ILogger logger, string sourcePath, int chunkCount, Exception exception);

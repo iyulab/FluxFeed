@@ -36,6 +36,26 @@ public interface IVaultPipeline
     Task<IndexRowCounts> GetIndexRowCountsAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default);
 
     /// <summary>
+    /// Rebuilds the keyword-index rows of every entry whose two legs hold different id sets, from the rows
+    /// the vector store holds for it. Entries whose legs agree are left alone. Nothing is re-embedded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A re-index heals an entry's keyword leg, but an entry that is never re-indexed keeps whatever drift
+    /// it has — keyword rows written before the stores honoured caller ids, for one. Re-memorizing to
+    /// clear it pays for every embedding again, although the vector store already holds exactly the rows
+    /// the keyword leg should: this copies them across.
+    /// </para>
+    /// <para>
+    /// Per drifted entry the vector rows are written to the keyword index first and the keyword rows the
+    /// vector store does not hold are removed after, so the entry never has an empty keyword leg. Do not run
+    /// it while the same entries are being re-indexed — pause the queue first.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default);
+
+    /// <summary>
     /// Full memorize pipeline: extract → refine → chunk → embed → commit.
     /// Used for new files or when source content has changed.
     /// </summary>
@@ -201,6 +221,19 @@ public sealed class MemorizeOptions
 /// <param name="KeywordRows">Rows the keyword index holds for the entries, or <c>null</c> without a keyword index.</param>
 /// <param name="MismatchedEntries">Entries whose two legs hold different id sets. Zero when fewer than two legs are registered.</param>
 public readonly record struct IndexRowCounts(int? VectorRows, int? KeywordRows, int MismatchedEntries);
+
+/// <summary>
+/// Outcome of <see cref="IVaultPipeline.RepairKeywordIndexAsync"/>.
+/// </summary>
+/// <param name="EntriesChecked">Entries whose two legs were compared.</param>
+/// <param name="EntriesRepaired">Entries whose keyword leg disagreed with the vector leg and was rebuilt.</param>
+/// <param name="KeywordRowsWritten">Keyword rows written from the vector leg across the repaired entries.</param>
+/// <param name="KeywordRowsRemoved">Keyword rows removed because the vector leg does not hold them.</param>
+public readonly record struct KeywordIndexRepairResult(
+    int EntriesChecked,
+    int EntriesRepaired,
+    int KeywordRowsWritten,
+    int KeywordRowsRemoved);
 
 public sealed class MemorizeResult
 {
