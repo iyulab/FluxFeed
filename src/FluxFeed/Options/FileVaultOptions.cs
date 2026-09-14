@@ -298,6 +298,8 @@ public sealed class ContextualEnrichmentDefaults
     /// <summary>
     /// When true (default), a failed enrichment call logs a warning and the document is indexed with its plain chunks,
     /// each tagged <c>enrichment=failed</c>. When false, the failure propagates and the memorize fails.
+    /// A call that succeeds with a blank context is not a failure under either setting: that chunk is indexed as it was,
+    /// tagged <c>enrichment=empty</c>, and a warning is logged.
     /// </summary>
     public bool ContinueOnError { get; set; } = true;
 }

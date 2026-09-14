@@ -6,6 +6,7 @@ using FluxFeed.Domain.Entities;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using FluxFeed.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -84,8 +85,8 @@ public sealed class VaultPipelineContextualEnrichmentTests : IDisposable
         catch { /* ignore cleanup errors */ }
     }
 
-    private VaultPipeline CreatePipeline(IContextualEnrichmentService? enrichment, bool enabled, bool continueOnError = true) => new(
-        _git, _hasher, _storage, NullLogger<VaultPipeline>.Instance,
+    private VaultPipeline CreatePipeline(IContextualEnrichmentService? enrichment, bool enabled, bool continueOnError = true, ILogger<VaultPipeline>? logger = null) => new(
+        _git, _hasher, _storage, logger ?? NullLogger<VaultPipeline>.Instance,
         options: MsOptions.Create(new FileVaultOptions
         {
             VaultBasePath = _vaultDir,
@@ -178,17 +179,41 @@ public sealed class VaultPipelineContextualEnrichmentTests : IDisposable
     }
 
     [Fact]
-    public async Task BlankContext_LeavesTheChunkUntouched()
+    public async Task BlankContext_LeavesTheContentUntouched_ButTagsTheChunkEmpty()
     {
+        // A port that succeeds with no context is a third outcome, neither 'contextual' nor 'failed'. Without its own
+        // tag it is indistinguishable from enrichment being off — the ecosystem E2E harness once saw every chunk come
+        // back unmarked and had nothing to tell a silent generator from a missing registration.
         var port = PortSummarizing("   ");
-        var pipeline = CreatePipeline(port, enabled: true);
+        var logger = new CapturingLogger<VaultPipeline>();
+        var pipeline = CreatePipeline(port, enabled: true, logger: logger);
 
         var result = await MemorizeAsync(pipeline);
 
         result.Success.Should().BeTrue();
         var stored = _stored.Should().ContainSingle().Subject;
         stored.Content.Should().Be(Document);
-        stored.Metadata.Should().NotContainKey(VaultPipeline.EnrichmentMetadataKey);
+        stored.Metadata[VaultPipeline.EnrichmentMetadataKey].Should().Be("empty");
+        stored.Metadata.Should().NotContainKey(VaultPipeline.ContextSummaryMetadataKey);
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("no context for 1/1"));
+    }
+
+    [Fact]
+    public async Task MixedContexts_TagEachChunkByItsOwnOutcome()
+    {
+        var port = PortReturning(chunks => chunks.Select((_, i) => i == 0 ? "" : "Section context.").ToList());
+        var pipeline = CreatePipeline(port, enabled: true);
+
+        var path = Path.Combine(_testDir, $"doc_{Guid.NewGuid():N}.txt");
+        await File.WriteAllTextAsync(path, "First paragraph about vacation.\n\nSecond paragraph about expenses.", TestContext.Current.CancellationToken);
+        var entry = VaultEntry.Create(path, _vaultDir);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+        var result = await pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 40, SkipCommit = true }, TestContext.Current.CancellationToken);
+
+        result.Success.Should().BeTrue();
+        _stored.Should().HaveCountGreaterThan(1, "the fixture must produce more than one chunk for this fact to mean anything");
+        _stored.OrderBy(c => c.ChunkIndex).Select(c => c.Metadata[VaultPipeline.EnrichmentMetadataKey])
+            .Should().Equal(new object[] { "empty" }.Concat(Enumerable.Repeat<object>("contextual", _stored.Count - 1)));
     }
 
     [Fact]

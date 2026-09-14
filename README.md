@@ -480,7 +480,9 @@ var pipeline = new VaultPipeline(
 Opt-in. Before a document's text chunks are embedded and keyword-indexed, each one gets a short LLM-written
 context — where it sits in its document — prepended (Anthropic's "contextual retrieval"). The same enriched text is
 what gets stored, embedded and keyword-indexed, so retrieval and display agree; the context alone is also kept in
-chunk metadata (`context_summary`) and the step is recorded as `enrichment=contextual`. Image-description chunks
+chunk metadata (`context_summary`) and the step is recorded as `enrichment=contextual`. A port that succeeds but
+returns a blank context leaves that chunk's text as it was, tags it `enrichment=empty` and logs a warning — so "the
+model said nothing" is never mistaken for "enrichment is off". Image-description chunks
 are not enriched. Refresh re-runs it, since it happens at the chunk stage.
 
 The port is FluxIndex.Core's own `IContextualEnrichmentService` (`GenerateContextBatchAsync(chunks, fullDocumentText)`

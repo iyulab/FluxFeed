@@ -595,14 +595,19 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <summary>Metadata key holding the LLM-written context summary that was prepended to an enriched chunk.</summary>
     public const string ContextSummaryMetadataKey = "context_summary";
 
-    /// <summary>Metadata key recording what happened to a chunk in the enrichment step: <c>contextual</c> or <c>failed</c>.</summary>
+    /// <summary>
+    /// Metadata key recording what happened to a chunk in the enrichment step: <c>contextual</c> (a context was
+    /// prepended), <c>empty</c> (the port succeeded but returned no context, so the chunk is indexed as it was) or
+    /// <c>failed</c> (the port threw and <see cref="ContextualEnrichmentDefaults.ContinueOnError"/> degraded it).
+    /// </summary>
     public const string EnrichmentMetadataKey = "enrichment";
 
     /// <summary>
     /// Asks the FluxIndex.Core <see cref="IContextualEnrichmentService"/> port for one context per text chunk and
     /// prepends it (context + blank line + original) — the same text then goes to the vector store, the keyword index
     /// and the stored chunk, so retrieval and display agree. The original passage is still on disk in <c>refined.md</c>;
-    /// the context alone is kept in metadata so a consumer can strip it. A blank context leaves the chunk untouched.
+    /// the context alone is kept in metadata so a consumer can strip it. A blank context leaves the content untouched
+    /// but tags the chunk <c>empty</c> and logs a warning — otherwise it would look exactly like enrichment being off.
     /// </summary>
     private async Task<List<VaultChunk>> ApplyContextualEnrichmentAsync(
         List<VaultChunk> chunks,
@@ -638,13 +643,15 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         var result = new List<VaultChunk>(chunks.Count);
         var enrichedCount = 0;
+        var emptyCount = 0;
         for (var i = 0; i < chunks.Count; i++)
         {
             var chunk = chunks[i];
             var context = contexts[i]?.Trim();
             if (string.IsNullOrEmpty(context))
             {
-                result.Add(chunk);
+                emptyCount++;
+                result.Add(chunk with { Metadata = WithMetadata(chunk.Metadata, EnrichmentMetadataKey, "empty") });
                 continue;
             }
 
@@ -652,6 +659,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
             var metadata = WithMetadata(chunk.Metadata, ContextSummaryMetadataKey, context);
             metadata = WithMetadata(metadata, EnrichmentMetadataKey, "contextual");
             result.Add(chunk with { Content = context + "\n\n" + chunk.Content, Metadata = metadata });
+        }
+
+        if (emptyCount > 0)
+        {
+            LogContextualEnrichmentReturnedNoContext(_logger, emptyCount, chunks.Count, sourcePath);
         }
 
         LogContextualEnrichmentApplied(_logger, enrichedCount, chunks.Count, sourcePath, stopwatch.ElapsedMilliseconds);
@@ -2014,6 +2026,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Contextual enrichment failed for {SourcePath}; indexing {ChunkCount} chunks without context")]
     private static partial void LogContextualEnrichmentFailed(ILogger logger, string sourcePath, int chunkCount, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Contextual enrichment returned no context for {EmptyCount}/{ChunkCount} chunks of {SourcePath}; those chunks are indexed without context and tagged enrichment=empty")]
+    private static partial void LogContextualEnrichmentReturnedNoContext(ILogger logger, int emptyCount, int chunkCount, string sourcePath);
 
     #endregion
 }
