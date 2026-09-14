@@ -12,6 +12,14 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.29.3]
+
+### Changed
+- Re-pinned sibling package(s) `FileFlux` 0.23.8 -> 0.23.9, `FluxIndex.Core` 0.41.0 -> 0.41.1, `FluxIndex.Storage.SQLite` 0.41.0 -> 0.41.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Raised `Microsoft.Extensions.*` package references to 10.0.12 (latest servicing release). The re-pinned sibling releases declare `Microsoft.Extensions.*` floors above the previous references.
+
+---
+
 ## [0.29.2]
 
 ### Changed
