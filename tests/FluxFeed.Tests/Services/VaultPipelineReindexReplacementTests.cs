@@ -265,6 +265,31 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
     }
 
     [Fact]
+    public async Task GetIndexRowCounts_CountsEachLegForTheGivenEntriesAndTheEntriesThatDisagree()
+    {
+        var pipeline = CreatePipeline(CreateKeywordIndex());
+        var first = await CreateEntryAsync("first.txt", "Requests are reviewed within five business days.");
+        var second = await CreateEntryAsync("second.txt", "Appeals are heard on the last Friday of the month.");
+        await pipeline.MemorizeAsync(first, Options(), TestContext.Current.CancellationToken);
+        await pipeline.MemorizeAsync(second, Options(), TestContext.Current.CancellationToken);
+        var vectorRows = _vectorRows.Count;
+
+        var legacy = DocumentChunk.Create(second.FilepathHash, "Appeals were heard on Mondays.", 0, 1);
+        legacy.Id = Guid.NewGuid().ToString();
+        _keywordRows.Add(legacy);
+
+        var counts = await pipeline.GetIndexRowCountsAsync([first, second], TestContext.Current.CancellationToken);
+
+        counts.VectorRows.Should().Be(vectorRows);
+        counts.KeywordRows.Should().Be(vectorRows + 1);
+        counts.MismatchedEntries.Should().Be(1, "only the second entry's legs disagree");
+
+        var firstOnly = await pipeline.GetIndexRowCountsAsync([first], TestContext.Current.CancellationToken);
+        firstOnly.MismatchedEntries.Should().Be(0);
+        firstOnly.KeywordRows.Should().Be(firstOnly.VectorRows, "counts are scoped to the entries asked about, not the whole store");
+    }
+
+    [Fact]
     public async Task Refresh_AfterMemorize_StillLeavesOneRowPerChunk()
     {
         // Refresh already replaced its rows before the shared step owned the removal; it must keep

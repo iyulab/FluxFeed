@@ -23,6 +23,19 @@ public interface IVaultPipeline
     bool SupportsGraphRAG { get; }
 
     /// <summary>
+    /// Rows each index leg currently holds for <paramref name="entries"/>, and how many of those
+    /// entries the legs disagree on. Counted per entry through each leg's own id enumeration, so the
+    /// numbers are scoped to this vault even when the store is shared with others, and a mismatch
+    /// is visible per document rather than hidden in totals that happen to coincide.
+    /// </summary>
+    /// <remarks>
+    /// The entry store counts chunks; it says nothing about rows. Two legs written under different
+    /// ids drifted for months with every count in <see cref="VaultStatus"/> looking right — this is
+    /// the surface that shows it. One enumeration per registered leg per entry.
+    /// </remarks>
+    Task<IndexRowCounts> GetIndexRowCountsAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default);
+
+    /// <summary>
     /// Full memorize pipeline: extract → refine → chunk → embed → commit.
     /// Used for new files or when source content has changed.
     /// </summary>
@@ -180,6 +193,15 @@ public sealed class MemorizeOptions
 /// <summary>
 /// Result of a memorize/refresh operation.
 /// </summary>
+/// <summary>
+/// Row counts per index leg for a set of entries — see <see cref="IVaultPipeline.GetIndexRowCountsAsync"/>.
+/// A leg that is not registered reports <c>null</c>, not zero: zero would read as an empty index.
+/// </summary>
+/// <param name="VectorRows">Rows the vector store holds for the entries, or <c>null</c> without a vector store.</param>
+/// <param name="KeywordRows">Rows the keyword index holds for the entries, or <c>null</c> without a keyword index.</param>
+/// <param name="MismatchedEntries">Entries whose two legs hold different id sets. Zero when fewer than two legs are registered.</param>
+public readonly record struct IndexRowCounts(int? VectorRows, int? KeywordRows, int MismatchedEntries);
+
 public sealed class MemorizeResult
 {
     /// <summary>

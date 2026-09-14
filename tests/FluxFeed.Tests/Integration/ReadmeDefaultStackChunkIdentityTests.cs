@@ -141,6 +141,64 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
     }
 
     [Fact]
+    public async Task Status_ReportsEachIndexLegsRowsAndTheEntriesWhereTheyDisagree()
+    {
+        // Nothing on the public surface showed the accumulation: the entry store counts chunks, not
+        // rows, and the two legs were never compared. The status must make the drift visible before
+        // a re-index and show it gone after one.
+        await using var provider = BuildStack(withKeywordIndex: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var keyword = scope.ServiceProvider.GetRequiredService<IKeywordSearchService>();
+
+        var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+
+        var clean = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        clean.IndexedChunkCount.Should().Be(entry.ChunkCount);
+        clean.VectorRowCount.Should().Be(entry.ChunkCount);
+        clean.KeywordRowCount.Should().Be(entry.ChunkCount);
+        clean.IndexMismatchedEntryCount.Should().Be(0);
+
+        await keyword.IndexChunksAsync(
+            [new DocumentChunk { Id = Guid.NewGuid().ToString(), DocumentId = entry.FilepathHash, ChunkIndex = 0, Content = "Radio checks on the hour (previous generation).", TokenCount = 5 }],
+            TestContext.Current.CancellationToken);
+
+        var drifted = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        drifted.VectorRowCount.Should().Be(entry.ChunkCount);
+        drifted.KeywordRowCount.Should().Be(entry.ChunkCount + 1, "the keyword leg carries a row the vector leg does not");
+        drifted.IndexMismatchedEntryCount.Should().Be(1);
+
+        await File.WriteAllTextAsync(_file,
+            Paragraphs.Replace("marmalade board", "turquoise ledger", StringComparison.Ordinal),
+            TestContext.Current.CancellationToken);
+        var reindexed = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        reindexed.Stage.Should().Be(ProcessingStage.Memorized, because: reindexed.LastError);
+
+        var healed = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        healed.KeywordRowCount.Should().Be(healed.VectorRowCount);
+        healed.IndexMismatchedEntryCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Status_WithoutAKeywordIndex_ReportsThatLegAsAbsentNotEmpty()
+    {
+        await using var provider = BuildStack();
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+
+        var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+
+        var status = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        status.VectorRowCount.Should().Be(entry.ChunkCount);
+        status.KeywordRowCount.Should().BeNull("no keyword index is registered — a zero would read as an empty index");
+        status.IndexMismatchedEntryCount.Should().Be(0, "one leg cannot disagree with itself");
+    }
+
+    [Fact]
     public async Task ReindexThatFailsMidway_LeavesThePreviousGenerationWholeAndSearchable()
     {
         await using var provider = BuildStack(o => o.EnableAutoRetry = false, withKeywordIndex: true);

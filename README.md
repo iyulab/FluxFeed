@@ -257,6 +257,23 @@ if (entry.ExtractionHints?.TryGetValue("extraction_failure_reason", out var reas
   its own reason overwrites the latter but not the former. Both clear on a successful stage or reset,
   and neither is cleared by sync-status transitions — so use `Stage`/`SyncStatus`, not
   `FirstError != null`, to decide whether an entry is currently broken.
+
+### Index legs — `StatusAsync`
+
+The entry store counts chunks; it says nothing about rows. `VaultStatus` therefore reports, for the
+searchable entries, what each index leg actually holds: `IndexedChunkCount` (what the entries claim),
+`VectorRowCount` and `KeywordRowCount` (what the legs hold — `null` for a leg that is not registered,
+never zero), and `IndexMismatchedEntryCount`, the entries whose two legs hold different id sets. The
+counts are taken per entry through each leg's own id enumeration, so they are scoped to this vault
+even on a store shared with others. A mismatch is the drift a re-index of that entry removes (see
+*Re-indexing*); the same numbers before and after are how you tell the re-index did.
+
+```csharp
+var status = await vault.StatusAsync();
+if (status.IndexMismatchedEntryCount > 0)
+    logger.LogWarning("{Count} entries have keyword rows the vector store never keyed", status.IndexMismatchedEntryCount);
+```
+
 ### Queue fairness
 
 One `IVaultQueueService` shared across vaults is the default registration, and until 0.23.0 nothing

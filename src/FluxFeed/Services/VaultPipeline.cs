@@ -1360,6 +1360,48 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return [.. ids];
     }
 
+    /// <inheritdoc />
+    public async Task<IndexRowCounts> GetIndexRowCountsAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        if (_vectorStore == null && _keywordSearchService == null)
+        {
+            return new IndexRowCounts(null, null, 0);
+        }
+
+        var vectorRows = _vectorStore == null ? (int?)null : 0;
+        var keywordRows = _keywordSearchService == null ? (int?)null : 0;
+        var mismatched = 0;
+
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            IReadOnlyList<string>? vectorIds = null;
+            if (_vectorStore != null)
+            {
+                vectorIds = await _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
+                vectorRows += vectorIds.Count;
+            }
+
+            IReadOnlyList<string>? keywordIds = null;
+            if (_keywordSearchService != null)
+            {
+                keywordIds = await _keywordSearchService.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
+                keywordRows += keywordIds.Count;
+            }
+
+            if (vectorIds != null && keywordIds != null
+                && !vectorIds.ToHashSet(StringComparer.Ordinal).SetEquals(keywordIds))
+            {
+                mismatched++;
+            }
+        }
+
+        return new IndexRowCounts(vectorRows, keywordRows, mismatched);
+    }
+
     /// <summary>
     /// Deletes the given chunk ids from every backend they were written to. Used for both halves of
     /// the swap: dropping the superseded generation on success, and dropping the partial one on

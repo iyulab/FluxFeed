@@ -502,6 +502,17 @@ public sealed class VaultStatus
 
     // Storage
     public long TotalStorageSizeBytes { get; init; }
+
+    // Index legs — see IVaultPipeline.GetIndexRowCountsAsync. A leg that is not registered is null,
+    // not zero. The chunk count is what the entries claim; the row counts are what the legs hold.
+    /// <summary>Chunks the searchable entries claim to have indexed (sum of <see cref="VaultEntry.ChunkCount"/>).</summary>
+    public int IndexedChunkCount { get; init; }
+    /// <summary>Rows the vector store holds for the searchable entries; <c>null</c> without a vector store.</summary>
+    public int? VectorRowCount { get; init; }
+    /// <summary>Rows the keyword index holds for the searchable entries; <c>null</c> without a keyword index.</summary>
+    public int? KeywordRowCount { get; init; }
+    /// <summary>Searchable entries whose vector and keyword legs hold different id sets — the drift a re-index of that entry removes.</summary>
+    public int IndexMismatchedEntryCount { get; init; }
 }
 
 /// <summary>

@@ -813,6 +813,10 @@ public sealed partial class VaultManager : IVault
         // Watcher status
         var folders = _watchedFolders.Values.ToList();
 
+        // Index legs, for the entries the index should hold rows for.
+        var searchable = entries.Where(e => e.IsSearchable).ToList();
+        var indexRows = await _pipeline.GetIndexRowCountsAsync(searchable, ct);
+
         return new VaultStatus
         {
             TotalEntries = entries.Count,
@@ -840,7 +844,11 @@ public sealed partial class VaultManager : IVault
             FailedCount = queueStatus.FailedCount,
             OrphanedCount = orphanedCount,
             LastSyncTime = _lastSyncTime,
-            TotalStorageSizeBytes = totalStorageSize
+            TotalStorageSizeBytes = totalStorageSize,
+            IndexedChunkCount = searchable.Sum(e => e.ChunkCount),
+            VectorRowCount = indexRows.VectorRows,
+            KeywordRowCount = indexRows.KeywordRows,
+            IndexMismatchedEntryCount = indexRows.MismatchedEntries
         };
     }
 
