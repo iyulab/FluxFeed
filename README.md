@@ -265,7 +265,8 @@ searchable entries, what each index leg actually holds: `IndexedChunkCount` (wha
 `VectorRowCount` and `KeywordRowCount` (what the legs hold — `null` for a leg that is not registered,
 never zero), and `IndexMismatchedEntryCount`, the entries whose two legs hold different id sets. The
 counts are taken per entry through each leg's own id enumeration, so they are scoped to this vault
-even on a store shared with others. A mismatch is the drift a re-index of that entry removes (see
+even on a store shared with others — and cost one enumeration per leg per entry, which on a remote
+store is a round trip per entry; treat `StatusAsync` as the diagnostic call it is. A mismatch is the drift a re-index of that entry removes (see
 *Re-indexing*); the same numbers before and after are how you tell the re-index did.
 
 ```csharp
