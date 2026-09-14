@@ -1,4 +1,5 @@
 using System.Text.Json;
+using FluxFeed.Domain;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
@@ -15,6 +16,34 @@ public sealed partial class VaultStorageService : IVaultStorageService
     private readonly ILogger<VaultStorageService> _logger;
     private readonly IGitService _gitService;
     private readonly string _basePath;
+
+    /// <summary>
+    /// Serializes the manifest's read-modify-write per entry. Each write is already whole (AtomicFile), but
+    /// two overlapping updates each read the manifest before the other wrote it, and the later write drops
+    /// the earlier one's change — a description silently lost and paid for again. Striped rather than one
+    /// lock per entry so the set stays bounded however many entries a vault holds; process-wide because a
+    /// vault's storage service is not the only instance that may touch an entry.
+    /// </summary>
+    private static readonly SemaphoreSlim[] s_manifestLocks =
+        Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
+
+    private static SemaphoreSlim ManifestLockFor(VaultEntry entry) =>
+        s_manifestLocks[(int)((uint)Path.GetFullPath(entry.ImagesManifestPath)
+            .GetHashCode(StringComparison.OrdinalIgnoreCase) % (uint)s_manifestLocks.Length)];
+
+    private static async Task<T> WithManifestLockAsync<T>(VaultEntry entry, Func<Task<T>> update, CancellationToken ct)
+    {
+        var gate = ManifestLockFor(entry);
+        await gate.WaitAsync(ct);
+        try
+        {
+            return await update();
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -66,7 +95,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
     public async Task StoreExtractedContentAsync(VaultEntry entry, string content, CancellationToken ct = default)
     {
         Directory.CreateDirectory(entry.EntryPath);
-        await File.WriteAllTextAsync(entry.ExtractedMdPath, content, ct);
+        await AtomicFile.WriteAllTextAsync(entry.ExtractedMdPath, content, entry.EntryPath, ct);
         LogStoredExtracted(_logger, entry.Id);
     }
 
@@ -75,13 +104,13 @@ public sealed partial class VaultStorageService : IVaultStorageService
         if (!File.Exists(entry.ExtractedMdPath))
             return null;
 
-        return await File.ReadAllTextAsync(entry.ExtractedMdPath, ct);
+        return await AtomicFile.ReadAllTextAsync(entry.ExtractedMdPath, ct);
     }
 
     public async Task StoreRefinedContentAsync(VaultEntry entry, string content, CancellationToken ct = default)
     {
         Directory.CreateDirectory(entry.VaultPath);
-        await File.WriteAllTextAsync(entry.RefinedMdPath, content, ct);
+        await AtomicFile.WriteAllTextAsync(entry.RefinedMdPath, content, entry.EntryPath, ct);
         LogStoredRefined(_logger, entry.Id);
     }
 
@@ -90,10 +119,13 @@ public sealed partial class VaultStorageService : IVaultStorageService
         if (!File.Exists(entry.RefinedMdPath))
             return null;
 
-        return await File.ReadAllTextAsync(entry.RefinedMdPath, ct);
+        return await AtomicFile.ReadAllTextAsync(entry.RefinedMdPath, ct);
     }
 
-    public async Task StoreImagesAsync(VaultEntry entry, IEnumerable<ImageArtifact> images, CancellationToken ct = default)
+    public Task StoreImagesAsync(VaultEntry entry, IEnumerable<ImageArtifact> images, CancellationToken ct = default) =>
+        WithManifestLockAsync(entry, async () => { await StoreImagesCoreAsync(entry, images, ct); return true; }, ct);
+
+    private async Task StoreImagesCoreAsync(VaultEntry entry, IEnumerable<ImageArtifact> images, CancellationToken ct)
     {
         Directory.CreateDirectory(entry.ImagesPath);
 
@@ -104,7 +136,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         // recorded enrichment failure: without carrying it forward too, every MemorizeAsync call
         // (which re-extracts) would silently reset the attempt count, and a permanently-failed image
         // would be offered to the enricher again on the very next memorize.
-        var previous = (await ReadManifestAsync(entry, ct) ?? [])
+        var previous = (await ReadPreviousManifestForRewriteAsync(entry, ct) ?? [])
             .Where(item => !string.IsNullOrWhiteSpace(item.Description) || item.LastEnrichmentFailure != null)
             .ToDictionary(item => item.Id, StringComparer.Ordinal);
 
@@ -128,7 +160,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 carriedFailure = prior.LastEnrichmentFailure;
             }
 
-            await File.WriteAllBytesAsync(filePath, image.Data, ct);
+            await AtomicFile.WriteAllBytesAsync(filePath, image.Data, entry.EntryPath, ct);
 
             manifest.Add(new ImageManifestEntry
             {
@@ -148,7 +180,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
 
         // Write manifest
         var manifestJson = JsonSerializer.Serialize(manifest, JsonOptions);
-        await File.WriteAllTextAsync(entry.ImagesManifestPath, manifestJson, ct);
+        await AtomicFile.WriteAllTextAsync(entry.ImagesManifestPath, manifestJson, entry.EntryPath, ct);
 
         LogStoredImages(_logger, index, entry.Id);
     }
@@ -158,7 +190,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         if (!File.Exists(entry.ImagesManifestPath))
             return [];
 
-        var json = await File.ReadAllTextAsync(entry.ImagesManifestPath, ct);
+        var json = await AtomicFile.ReadAllTextAsync(entry.ImagesManifestPath, ct);
         var manifest = JsonSerializer.Deserialize<List<ImageManifestEntry>>(json, JsonOptions);
 
         if (manifest == null)
@@ -170,7 +202,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
             var imagePath = Path.Combine(entry.ImagesPath, item.FileName);
             if (File.Exists(imagePath))
             {
-                var data = await File.ReadAllBytesAsync(imagePath, ct);
+                var data = await AtomicFile.ReadAllBytesAsync(imagePath, ct);
                 images.Add(new ImageArtifact
                 {
                     Id = item.Id,
@@ -208,9 +240,14 @@ public sealed partial class VaultStorageService : IVaultStorageService
             .ToList();
     }
 
-    public async Task<bool> SetImageDescriptionAsync(VaultEntry entry, string imageId, string description, CancellationToken ct = default)
+    public Task<bool> SetImageDescriptionAsync(VaultEntry entry, string imageId, string description, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(imageId);
+        return WithManifestLockAsync(entry, () => SetImageDescriptionCoreAsync(entry, imageId, description, ct), ct);
+    }
+
+    private async Task<bool> SetImageDescriptionCoreAsync(VaultEntry entry, string imageId, string description, CancellationToken ct)
+    {
 
         var manifest = await ReadManifestAsync(entry, ct);
         var target = manifest?.FirstOrDefault(item => item.Id == imageId);
@@ -221,13 +258,13 @@ public sealed partial class VaultStorageService : IVaultStorageService
         target.LastEnrichmentFailure = null;
 
         var json = JsonSerializer.Serialize(manifest, JsonOptions);
-        await File.WriteAllTextAsync(entry.ImagesManifestPath, json, ct);
+        await AtomicFile.WriteAllTextAsync(entry.ImagesManifestPath, json, entry.EntryPath, ct);
 
         LogStoredImageDescription(_logger, imageId, entry.Id);
         return true;
     }
 
-    public async Task<bool> SetImageEnrichmentFailureAsync(
+    public Task<bool> SetImageEnrichmentFailureAsync(
         VaultEntry entry,
         string imageId,
         string reason,
@@ -236,6 +273,18 @@ public sealed partial class VaultStorageService : IVaultStorageService
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(imageId);
+        return WithManifestLockAsync(
+            entry, () => SetImageEnrichmentFailureCoreAsync(entry, imageId, reason, attemptCount, isPermanent, ct), ct);
+    }
+
+    private async Task<bool> SetImageEnrichmentFailureCoreAsync(
+        VaultEntry entry,
+        string imageId,
+        string reason,
+        int attemptCount,
+        bool isPermanent,
+        CancellationToken ct)
+    {
 
         var manifest = await ReadManifestAsync(entry, ct);
         var target = manifest?.FirstOrDefault(item => item.Id == imageId);
@@ -251,7 +300,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         };
 
         var json = JsonSerializer.Serialize(manifest, JsonOptions);
-        await File.WriteAllTextAsync(entry.ImagesManifestPath, json, ct);
+        await AtomicFile.WriteAllTextAsync(entry.ImagesManifestPath, json, entry.EntryPath, ct);
 
         LogStoredImageEnrichmentFailure(_logger, imageId, entry.Id, attemptCount, isPermanent);
         return true;
@@ -266,8 +315,27 @@ public sealed partial class VaultStorageService : IVaultStorageService
         if (!File.Exists(filePath))
             return false;
 
-        var existing = await File.ReadAllBytesAsync(filePath, ct);
+        var existing = await AtomicFile.ReadAllBytesAsync(filePath, ct);
         return existing.AsSpan().SequenceEqual(data);
+    }
+
+    /// <summary>
+    /// Reads the manifest a rewrite is about to replace. An unreadable one is reported and treated as absent
+    /// rather than failing the rewrite: the previous manifest only supplies descriptions to carry forward,
+    /// and failing here would make a damaged manifest block the one operation that replaces it — every later
+    /// attempt on the entry failing the same way until someone deletes the file.
+    /// </summary>
+    private async Task<List<ImageManifestEntry>?> ReadPreviousManifestForRewriteAsync(VaultEntry entry, CancellationToken ct)
+    {
+        try
+        {
+            return await ReadManifestAsync(entry, ct);
+        }
+        catch (JsonException ex)
+        {
+            LogRebuildingUnreadableManifest(_logger, entry.Id, entry.ImagesManifestPath, ex.Message);
+            return null;
+        }
     }
 
     private async Task<List<ImageManifestEntry>?> ReadManifestAsync(VaultEntry entry, CancellationToken ct)
@@ -275,7 +343,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         if (!File.Exists(entry.ImagesManifestPath))
             return null;
 
-        var json = await File.ReadAllTextAsync(entry.ImagesManifestPath, ct);
+        var json = await AtomicFile.ReadAllTextAsync(entry.ImagesManifestPath, ct);
         return JsonSerializer.Deserialize<List<ImageManifestEntry>>(json, JsonOptions);
     }
 
@@ -286,13 +354,13 @@ public sealed partial class VaultStorageService : IVaultStorageService
         string? qaContent = null;
 
         if (File.Exists(entry.RefinedMdPath))
-            refinedContent = await File.ReadAllTextAsync(entry.RefinedMdPath, ct);
+            refinedContent = await AtomicFile.ReadAllTextAsync(entry.RefinedMdPath, ct);
 
         if (File.Exists(entry.AppendTextPath))
-            appendText = await File.ReadAllTextAsync(entry.AppendTextPath, ct);
+            appendText = await AtomicFile.ReadAllTextAsync(entry.AppendTextPath, ct);
 
         if (File.Exists(entry.QaPath))
-            qaContent = await File.ReadAllTextAsync(entry.QaPath, ct);
+            qaContent = await AtomicFile.ReadAllTextAsync(entry.QaPath, ct);
 
         return new VaultTextContent
         {
@@ -305,14 +373,14 @@ public sealed partial class VaultStorageService : IVaultStorageService
     public async Task StoreAppendTextAsync(VaultEntry entry, string content, CancellationToken ct = default)
     {
         Directory.CreateDirectory(entry.VaultPath);
-        await File.WriteAllTextAsync(entry.AppendTextPath, content, ct);
+        await AtomicFile.WriteAllTextAsync(entry.AppendTextPath, content, entry.EntryPath, ct);
         LogStoredAppendText(_logger, entry.Id);
     }
 
     public async Task StoreQaContentAsync(VaultEntry entry, string content, CancellationToken ct = default)
     {
         Directory.CreateDirectory(entry.VaultPath);
-        await File.WriteAllTextAsync(entry.QaPath, content, ct);
+        await AtomicFile.WriteAllTextAsync(entry.QaPath, content, entry.EntryPath, ct);
         LogStoredQa(_logger, entry.Id);
     }
 
@@ -442,6 +510,9 @@ public sealed partial class VaultStorageService : IVaultStorageService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Storage delete for entry {EntryId} hit a transient lock (attempt {Attempt}), retrying: {Error}")]
     private static partial void LogStorageDeleteRetry(ILogger logger, Guid entryId, int attempt, string error);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Image manifest for entry {EntryId} at {ManifestPath} is unreadable and is being rebuilt; descriptions it held are not carried forward: {Error}")]
+    private static partial void LogRebuildingUnreadableManifest(ILogger logger, Guid entryId, string manifestPath, string error);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Git initialization failed for {EntryPath}: {Error}. Vault will operate without version tracking.")]
     private static partial void LogGitInitFailed(ILogger logger, string entryPath, string error);
