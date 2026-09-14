@@ -610,6 +610,10 @@ var next = await queue.GetJobsAsync(VaultJobStatus.Failed, limit: 50, offset: 50
 `newestFirst` sorts by `queued_at` alone — priority decides what runs next, not what is most recent. The default order is unchanged
 (priority, then oldest first).
 
+## Changelog
+
+Version history, including breaking changes, is in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
