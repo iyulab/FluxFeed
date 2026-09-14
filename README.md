@@ -177,6 +177,14 @@ retry cannot skip rows the rollback removed. Vaults indexed before 0.26.0 hold G
 re-index after upgrading finds nothing in common and replaces everything, exactly as before — no
 migration.
 
+The previous generation is enumerated on every leg — the vector store and, when one is registered,
+the keyword index (`IKeywordSearchService.GetChunkIdsByDocumentIdAsync`, FluxIndex.Core 0.39.0) — and
+the union is what the swap supersedes. Before 0.27.0 only the vector store was asked, on the
+assumption that both legs key their rows identically; keyword rows written before the SQLite stores
+honoured caller ids (FluxIndex 0.36.2) never matched, so each re-index left the previous keyword
+generation searchable beside the new one. An ordinary re-index now removes those rows along with the
+rest of the previous generation; a document that is never re-indexed keeps them.
+
 Each entry lives under the vault base path, keyed by a hash of its absolute file path:
 
 ```

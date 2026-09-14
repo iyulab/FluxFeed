@@ -1325,22 +1325,39 @@ public sealed partial class VaultPipeline : IVaultPipeline
     }
 
     /// <summary>
-    /// Ids of the rows currently indexed for this entry, captured before a re-index so that the
-    /// previous generation can be dropped after the new one is durably written rather than before.
-    /// Both legs key their rows by the same chunk id, so the vector store's view covers the keyword
-    /// index too — there is no separate enumeration to keep in step with it.
+    /// Ids of the rows currently indexed for this entry on every leg, captured before a re-index so
+    /// that the previous generation can be dropped after the new one is durably written rather than
+    /// before. Each leg answers for its own rows: the union is what the swap supersedes, and
+    /// <see cref="DeleteChunksAsync"/> offers every id to both legs, where an id a leg never held is
+    /// a no-op.
     /// </summary>
+    /// <remarks>
+    /// Until 0.27.0 this read the vector store alone, on the stated assumption that both legs key
+    /// their rows by the same chunk id. Nothing enforced that: the SQLite stores minted their own
+    /// ids before FluxIndex 0.36.2 while the keyword index kept the pipeline's, so no keyword row
+    /// written before then has a vector-side twin, and deleting on the keyword leg with the vector
+    /// store's ids removed nothing — every re-index left the previous keyword generation searchable
+    /// beside the new one. Measured on a real vault: 167 keyword rows, 108 vector rows, 0 ids in
+    /// common. Enumerating the keyword leg itself is what lets an ordinary re-index heal it.
+    /// </remarks>
     private async Task<IReadOnlyList<string>> GetIndexedChunkIdsAsync(VaultEntry entry, CancellationToken ct)
     {
-        if (_vectorStore == null)
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+
+        if (_vectorStore != null)
         {
-            return [];
+            // Ids only: this call resolves which rows to supersede and uses nothing else about them.
+            // Fetching each chunk in full made the response grow with the document, which is how an
+            // ordinary few-MB file could exceed a store's transport limit here (FluxIndex 0.35.0).
+            ids.UnionWith(await _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct));
         }
 
-        // Ids only: this call resolves which rows to supersede and uses nothing else about them.
-        // Fetching each chunk in full made the response grow with the document, which is how an
-        // ordinary few-MB file could exceed a store's transport limit here (FluxIndex 0.35.0).
-        return await _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
+        if (_keywordSearchService != null)
+        {
+            ids.UnionWith(await _keywordSearchService.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct));
+        }
+
+        return [.. ids];
     }
 
     /// <summary>

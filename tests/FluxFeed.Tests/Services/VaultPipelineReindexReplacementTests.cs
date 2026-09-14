@@ -135,6 +135,9 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
                 _keywordRows.RemoveAll(c => c.Id == (string)ci[0]);
                 return Task.CompletedTask;
             });
+        keyword.GetChunkIdsByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult<IReadOnlyList<string>>(
+                _keywordRows.Where(c => c.DocumentId == (string)ci[0]).Select(c => c.Id).ToList()));
         return keyword;
     }
 
@@ -237,6 +240,28 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
 
         _keywordRows.Should().HaveCount(chunkCount);
         _keywordRows.Select(c => c.ChunkIndex).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task Memorize_WithKeywordRowsUnderIdsTheVectorStoreNeverHeld_SupersedesThemToo()
+    {
+        // Rows written before the stores honoured caller ids: the keyword leg holds the document under
+        // ids that match nothing in the vector store, so deleting on it with the vector store's ids is a
+        // no-op and each re-index leaves one more stale generation behind. The swap must enumerate the
+        // keyword leg itself.
+        var pipeline = CreatePipeline(CreateKeywordIndex());
+        var entry = await CreateEntryAsync("policy.txt", "Requests are reviewed within five business days.");
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
+        var currentCount = _keywordRows.Count;
+
+        var legacy = DocumentChunk.Create(entry.FilepathHash, "Requests were reviewed within ten business days.", 0, 1);
+        legacy.Id = Guid.NewGuid().ToString();
+        _keywordRows.Add(legacy);
+
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
+
+        _keywordRows.Should().NotContain(c => c.Id == legacy.Id, "the previous generation is superseded on the keyword leg by its own ids");
+        _keywordRows.Should().HaveCount(currentCount);
     }
 
     [Fact]

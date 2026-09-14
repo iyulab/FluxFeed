@@ -4,7 +4,9 @@ using FluxFeed.Extensions;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using FluxIndex.Core.Application.Interfaces;
+using FluxIndex.Core.Domain.Entities;
 using FluxIndex.Storage.SQLite;
+using FluxIndex.Storage.SQLite.KeywordSearch;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -65,18 +67,102 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
     }
 
     [Fact]
-    public async Task ReindexThatFailsMidway_LeavesThePreviousGenerationWholeAndSearchable()
+    public async Task ReindexOfAChangedFile_ReplacesTheKeywordGenerationToo()
     {
-        await using var provider = BuildStack(o => o.EnableAutoRetry = false);
+        // The keyword leg has never been measured on a real store: the unit double shares ids with
+        // the vector double by construction, and the facts above register no keyword service.
+        await using var provider = BuildStack(withKeywordIndex: true);
         await using var worker = await StartHostedServicesAsync(provider);
         using var scope = provider.CreateScope();
         var vault = scope.ServiceProvider.GetRequiredService<IVault>();
         var store = scope.ServiceProvider.GetRequiredService<IVectorStore>();
+        var keyword = scope.ServiceProvider.GetRequiredService<IKeywordSearchService>();
+
+        var first = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        first.Stage.Should().Be(ProcessingStage.Memorized, because: first.LastError);
+        var firstKeywordIds = await keyword.GetChunkIdsByDocumentIdAsync(first.FilepathHash, TestContext.Current.CancellationToken);
+        firstKeywordIds.Should().BeEquivalentTo(
+            await store.GetChunkIdsByDocumentIdAsync(first.FilepathHash, TestContext.Current.CancellationToken),
+            "both legs are written under the ids the pipeline derives");
+
+        await File.WriteAllTextAsync(_file,
+            Paragraphs.Replace("marmalade board", "turquoise ledger", StringComparison.Ordinal),
+            TestContext.Current.CancellationToken);
+        var second = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        second.Stage.Should().Be(ProcessingStage.Memorized, because: second.LastError);
+
+        var vectorIds = await store.GetChunkIdsByDocumentIdAsync(second.FilepathHash, TestContext.Current.CancellationToken);
+        var keywordIds = await keyword.GetChunkIdsByDocumentIdAsync(second.FilepathHash, TestContext.Current.CancellationToken);
+        keywordIds.Should().BeEquivalentTo(vectorIds, "one keyword row per chunk of the current generation, none of the previous one");
+        keywordIds.Should().HaveCount(second.ChunkCount);
+
+        var oldWording = await keyword.SearchAsync("marmalade", cancellationToken: TestContext.Current.CancellationToken);
+        oldWording.Should().BeEmpty("the previous generation's passage must not answer keyword searches");
+        var newWording = await keyword.SearchAsync("turquoise", cancellationToken: TestContext.Current.CancellationToken);
+        newWording.Should().ContainSingle(r => r.Chunk.Content.Contains("turquoise", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReindexOfADocumentWithKeywordRowsUnderForeignIds_RemovesThoseRowsAsWell()
+    {
+        // A vault written before the stores honoured caller ids holds keyword rows whose ids match
+        // nothing in the vector store. Measured on such a vault: 167 keyword rows, 0 ids in common,
+        // one more stale generation per re-index. The swap must enumerate the keyword leg's own ids,
+        // not delete on it with the vector store's.
+        await using var provider = BuildStack(withKeywordIndex: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var store = scope.ServiceProvider.GetRequiredService<IVectorStore>();
+        var keyword = scope.ServiceProvider.GetRequiredService<IKeywordSearchService>();
+
+        var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+
+        var legacyIds = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+        await keyword.IndexChunksAsync(
+        [
+            new DocumentChunk { Id = legacyIds[0], DocumentId = entry.FilepathHash, ChunkIndex = 0, Content = "The generator must be refuelled every six hours (previous generation).", TokenCount = 10 },
+            new DocumentChunk { Id = legacyIds[1], DocumentId = entry.FilepathHash, ChunkIndex = 1, Content = "Night shifts hand over at the marmalade board (previous generation).", TokenCount = 10 }
+        ], TestContext.Current.CancellationToken);
+        (await keyword.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken))
+            .Should().Contain(legacyIds, "the legacy rows are in place before the re-index");
+
+        await File.WriteAllTextAsync(_file,
+            Paragraphs.Replace("marmalade board", "turquoise ledger", StringComparison.Ordinal),
+            TestContext.Current.CancellationToken);
+        var reindexed = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        reindexed.Stage.Should().Be(ProcessingStage.Memorized, because: reindexed.LastError);
+
+        var vectorIds = await store.GetChunkIdsByDocumentIdAsync(reindexed.FilepathHash, TestContext.Current.CancellationToken);
+        var keywordIds = await keyword.GetChunkIdsByDocumentIdAsync(reindexed.FilepathHash, TestContext.Current.CancellationToken);
+        keywordIds.Should().NotContain(legacyIds, "a successful re-index supersedes every keyword row the new generation did not write");
+        keywordIds.Should().BeEquivalentTo(vectorIds);
+    }
+
+    [Fact]
+    public async Task ReindexThatFailsMidway_LeavesThePreviousGenerationWholeAndSearchable()
+    {
+        await using var provider = BuildStack(o => o.EnableAutoRetry = false, withKeywordIndex: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var store = scope.ServiceProvider.GetRequiredService<IVectorStore>();
+        var keyword = scope.ServiceProvider.GetRequiredService<IKeywordSearchService>();
 
         var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
         entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
         entry.ChunkCount.Should().BeGreaterThanOrEqualTo(3);
         var previousGeneration = await store.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken);
+
+        // A keyword row from before the stores honoured caller ids: part of the previous generation
+        // on that leg, under an id the vector store never held. The rollback must leave it too.
+        var legacyId = Guid.NewGuid().ToString();
+        await keyword.IndexChunksAsync(
+            [new DocumentChunk { Id = legacyId, DocumentId = entry.FilepathHash, ChunkIndex = 0, Content = "Coolant pressure gauge (previous generation).", TokenCount = 5 }],
+            TestContext.Current.CancellationToken);
+        var previousKeywordGeneration = await keyword.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken);
+        previousKeywordGeneration.Should().Contain(legacyId);
 
         // Change the last paragraph and let the per-chunk worker path write at least one chunk before
         // the embedder throws: a genuine half-written generation.
@@ -91,6 +177,9 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         var afterFailure = await store.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken);
         afterFailure.Should().BeEquivalentTo(previousGeneration,
             "the rollback removes what the failed run added and leaves the previous generation's rows in place");
+        (await keyword.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken))
+            .Should().BeEquivalentTo(previousKeywordGeneration,
+                "the rollback deletes attempted minus previous: the keyword leg's previous generation, legacy ids included, is untouched");
 
         var oldWording = await vault.SearchAsync("marmalade board work orders", ct: TestContext.Current.CancellationToken);
         oldWording.Items.Should().Contain(i => i.Content != null && i.Content.Contains("marmalade", StringComparison.Ordinal),
@@ -109,6 +198,8 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         newGeneration.Intersect(previousGeneration).Should().NotBeEmpty("unchanged paragraphs keep their ids");
         var afterRetry = await vault.SearchAsync("turquoise ledger work orders", ct: TestContext.Current.CancellationToken);
         afterRetry.Items.Should().Contain(i => i.Content != null && i.Content.Contains("turquoise", StringComparison.Ordinal));
+        (await keyword.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken))
+            .Should().BeEquivalentTo(newGeneration, "the successful retry supersedes the keyword leg's previous generation, legacy ids included");
     }
 
     [Fact]
@@ -156,16 +247,24 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         throw new TimeoutException($"entry did not reach {stage} within {timeout}; last stage {entry?.Stage}, error {entry?.LastError}");
     }
 
-    private ServiceProvider BuildStack(Action<FileVaultOptions>? configure = null)
+    private ServiceProvider BuildStack(Action<FileVaultOptions>? configure = null, bool withKeywordIndex = false)
     {
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
+        var databasePath = Path.Combine(_root, "fluxindex.db");
         services.AddSQLiteVecVectorStore(o =>
         {
-            o.DatabasePath = Path.Combine(_root, "fluxindex.db");
+            o.DatabasePath = databasePath;
             o.VectorDimension = _embedder.GetEmbeddingDimension();
             o.FallbackToInMemoryOnError = false;
         });
+        if (withKeywordIndex)
+        {
+            // The README's keyword leg on the same database, the way FluxIndexContext wires it.
+            services.AddSingleton<IKeywordSearchService>(sp => new SQLiteKeywordSearchService(
+                $"Data Source={databasePath}",
+                sp.GetRequiredService<ILogger<SQLiteKeywordSearchService>>()));
+        }
         services.AddSingleton<IEmbeddingService>(_embedder);
         services.AddFileVaultWithFluxIndex(o =>
         {
