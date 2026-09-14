@@ -260,18 +260,33 @@ if (entry.ExtractionHints?.TryGetValue("extraction_failure_reason", out var reas
   and neither is cleared by sync-status transitions — so use `Stage`/`SyncStatus`, not
   `FirstError != null`, to decide whether an entry is currently broken.
 
-### Index legs — `StatusAsync`
+### Status, change detection, index audit — four calls, four costs
 
-The entry store counts chunks; it says nothing about rows. `VaultStatus` therefore reports, for the
+A status read, a change sweep, an index audit and a disk measurement are different questions with different costs,
+so each is its own call:
+
+| Call | Answers | Cost |
+|---|---|---|
+| `StatusAsync()` | entry counts by stage and sync status, queue, watchers, `IndexedChunkCount` (what the records claim) | listing the entries — no git, no index query, no write |
+| `DetectChangesAsync()` | which entries' sources changed, were deleted, or have modified vault files; **persists** each entry's `SyncStatus` | a source hash and a `git status` process per entry — tens of ms per entry |
+| `AuditIndexAsync()` | what each index leg holds for the searchable entries | one id enumeration per leg per entry — a round trip per entry on a remote store |
+| `GetStorageSizeAsync()` | bytes on disk under the entry directories | a directory walk per entry |
+
+`GetEntriesNeedingSyncAsync()` and `ListByStatusAsync()` read the persisted `SyncStatus`; it is refreshed by
+`DetectChangesAsync()`, `SyncAsync()` and folder scans — not by `StatusAsync()`. Entries being removed are left out of
+`TotalEntries`, the stage counts and `OrphanedCount`; `RemovalPendingCount` and `RemovalPartialCount` report them.
+
+### Index legs — `AuditIndexAsync`
+
+The entry store counts chunks; it says nothing about rows. `VaultIndexAudit` therefore reports, for the
 searchable entries, what each index leg actually holds: `IndexedChunkCount` (what the entries claim),
 `VectorRowCount` and `KeywordRowCount` (what the legs hold — `null` for a leg that is not registered,
-never zero), and `IndexMismatchedEntryCount`, the entries whose two legs hold different id sets. The
+never zero), and `MismatchedEntryCount`, the entries whose two legs hold different id sets. The
 counts are taken per entry through each leg's own id enumeration, so they are scoped to this vault
-even on a store shared with others — and cost one enumeration per leg per entry, which on a remote
-store is a round trip per entry; treat `StatusAsync` as the diagnostic call it is. A mismatch is the drift a re-index of that entry removes (see
+even on a store shared with others. A mismatch is the drift a re-index of that entry removes (see
 *Re-indexing*); the same numbers before and after are how you tell the re-index did.
 
-`IndexMismatchedEntryCount` compares **id sets**, not row counts: on a vault indexed before FluxIndex 0.36.2 every entry's
+`MismatchedEntryCount` compares **id sets**, not row counts: on a vault indexed before FluxIndex 0.36.2 every entry's
 keyword ids differ from its vector ids, so every entry counts as mismatched even where the two legs happen to hold the same
 number of rows. Expect it to be much larger than a per-document row-count comparison on the same database, and to fall by one
 per re-indexed entry.
@@ -289,9 +304,9 @@ await vault.ResumeQueueAsync();
 It throws when no keyword index is registered rather than reporting nothing to repair.
 
 ```csharp
-var status = await vault.StatusAsync();
-if (status.IndexMismatchedEntryCount > 0)
-    logger.LogWarning("{Count} entries have keyword rows the vector store never keyed", status.IndexMismatchedEntryCount);
+var audit = await vault.AuditIndexAsync();
+if (audit.MismatchedEntryCount > 0)
+    logger.LogWarning("{Count} entries have keyword rows the vector store never keyed", audit.MismatchedEntryCount);
 ```
 
 ### Queue fairness

@@ -1202,4 +1202,138 @@ public class VaultManagerTests : IDisposable
     }
 
     #endregion
+
+    #region Status, change detection and index audit are separate questions (docket #288)
+
+    [Fact]
+    public async Task StatusAsync_RunsNoChangeDetection_NoGitProcessAndNoRecordWrite()
+    {
+        // A status read used to run DetectChangesAsync for every entry: a git status process, a hash of the whole
+        // source and a meta.json write each - ~30 ms per entry, and a read that wrote.
+        var file = CreateTestFile("status-cheap.txt", "Original content");
+        var entry = CreateEntryWithMetadataAtStage(file, ProcessingStage.Extracted);
+        File.WriteAllText(file, "Modified after extraction");
+        var metaPath = Path.Combine(entry.EntryPath, "meta.json");
+        var writtenBefore = File.GetLastWriteTimeUtc(metaPath);
+        _gitServiceMock.StatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new GitStatus { ModifiedFiles = [] });
+
+        var status = await _vault.StatusAsync(TestContext.Current.CancellationToken);
+
+        status.TotalEntries.Should().Be(1);
+        await _gitServiceMock.DidNotReceive().StatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        File.GetLastWriteTimeUtc(metaPath).Should().Be(writtenBefore, "reading status must not rewrite the entry record");
+        (await _vault.GetAsync(file, TestContext.Current.CancellationToken))!.SyncStatus
+            .Should().NotBe(SyncStatus.SourceModified, "detection is DetectChangesAsync's job, not status's");
+    }
+
+    [Fact]
+    public async Task StatusAsync_LeavesRemovalResidueOutOfTheEntryAndStageCounts()
+    {
+        var kept = CreateEntryWithMetadataAtStage(CreateTestFile("kept.txt", "kept"), ProcessingStage.Extracted);
+        var pending = CreateEntryWithMetadataAtStage(CreateTestFile("pending.txt", "pending"), ProcessingStage.Extracted);
+        pending.MarkRemovalPending();
+        pending.SaveMetadata();
+        var partial = CreateEntryWithMetadataAtStage(CreateTestFile("partial.txt", "partial"), ProcessingStage.Memorized);
+        partial.MarkRemovalPartial("directory-delete");
+        partial.SaveMetadata();
+        File.Delete(partial.SourcePath);
+
+        var status = await _vault.StatusAsync(TestContext.Current.CancellationToken);
+
+        status.TotalEntries.Should().Be(1, "an entry being removed is not a document of the vault");
+        status.ExtractedCount.Should().Be(1);
+        status.MemorizedCount.Should().Be(0);
+        status.OrphanedCount.Should().Be(0, "a removed entry whose source is gone is residue, not an orphan");
+        status.RemovalPendingCount.Should().Be(1, "the residue is still reported, under its own counts");
+        status.RemovalPartialCount.Should().Be(1);
+        kept.SyncStatus.Should().NotBe(SyncStatus.RemovalPending);
+    }
+
+    [Fact]
+    public async Task DetectChangesAsync_WholeVault_PersistsSyncStatus_SoGetEntriesNeedingSyncSeesIt()
+    {
+        var changed = CreateTestFile("detect-changed.txt", "Original content");
+        var changedEntry = CreateEntryWithMetadataAtStage(changed, ProcessingStage.Extracted);
+        changedEntry.MarkInSync();
+        changedEntry.SaveMetadata();
+        var unchanged = CreateTestFile("detect-unchanged.txt", "Stays the same");
+        var unchangedEntry = CreateEntryWithMetadataAtStage(unchanged, ProcessingStage.Extracted);
+        unchangedEntry.MarkInSync();
+        unchangedEntry.SaveMetadata();
+        File.WriteAllText(changed, "Modified content that is different");
+        _gitServiceMock.StatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new GitStatus { ModifiedFiles = [] });
+
+        var report = await _vault.DetectChangesAsync(TestContext.Current.CancellationToken);
+
+        report.EntriesChecked.Should().Be(2);
+        report.SourceChanged.Select(e => e.SourcePath).Should().Equal(Path.GetFullPath(changed));
+        report.VaultChanged.Should().BeEmpty();
+        report.SourceDeleted.Should().BeEmpty();
+        var needingSync = await _vault.GetEntriesNeedingSyncAsync(TestContext.Current.CancellationToken);
+        needingSync.Select(e => e.SourcePath).Should().Equal(Path.GetFullPath(changed));
+    }
+
+    [Fact]
+    public async Task AuditIndexAsync_ReportsTheLegCountsForTheSearchableEntries()
+    {
+        var file = CreateTestFile("audit.txt", "indexed");
+        CreateEntryWithMetadataAtStage(file, ProcessingStage.Memorized);
+        CreateEntryWithMetadataAtStage(CreateTestFile("audit-source.txt", "not indexed"), ProcessingStage.Source);
+        _pipelineMock.GetIndexRowCountsAsync(Arg.Any<IReadOnlyList<VaultEntry>>(), Arg.Any<CancellationToken>())
+            .Returns(new IndexRowCounts(VectorRows: 1, KeywordRows: 2, MismatchedEntries: 1));
+
+        var audit = await _vault.AuditIndexAsync(TestContext.Current.CancellationToken);
+
+        audit.IndexedChunkCount.Should().Be(1);
+        audit.VectorRowCount.Should().Be(1);
+        audit.KeywordRowCount.Should().Be(2);
+        audit.MismatchedEntryCount.Should().Be(1);
+        await _pipelineMock.Received(1).GetIndexRowCountsAsync(
+            Arg.Is<IReadOnlyList<VaultEntry>>(entries => entries.Count == 1 && entries[0].SourcePath == Path.GetFullPath(file)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DetectChangesAsync_WholeVault_ReportsADeletedSource_AndSkipsRemovalResidue()
+    {
+        var deleted = CreateTestFile("detect-deleted.txt", "gone soon");
+        CreateEntryWithMetadataAtStage(deleted, ProcessingStage.Extracted);
+        var residue = CreateEntryWithMetadataAtStage(CreateTestFile("detect-residue.txt", "being removed"), ProcessingStage.Extracted);
+        residue.MarkRemovalPending();
+        residue.SaveMetadata();
+        File.Delete(deleted);
+        _gitServiceMock.StatusAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(new GitStatus { ModifiedFiles = [] });
+
+        var report = await _vault.DetectChangesAsync(TestContext.Current.CancellationToken);
+
+        report.EntriesChecked.Should().Be(1, "an entry being removed is not swept");
+        report.SourceDeleted.Should().ContainSingle().Which.SyncStatus.Should().Be(SyncStatus.SourceDeleted,
+            "the report carries the entry as persisted after detection");
+        (await _vault.GetByHashAsync(residue.FilepathHash, TestContext.Current.CancellationToken))!.SyncStatus
+            .Should().Be(SyncStatus.RemovalPending, "detection must not overwrite a removal in progress");
+    }
+
+    [Fact]
+    public async Task GetStorageSizeAsync_SumsEveryEntryThroughTheStorageService()
+    {
+        CreateEntryWithMetadata(CreateTestFile("size-a.txt", "a"));
+        CreateEntryWithMetadata(CreateTestFile("size-b.txt", "b"));
+        _storageMock.GetStorageSizeAsync(Arg.Any<VaultEntry>(), Arg.Any<CancellationToken>()).Returns(1_024L);
+
+        var bytes = await _vault.GetStorageSizeAsync(TestContext.Current.CancellationToken);
+
+        bytes.Should().Be(2_048L);
+    }
+
+    [Fact]
+    public async Task StatusAsync_DoesNotAskTheIndexLegs()
+    {
+        CreateEntryWithMetadataAtStage(CreateTestFile("status-no-legs.txt", "indexed"), ProcessingStage.Memorized);
+
+        await _vault.StatusAsync(TestContext.Current.CancellationToken);
+
+        await _pipelineMock.DidNotReceive().GetIndexRowCountsAsync(Arg.Any<IReadOnlyList<VaultEntry>>(), Arg.Any<CancellationToken>());
+    }
+
+    #endregion
 }

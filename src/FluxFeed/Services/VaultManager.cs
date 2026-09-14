@@ -729,8 +729,9 @@ public sealed partial class VaultManager : IVault
 
     public async Task<VaultStatus> StatusAsync(CancellationToken ct = default)
     {
-        var entries = await ListAsync(ct: ct);
-        var changedEntries = new List<VaultEntry>();
+        var all = await ListAsync(ct: ct);
+        // Removal residue is reported by its own two counts, never as documents of the vault.
+        var entries = all.Where(e => !IsRemovalResidue(e)).ToList();
 
         var sourceCount = 0;
         var extractedCount = 0;
@@ -738,19 +739,7 @@ public sealed partial class VaultManager : IVault
         var memorizedCount = 0;
         var staleCount = 0;
         var errorStageCount = 0;
-        var changedSourceCount = 0;
-        var changedVaultCount = 0;
         var orphanedCount = 0;
-        long totalStorageSize = 0;
-
-        // SyncStatus counts
-        var inSyncCount = 0;
-        var sourceModifiedCount = 0;
-        var vaultModifiedCount = 0;
-        var sourceDeletedCount = 0;
-        var removalPendingCount = 0;
-        var removalPartialCount = 0;
-        var errorCount = 0;
 
         foreach (var entry in entries)
         {
@@ -764,65 +753,14 @@ public sealed partial class VaultManager : IVault
                 case ProcessingStage.Error: errorStageCount++; break;
             }
 
-            // Count SyncStatus
-            switch (entry.SyncStatus)
-            {
-                case SyncStatus.InSync: inSyncCount++; break;
-                case SyncStatus.SourceModified: sourceModifiedCount++; break;
-                case SyncStatus.VaultModified: vaultModifiedCount++; break;
-                case SyncStatus.SourceDeleted: sourceDeletedCount++; break;
-                case SyncStatus.RemovalPending: removalPendingCount++; break;
-                case SyncStatus.RemovalPartial: removalPartialCount++; break;
-                case SyncStatus.Error: errorCount++; break;
-            }
-
-            // Check if source file exists (orphaned check)
             if (!File.Exists(entry.SourcePath))
             {
                 orphanedCount++;
-                continue;
-            }
-
-            // Detect changes. The listing above already skipped records it could not read, so this
-            // only fires if one became unreadable mid-sweep — report it and keep the rest of the
-            // status intact rather than failing the whole query over a single entry.
-            ChangeDetectionResult? changes = null;
-            try
-            {
-                changes = await DetectChangesAsync(entry.SourcePath, ct);
-            }
-            catch (VaultRecordUnreadableException ex)
-            {
-                LogFailedToDetectChanges(_logger, ex, entry.SourcePath);
-            }
-
-            if (changes?.SourceChanged == true)
-            {
-                changedSourceCount++;
-                changedEntries.Add(entry);
-            }
-            else if (changes?.VaultChanged == true)
-            {
-                changedVaultCount++;
-                changedEntries.Add(entry);
-            }
-
-            // Calculate storage size
-            if (Directory.Exists(entry.EntryPath))
-            {
-                totalStorageSize += GetDirectorySize(entry.EntryPath);
             }
         }
 
-        // Queue status
         var queueStatus = await GetQueueStatusAsync(ct);
-
-        // Watcher status
         var folders = _watchedFolders.Values.ToList();
-
-        // Index legs, for the entries the index should hold rows for.
-        var searchable = entries.Where(e => e.IsSearchable).ToList();
-        var indexRows = await _pipeline.GetIndexRowCountsAsync(searchable, ct);
 
         return new VaultStatus
         {
@@ -833,16 +771,13 @@ public sealed partial class VaultManager : IVault
             MemorizedCount = memorizedCount,
             StaleCount = staleCount,
             ErrorStageCount = errorStageCount,
-            ChangedSourceCount = changedSourceCount,
-            ChangedVaultCount = changedVaultCount,
-            ChangedEntries = changedEntries,
-            InSyncCount = inSyncCount,
-            SourceModifiedCount = sourceModifiedCount,
-            VaultModifiedCount = vaultModifiedCount,
-            SourceDeletedCount = sourceDeletedCount,
-            RemovalPendingCount = removalPendingCount,
-            RemovalPartialCount = removalPartialCount,
-            ErrorCount = errorCount,
+            InSyncCount = all.Count(e => e.SyncStatus == SyncStatus.InSync),
+            SourceModifiedCount = all.Count(e => e.SyncStatus == SyncStatus.SourceModified),
+            VaultModifiedCount = all.Count(e => e.SyncStatus == SyncStatus.VaultModified),
+            SourceDeletedCount = all.Count(e => e.SyncStatus == SyncStatus.SourceDeleted),
+            RemovalPendingCount = all.Count(e => e.SyncStatus == SyncStatus.RemovalPending),
+            RemovalPartialCount = all.Count(e => e.SyncStatus == SyncStatus.RemovalPartial),
+            ErrorCount = all.Count(e => e.SyncStatus == SyncStatus.Error),
             ActiveWatcherCount = folders.Count(f => f.Status == WatcherStatus.Active),
             PausedWatcherCount = folders.Count(f => f.Status == WatcherStatus.Paused),
             ErrorWatcherCount = folders.Count(f => f.Status == WatcherStatus.Error),
@@ -851,13 +786,89 @@ public sealed partial class VaultManager : IVault
             FailedCount = queueStatus.FailedCount,
             OrphanedCount = orphanedCount,
             LastSyncTime = _lastSyncTime,
-            TotalStorageSizeBytes = totalStorageSize,
-            IndexedChunkCount = searchable.Sum(e => e.ChunkCount),
-            VectorRowCount = indexRows.VectorRows,
-            KeywordRowCount = indexRows.KeywordRows,
-            IndexMismatchedEntryCount = indexRows.MismatchedEntries
+            IndexedChunkCount = entries.Where(e => e.IsSearchable).Sum(e => e.ChunkCount)
         };
     }
+
+    public async Task<VaultChangeReport> DetectChangesAsync(CancellationToken ct = default)
+    {
+        var entries = (await ListAsync(ct: ct)).Where(e => !IsRemovalResidue(e)).ToList();
+        var sourceChanged = new List<VaultEntry>();
+        var vaultChanged = new List<VaultEntry>();
+        var sourceDeleted = new List<VaultEntry>();
+        var checkedCount = 0;
+
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // The listing skipped records it could not read, so this only fires if one became unreadable
+            // mid-sweep — report it and keep sweeping rather than failing the whole detection over one entry.
+            ChangeDetectionResult changes;
+            try
+            {
+                changes = await DetectChangesAsync(entry.SourcePath, ct);
+            }
+            catch (VaultRecordUnreadableException ex)
+            {
+                LogFailedToDetectChanges(_logger, ex, entry.SourcePath);
+                continue;
+            }
+
+            checkedCount++;
+            if (!changes.SourceChanged && !changes.VaultChanged && changes.SourceExists)
+            {
+                continue;
+            }
+
+            var persisted = VaultEntry.LoadByHash(entry.FilepathHash, _storage.BasePath) ?? entry;
+            if (!changes.SourceExists)
+                sourceDeleted.Add(persisted);
+            else if (changes.SourceChanged)
+                sourceChanged.Add(persisted);
+            else
+                vaultChanged.Add(persisted);
+        }
+
+        return new VaultChangeReport
+        {
+            EntriesChecked = checkedCount,
+            SourceChanged = sourceChanged,
+            VaultChanged = vaultChanged,
+            SourceDeleted = sourceDeleted,
+            DetectedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    public async Task<VaultIndexAudit> AuditIndexAsync(CancellationToken ct = default)
+    {
+        var searchable = (await ListAsync(ct: ct)).Where(e => e.IsSearchable).ToList();
+        var rows = await _pipeline.GetIndexRowCountsAsync(searchable, ct);
+
+        return new VaultIndexAudit
+        {
+            EntriesAudited = searchable.Count,
+            IndexedChunkCount = searchable.Sum(e => e.ChunkCount),
+            VectorRowCount = rows.VectorRows,
+            KeywordRowCount = rows.KeywordRows,
+            MismatchedEntryCount = rows.MismatchedEntries
+        };
+    }
+
+    public async Task<long> GetStorageSizeAsync(CancellationToken ct = default)
+    {
+        long total = 0;
+        foreach (var entry in await ListAsync(ct: ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            total += await _storage.GetStorageSizeAsync(entry, ct);
+        }
+
+        return total;
+    }
+
+    private static bool IsRemovalResidue(VaultEntry entry)
+        => entry.SyncStatus is SyncStatus.RemovalPending or SyncStatus.RemovalPartial;
 
     public async Task<string> DiffAsync(string filePath, CancellationToken ct = default)
     {
@@ -920,14 +931,6 @@ public sealed partial class VaultManager : IVault
         return await _storage.GetImageManifestAsync(entry, ct);
     }
 
-    private static long GetDirectorySize(string path)
-    {
-        var info = new DirectoryInfo(path);
-        if (!info.Exists) return 0;
-
-        return info.EnumerateFiles("*", SearchOption.AllDirectories)
-            .Sum(f => f.Length);
-    }
 
     #endregion
 

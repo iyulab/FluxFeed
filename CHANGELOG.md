@@ -12,6 +12,32 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.29.0]
+
+### Breaking
+- `IVault.StatusAsync()` no longer runs change detection, queries the index legs or walks the entry directories.
+  It used to call `DetectChangesAsync` for every entry — a source hash, a `git status` process and a `meta.json`
+  write each, roughly 30 ms per entry — so a status read was a change sweep that wrote to disk. It now costs what
+  listing the entries costs and writes nothing.
+- Removed from `VaultStatus`: `ChangedSourceCount`, `ChangedVaultCount`, `ChangedEntries` (use
+  `DetectChangesAsync()`), `VectorRowCount`, `KeywordRowCount`, `IndexMismatchedEntryCount` (use
+  `AuditIndexAsync()`), `TotalStorageSizeBytes` (use `GetStorageSizeAsync()`).
+- `StatusAsync()` no longer refreshes the persisted `SyncStatus` that `GetEntriesNeedingSyncAsync()` and
+  `ListByStatusAsync()` read. Call `DetectChangesAsync()` where fresh sync state is needed.
+- `TotalEntries`, the stage counts and `OrphanedCount` exclude entries being removed (`RemovalPending`,
+  `RemovalPartial`); `RemovalPendingCount` and `RemovalPartialCount` still report them.
+- New `IVault` members (a hand-written implementation must add them): `DetectChangesAsync(CancellationToken)`,
+  `AuditIndexAsync(CancellationToken)`, `GetStorageSizeAsync(CancellationToken)`.
+
+### Added
+- `IVault.DetectChangesAsync(CancellationToken)` runs change detection for every entry not being removed, persists
+  each entry's `SyncStatus`, and returns a `VaultChangeReport` (`SourceChanged`, `VaultChanged`, `SourceDeleted`).
+- `IVault.AuditIndexAsync(CancellationToken)` returns a `VaultIndexAudit` (`IndexedChunkCount`, `VectorRowCount`,
+  `KeywordRowCount`, `MismatchedEntryCount`) for the searchable entries.
+- `IVault.GetStorageSizeAsync(CancellationToken)` returns the bytes on disk under the entry directories.
+
+---
+
 ## [0.28.1]
 
 ### Changed

@@ -155,20 +155,20 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
         entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
 
-        var clean = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        var clean = await vault.AuditIndexAsync(TestContext.Current.CancellationToken);
         clean.IndexedChunkCount.Should().Be(entry.ChunkCount);
         clean.VectorRowCount.Should().Be(entry.ChunkCount);
         clean.KeywordRowCount.Should().Be(entry.ChunkCount);
-        clean.IndexMismatchedEntryCount.Should().Be(0);
+        clean.MismatchedEntryCount.Should().Be(0);
 
         await keyword.IndexChunksAsync(
             [new DocumentChunk { Id = Guid.NewGuid().ToString(), DocumentId = entry.FilepathHash, ChunkIndex = 0, Content = "Radio checks on the hour (previous generation).", TokenCount = 5 }],
             TestContext.Current.CancellationToken);
 
-        var drifted = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        var drifted = await vault.AuditIndexAsync(TestContext.Current.CancellationToken);
         drifted.VectorRowCount.Should().Be(entry.ChunkCount);
         drifted.KeywordRowCount.Should().Be(entry.ChunkCount + 1, "the keyword leg carries a row the vector leg does not");
-        drifted.IndexMismatchedEntryCount.Should().Be(1);
+        drifted.MismatchedEntryCount.Should().Be(1);
 
         await File.WriteAllTextAsync(_file,
             Paragraphs.Replace("marmalade board", "turquoise ledger", StringComparison.Ordinal),
@@ -176,9 +176,9 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         var reindexed = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
         reindexed.Stage.Should().Be(ProcessingStage.Memorized, because: reindexed.LastError);
 
-        var healed = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        var healed = await vault.AuditIndexAsync(TestContext.Current.CancellationToken);
         healed.KeywordRowCount.Should().Be(healed.VectorRowCount);
-        healed.IndexMismatchedEntryCount.Should().Be(0);
+        healed.MismatchedEntryCount.Should().Be(0);
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         await keyword.IndexChunksAsync(
             [new DocumentChunk { Id = Guid.NewGuid().ToString(), DocumentId = entry.FilepathHash, ChunkIndex = 0, Content = "Coolant pressure gauge on the south wall (stale wording).", TokenCount = 8 }],
             TestContext.Current.CancellationToken);
-        (await vault.StatusAsync(TestContext.Current.CancellationToken)).IndexMismatchedEntryCount.Should().Be(1);
+        (await vault.AuditIndexAsync(TestContext.Current.CancellationToken)).MismatchedEntryCount.Should().Be(1);
         var embeddedBefore = _embedder.EmbeddedTexts;
 
         var result = await vault.RepairKeywordIndexAsync(TestContext.Current.CancellationToken);
@@ -214,8 +214,8 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         result.KeywordRowsRemoved.Should().Be(1);
         _embedder.EmbeddedTexts.Should().Be(embeddedBefore, "the keyword leg is rebuilt from rows the vector leg already holds");
 
-        var healed = await vault.StatusAsync(TestContext.Current.CancellationToken);
-        healed.IndexMismatchedEntryCount.Should().Be(0);
+        var healed = await vault.AuditIndexAsync(TestContext.Current.CancellationToken);
+        healed.MismatchedEntryCount.Should().Be(0);
         (await keyword.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken))
             .Should().BeEquivalentTo(vectorIds);
 
@@ -279,10 +279,10 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
         entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
 
-        var status = await vault.StatusAsync(TestContext.Current.CancellationToken);
+        var status = await vault.AuditIndexAsync(TestContext.Current.CancellationToken);
         status.VectorRowCount.Should().Be(entry.ChunkCount);
         status.KeywordRowCount.Should().BeNull("no keyword index is registered — a zero would read as an empty index");
-        status.IndexMismatchedEntryCount.Should().Be(0, "one leg cannot disagree with itself");
+        status.MismatchedEntryCount.Should().Be(0, "one leg cannot disagree with itself");
     }
 
     [Fact]

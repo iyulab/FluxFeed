@@ -111,6 +111,19 @@ public interface IVault
     /// </summary>
     Task<ChangeDetectionResult> DetectChangesAsync(string filePath, CancellationToken ct = default);
 
+    /// <summary>
+    /// Runs change detection for every entry of the vault that is not being removed, persists each entry's
+    /// refreshed <see cref="VaultEntry.SyncStatus"/>, and reports what changed.
+    /// </summary>
+    /// <remarks>
+    /// This is the sweep <see cref="GetEntriesNeedingSyncAsync"/> reads the results of. It costs, per entry past
+    /// <see cref="ProcessingStage.Source"/>, a hash of the source file and a <c>git status</c> process in the
+    /// entry's vault directory — tens of milliseconds per entry — so call it when you need fresh sync state,
+    /// not as a status read. <see cref="SyncAsync()"/> and <see cref="ScanFolderAsync(string, CancellationToken)"/>
+    /// run the same detection for the files they visit.
+    /// </remarks>
+    Task<VaultChangeReport> DetectChangesAsync(CancellationToken ct = default);
+
     // === Entry Management ===
 
     /// <summary>
@@ -165,13 +178,37 @@ public interface IVault
     // === Status & History ===
 
     /// <summary>
-    /// Gets the overall vault status.
+    /// Gets the overall vault status from the entry records, the queue and the watchers — at the cost of listing
+    /// the entries. It runs no change detection, queries no index leg and writes nothing.
     /// </summary>
+    /// <remarks>
+    /// Entries being removed (<see cref="SyncStatus.RemovalPending"/>, <see cref="SyncStatus.RemovalPartial"/>)
+    /// are left out of <see cref="VaultStatus.TotalEntries"/>, the stage counts and
+    /// <see cref="VaultStatus.OrphanedCount"/>; the two removal counts report them. For fresh sync state call
+    /// <see cref="DetectChangesAsync(CancellationToken)"/>, for index rows <see cref="AuditIndexAsync"/>, for disk
+    /// usage <see cref="GetStorageSizeAsync"/>.
+    /// </remarks>
     Task<VaultStatus> StatusAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Compares what the searchable entries claim to have indexed with what each index leg holds for them.
+    /// </summary>
+    /// <remarks>
+    /// Counts are taken per entry through each leg's own id enumeration, so they are scoped to this vault even
+    /// on a store shared with others — one enumeration per registered leg per entry, a round trip per entry on a
+    /// remote store.
+    /// </remarks>
+    Task<VaultIndexAudit> AuditIndexAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Total bytes on disk under the entry directories of the vault (records, artifacts, images and each entry's
+    /// git history). Walks every entry directory.
+    /// </summary>
+    Task<long> GetStorageSizeAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Rebuilds the keyword-index rows of every searchable entry whose keyword leg disagrees with its vector
-    /// leg (<see cref="VaultStatus.IndexMismatchedEntryCount"/>), from the rows the vector store already holds.
+    /// leg (<see cref="VaultIndexAudit.MismatchedEntryCount"/>), from the rows the vector store already holds.
     /// Nothing is re-embedded. Use it once after upgrading a vault whose documents are not all re-indexed;
     /// pause the queue while it runs.
     /// </summary>
@@ -480,11 +517,6 @@ public sealed class VaultStatus
     public int StaleCount { get; init; }
     public int ErrorStageCount { get; init; }
 
-    // Change tracking
-    public int ChangedSourceCount { get; init; }
-    public int ChangedVaultCount { get; init; }
-    public IReadOnlyList<VaultEntry> ChangedEntries { get; init; } = [];
-
     // SyncStatus counts
     public int InSyncCount { get; init; }
     public int SourceModifiedCount { get; init; }
@@ -509,19 +541,54 @@ public sealed class VaultStatus
     public DateTimeOffset? LastSyncTime { get; init; }
     public DateTimeOffset StatusAsOf { get; init; } = DateTimeOffset.UtcNow;
 
-    // Storage
-    public long TotalStorageSizeBytes { get; init; }
-
-    // Index legs — see IVaultPipeline.GetIndexRowCountsAsync. A leg that is not registered is null,
-    // not zero. The chunk count is what the entries claim; the row counts are what the legs hold.
-    /// <summary>Chunks the searchable entries claim to have indexed (sum of <see cref="VaultEntry.ChunkCount"/>).</summary>
+    /// <summary>Chunks the searchable entries claim to have indexed (sum of <see cref="VaultEntry.ChunkCount"/>), read from the records.</summary>
     public int IndexedChunkCount { get; init; }
-    /// <summary>Rows the vector store holds for the searchable entries; <c>null</c> without a vector store.</summary>
+}
+
+/// <summary>
+/// Outcome of <see cref="IVault.DetectChangesAsync(CancellationToken)"/>. The entries are as persisted after detection.
+/// </summary>
+public sealed class VaultChangeReport
+{
+    /// <summary>Entries whose change detection ran (every entry not being removed).</summary>
+    public int EntriesChecked { get; init; }
+
+    /// <summary>Entries whose source content no longer matches the hash recorded at extraction.</summary>
+    public IReadOnlyList<VaultEntry> SourceChanged { get; init; } = [];
+
+    /// <summary>Entries whose vault files have uncommitted modifications (and whose source did not change).</summary>
+    public IReadOnlyList<VaultEntry> VaultChanged { get; init; } = [];
+
+    /// <summary>Entries whose source file no longer exists.</summary>
+    public IReadOnlyList<VaultEntry> SourceDeleted { get; init; } = [];
+
+    /// <summary>When the sweep finished.</summary>
+    public DateTimeOffset DetectedAt { get; init; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// Outcome of <see cref="IVault.AuditIndexAsync"/> for the searchable entries. A leg that is not registered is
+/// <c>null</c>, not zero: zero would read as an empty index.
+/// </summary>
+public sealed class VaultIndexAudit
+{
+    /// <summary>Searchable entries audited.</summary>
+    public int EntriesAudited { get; init; }
+
+    /// <summary>Chunks the audited entries claim to have indexed (sum of <see cref="VaultEntry.ChunkCount"/>).</summary>
+    public int IndexedChunkCount { get; init; }
+
+    /// <summary>Rows the vector store holds for the audited entries; <c>null</c> without a vector store.</summary>
     public int? VectorRowCount { get; init; }
-    /// <summary>Rows the keyword index holds for the searchable entries; <c>null</c> without a keyword index.</summary>
+
+    /// <summary>Rows the keyword index holds for the audited entries; <c>null</c> without a keyword index.</summary>
     public int? KeywordRowCount { get; init; }
-    /// <summary>Searchable entries whose vector and keyword legs hold different id sets — the drift a re-index of that entry removes.</summary>
-    public int IndexMismatchedEntryCount { get; init; }
+
+    /// <summary>
+    /// Entries whose vector and keyword legs hold different id sets — the drift a re-index of that entry, or
+    /// <see cref="IVault.RepairKeywordIndexAsync"/>, removes. Zero when fewer than two legs are registered.
+    /// </summary>
+    public int MismatchedEntryCount { get; init; }
 }
 
 /// <summary>

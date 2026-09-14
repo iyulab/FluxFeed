@@ -211,9 +211,6 @@ public sealed class MemorizeOptions
 }
 
 /// <summary>
-/// Result of a memorize/refresh operation.
-/// </summary>
-/// <summary>
 /// Row counts per index leg for a set of entries — see <see cref="IVaultPipeline.GetIndexRowCountsAsync"/>.
 /// A leg that is not registered reports <c>null</c>, not zero: zero would read as an empty index.
 /// </summary>
@@ -235,6 +232,9 @@ public readonly record struct KeywordIndexRepairResult(
     int KeywordRowsWritten,
     int KeywordRowsRemoved);
 
+/// <summary>
+/// Result of a memorize/refresh operation.
+/// </summary>
 public sealed class MemorizeResult
 {
     /// <summary>
