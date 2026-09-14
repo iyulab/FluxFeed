@@ -1414,14 +1414,16 @@ public sealed partial class VaultPipeline : IVaultPipeline
             return;
         }
 
-        foreach (var chunkId in chunkIds)
+        if (_vectorStore != null)
         {
-            if (_vectorStore != null)
+            foreach (var chunkId in chunkIds)
                 await _vectorStore.DeleteAsync(chunkId, ct);
-
-            if (_keywordSearchService != null)
-                await _keywordSearchService.DeleteChunkAsync(chunkId, ct);
         }
+
+        // One call for the whole set: a relational keyword index rewrites every shared term row the
+        // chunks hold, and deleting chunk by chunk rewrote those rows once per chunk.
+        if (_keywordSearchService != null)
+            await _keywordSearchService.DeleteChunksAsync(chunkIds, ct);
     }
 
     /// <summary>

@@ -183,7 +183,9 @@ the union is what the swap supersedes. Before 0.27.0 only the vector store was a
 assumption that both legs key their rows identically; keyword rows written before the SQLite stores
 honoured caller ids (FluxIndex 0.36.2) never matched, so each re-index left the previous keyword
 generation searchable beside the new one. An ordinary re-index now removes those rows along with the
-rest of the previous generation; a document that is never re-indexed keeps them.
+rest of the previous generation; a document that is never re-indexed keeps them. Since 0.28.0 the
+superseded keyword rows are removed with one `IKeywordSearchService.DeleteChunksAsync` call
+(FluxIndex.Core 0.40.0) rather than one call per chunk.
 
 Each entry lives under the vault base path, keyed by a hash of its absolute file path:
 
@@ -268,6 +270,11 @@ counts are taken per entry through each leg's own id enumeration, so they are sc
 even on a store shared with others — and cost one enumeration per leg per entry, which on a remote
 store is a round trip per entry; treat `StatusAsync` as the diagnostic call it is. A mismatch is the drift a re-index of that entry removes (see
 *Re-indexing*); the same numbers before and after are how you tell the re-index did.
+
+`IndexMismatchedEntryCount` compares **id sets**, not row counts: on a vault indexed before FluxIndex 0.36.2 every entry's
+keyword ids differ from its vector ids, so every entry counts as mismatched even where the two legs happen to hold the same
+number of rows. Expect it to be much larger than a per-document row-count comparison on the same database, and to fall by one
+per re-indexed entry.
 
 ```csharp
 var status = await vault.StatusAsync();

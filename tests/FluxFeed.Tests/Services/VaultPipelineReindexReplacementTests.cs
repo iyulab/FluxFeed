@@ -129,10 +129,13 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
                 _keywordRows.RemoveAll(c => c.DocumentId == (string)ci[0]);
                 return Task.CompletedTask;
             });
-        keyword.DeleteChunkAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+        // Only the set delete removes rows: a pipeline that fell back to per-chunk deletes would leave the
+        // superseded rows in this double and fail the facts that count them.
+        keyword.DeleteChunksAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
-                _keywordRows.RemoveAll(c => c.Id == (string)ci[0]);
+                var ids = ((IEnumerable<string>)ci[0]).ToHashSet(StringComparer.Ordinal);
+                _keywordRows.RemoveAll(c => ids.Contains(c.Id));
                 return Task.CompletedTask;
             });
         keyword.GetChunkIdsByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -240,6 +243,28 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
 
         _keywordRows.Should().HaveCount(chunkCount);
         _keywordRows.Select(c => c.ChunkIndex).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task Memorize_AfterSourceContentChanged_DropsTheSupersededKeywordRowsInOneCall()
+    {
+        // A relational keyword index rewrites every shared term row a deleted chunk held; deleting the
+        // superseded generation chunk by chunk rewrote those rows once per chunk.
+        var keyword = CreateKeywordIndex();
+        var pipeline = CreatePipeline(keyword);
+        var entry = await CreateEntryAsync("minutes.txt", "The board approved the budget. The audit starts next month.");
+
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
+        var previousIds = _keywordRows.Select(c => c.Id).ToList();
+        keyword.ClearReceivedCalls();
+
+        await File.WriteAllTextAsync(entry.SourcePath, "The board rejected the budget. The audit is postponed.", TestContext.Current.CancellationToken);
+        await pipeline.MemorizeAsync(entry, Options(), TestContext.Current.CancellationToken);
+
+        await keyword.Received(1).DeleteChunksAsync(
+            Arg.Is<IEnumerable<string>>(ids => ids.ToHashSet(StringComparer.Ordinal).SetEquals(previousIds)),
+            Arg.Any<CancellationToken>());
+        await keyword.DidNotReceiveWithAnyArgs().DeleteChunkAsync(default!, default);
     }
 
     [Fact]
