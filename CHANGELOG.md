@@ -12,6 +12,13 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.30.1]
+
+### Changed
+- Re-pinned sibling package(s) `FileFlux` 0.23.11 -> 0.23.12, `FluxGuard.Remote` 0.14.2 -> 0.15.0, `FluxIndex.Core` 0.42.0 -> 0.43.0, `FluxIndex.Storage.SQLite` 0.42.0 -> 0.43.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+
+---
+
 ## [0.30.0]
 
 ### Added
