@@ -108,8 +108,17 @@ public interface IVaultQueueService
     Task CompleteAsync(Guid jobId, CancellationToken ct = default);
 
     /// <summary>
-    /// Marks a job as failed.
+    /// Marks a job as failed without classifying the failure.
     /// </summary>
+    /// <remarks>
+    /// The job is recorded as "not classified", which the queue treats as retryable: automatic retry
+    /// keeps its budget, and an operator's rerun request is never refused for it. Only a recorded
+    /// <see cref="MemorizeFailureKind.Permanent"/> makes the queue stop retrying and refuse a rerun -
+    /// so a worker that replaces the default one and reports a deterministic failure (a missing
+    /// file, a format no reader handles) through this overload gets the failure retried by budget
+    /// and rerun on request, with nothing to say why. Prefer the classifying overload; use
+    /// <see cref="MemorizeFailureClassifier.Classify"/> when all you have is the exception type.
+    /// </remarks>
     Task FailAsync(Guid jobId, string errorMessage, CancellationToken ct = default);
 
     /// <summary>

@@ -303,6 +303,18 @@ await vault.ResumeQueueAsync();
 
 It throws when no keyword index is registered rather than reporting nothing to repair.
 
+Switching the text analyzer (`ITextAnalyzer`) or the keyword field set (`KeywordFieldOptions`) is a different
+shape: every keyword row is still present under the right id, only written the old way, so the mismatch-only
+repair finds nothing to do and a full re-memorize re-extracts and re-embeds a corpus that only needs its keyword
+rows rewritten. `KeywordIndexRepairScope.All` rewrites every searchable entry from the vector leg — chunk metadata
+included, so the fields the new configuration reads are populated — without re-embedding:
+
+```csharp
+await vault.PauseQueueAsync();
+var rebuilt = await vault.RepairKeywordIndexAsync(KeywordIndexRepairScope.All);   // EntriesRepaired == every searchable entry
+await vault.ResumeQueueAsync();
+```
+
 ```csharp
 var audit = await vault.AuditIndexAsync();
 if (audit.MismatchedEntryCount > 0)

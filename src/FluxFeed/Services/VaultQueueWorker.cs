@@ -294,8 +294,11 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
         }
         catch (FileNotFoundException ex)
         {
+            // Recorded as Permanent, the way the classifier already ranks it: this path used the
+            // unclassified overload, so a missing file was persisted as "not classified" and an
+            // operator's rerun request for it was never refused.
             LogFileNotFoundForJob(_logger, job.Id, job.FilePath);
-            await _queueService.FailAsync(job.Id, $"File not found: {ex.Message}", ct);
+            await ReportFailureAsync(job, $"File not found: {ex.Message}", MemorizeFailureKind.Permanent, ct);
         }
         catch (Exception ex)
         {

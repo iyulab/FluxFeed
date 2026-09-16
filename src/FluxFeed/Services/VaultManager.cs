@@ -720,11 +720,14 @@ public sealed partial class VaultManager : IVault
 
     #region Status & History
 
-    public async Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(CancellationToken ct = default)
+    public Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(CancellationToken ct = default)
+        => RepairKeywordIndexAsync(KeywordIndexRepairScope.Mismatched, ct);
+
+    public async Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(KeywordIndexRepairScope scope, CancellationToken ct = default)
     {
         // The same entries the status compares: an entry that is not searchable is not expected to hold rows.
         var searchable = (await ListAsync(ct: ct)).Where(e => e.IsSearchable).ToList();
-        return await _pipeline.RepairKeywordIndexAsync(searchable, ct);
+        return await _pipeline.RepairKeywordIndexAsync(searchable, scope, ct);
     }
 
     public async Task<VaultStatus> StatusAsync(CancellationToken ct = default)

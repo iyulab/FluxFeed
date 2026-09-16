@@ -56,6 +56,23 @@ public interface IVaultPipeline
     Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default);
 
     /// <summary>
+    /// Rebuilds the keyword-index rows of the given entries from the rows the vector store holds, for
+    /// the entries <paramref name="scope"/> selects. Nothing is re-embedded.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="KeywordIndexRepairScope.Mismatched"/> is the overload above. <see cref="KeywordIndexRepairScope.All"/>
+    /// rewrites entries whose legs agree as well - the case a change of text analyzer or keyword field set
+    /// leaves behind: every keyword row is present under the right id, and every one was written with the
+    /// previous analyzer or field set. Re-memorizing to refresh them re-extracts and re-embeds a corpus that
+    /// only needs its keyword rows rewritten; this copies the vector rows across again, metadata included, so
+    /// the fields the current configuration reads are populated. The per-entry order is the same as a
+    /// repair - new rows first, stale rows after - so the entry keeps answering keyword searches throughout.
+    /// Pause the queue first.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, KeywordIndexRepairScope scope, CancellationToken ct = default);
+
+    /// <summary>
     /// Full memorize pipeline: extract → refine → chunk → embed → commit.
     /// Used for new files or when source content has changed.
     /// </summary>
@@ -220,10 +237,29 @@ public sealed class MemorizeOptions
 public readonly record struct IndexRowCounts(int? VectorRows, int? KeywordRows, int MismatchedEntries);
 
 /// <summary>
-/// Outcome of <see cref="IVaultPipeline.RepairKeywordIndexAsync"/>.
+/// Which entries <see cref="IVaultPipeline.RepairKeywordIndexAsync(IReadOnlyList{VaultEntry}, KeywordIndexRepairScope, CancellationToken)"/>
+/// rewrites.
+/// </summary>
+public enum KeywordIndexRepairScope
+{
+    /// <summary>
+    /// Only entries whose keyword leg holds a different id set than their vector leg. Entries whose legs
+    /// agree are left alone.
+    /// </summary>
+    Mismatched = 0,
+
+    /// <summary>
+    /// Every entry, whether or not its legs agree. For rewriting a keyword leg whose rows are all present
+    /// but were written with a previous text analyzer or keyword field set.
+    /// </summary>
+    All = 1
+}
+
+/// <summary>
+/// Outcome of <see cref="IVaultPipeline.RepairKeywordIndexAsync(IReadOnlyList{VaultEntry}, CancellationToken)"/>.
 /// </summary>
 /// <param name="EntriesChecked">Entries whose two legs were compared.</param>
-/// <param name="EntriesRepaired">Entries whose keyword leg disagreed with the vector leg and was rebuilt.</param>
+/// <param name="EntriesRepaired">Entries whose keyword leg was rebuilt - those whose legs disagreed, or every entry under <see cref="KeywordIndexRepairScope.All"/>.</param>
 /// <param name="KeywordRowsWritten">Keyword rows written from the vector leg across the repaired entries.</param>
 /// <param name="KeywordRowsRemoved">Keyword rows removed because the vector leg does not hold them.</param>
 public readonly record struct KeywordIndexRepairResult(

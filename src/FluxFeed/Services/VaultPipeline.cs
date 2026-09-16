@@ -1415,7 +1415,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
     }
 
     /// <inheritdoc />
-    public async Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default)
+    public Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default)
+        => RepairKeywordIndexAsync(entries, KeywordIndexRepairScope.Mismatched, ct);
+
+    /// <inheritdoc />
+    public async Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, KeywordIndexRepairScope scope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
@@ -1443,13 +1447,18 @@ public sealed partial class VaultPipeline : IVaultPipeline
             var vectorIds = await _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
             var keywordIds = await _keywordSearchService.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
             var vectorIdSet = vectorIds.ToHashSet(StringComparer.Ordinal);
-            if (vectorIdSet.SetEquals(keywordIds))
+            // Legs that agree are only "nothing to do" when the question is drift. After an analyzer or
+            // field-set change every row is present under the right id and every one is written the old
+            // way - the id comparison cannot see that, so All rewrites them regardless.
+            if (scope == KeywordIndexRepairScope.Mismatched && vectorIdSet.SetEquals(keywordIds))
             {
                 continue;
             }
 
             // Write before removing, as a re-index swap does: the entry keeps answering keyword searches
-            // throughout, and a failure partway leaves the previous rows rather than none.
+            // throughout, and a failure partway leaves the previous rows rather than none. The vector store
+            // returns each chunk with its metadata, so the keyword fields the current configuration reads
+            // (title, file name, ...) are rebuilt along with the body.
             var chunks = (await _vectorStore.GetByDocumentIdAsync(entry.FilepathHash, ct)).ToList();
             if (chunks.Count > 0)
             {

@@ -70,6 +70,27 @@ public sealed class VaultQueueWorkerFailureReportingTests
     }
 
     [Fact]
+    public async Task MissingFile_IsRecordedAsPermanent_AndNotRetried()
+    {
+        // The worker's own missing-file path reported through the unclassified overload, so the
+        // job was persisted as "not classified": retried by budget, and never refused on an
+        // operator's rerun request - the very thing the classifier ranks FileNotFound Permanent for.
+        var (worker, queue, pipeline) = Build(new FileVaultOptions { EnableAutoRetry = true, RetryDelayMs = 0 });
+        pipeline.MemorizeAsync(Arg.Any<VaultEntry>(), Arg.Any<MemorizeOptions>(), Arg.Any<CancellationToken>())
+            .Returns<MemorizeResult>(_ => throw new FileNotFoundException("gone", "/docs/report.pdf"));
+        var job = MemorizeJob();
+
+        await worker.ProcessJobAsync(job, CancellationToken.None);
+
+        await queue.Received(1).FailAsync(
+            job.Id,
+            Arg.Is<string>(m => m.StartsWith("File not found", StringComparison.Ordinal)),
+            MemorizeFailureKind.Permanent,
+            Arg.Any<CancellationToken>());
+        await queue.DidNotReceive().RetryAsync(job.Id, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task SucceededMemorize_IsStillReportedAsCompleted()
     {
         var (worker, queue, pipeline) = Build();

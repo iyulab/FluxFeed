@@ -238,6 +238,57 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
     }
 
     [Fact]
+    public async Task RepairKeywordIndex_All_RewritesAnEntryWhoseLegsAgree_RestoringTheFieldsFromTheVectorLeg()
+    {
+        // After a text-analyzer or keyword-field change every keyword row is present under the right
+        // id and every one is written the old way. The id comparison sees nothing to do; re-memorizing
+        // pays for extraction and embedding again. All copies the vector rows across once more -
+        // metadata included, which is what the keyword fields (file name, title) are read from.
+        await using var provider = BuildStack(withKeywordIndex: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var store = scope.ServiceProvider.GetRequiredService<IVectorStore>();
+        var keyword = scope.ServiceProvider.GetRequiredService<IKeywordSearchService>();
+
+        // A file whose name shares no token with its body, so a hit on it can only come from the file-name field.
+        var file = Path.Combine(_root, "zephyr-ledger.md");
+        File.WriteAllText(file, Paragraphs);
+        var entry = await vault.MemorizeAsync(file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+
+        var byFileName = new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Keyword, TopK = 10 };
+        (await vault.SearchAsync("zephyr", byFileName, TestContext.Current.CancellationToken)).Items
+            .Should().NotBeEmpty("fixture premise: the file name is a keyword field on a freshly indexed entry");
+
+        // The old-configuration shape: the same rows under the same ids, written without the fields.
+        var vectorIds = await store.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken);
+        var bodiesOnly = (await store.GetByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken))
+            .Select(c => new DocumentChunk { Id = c.Id, DocumentId = c.DocumentId, ChunkIndex = c.ChunkIndex, Content = c.Content, TokenCount = c.TokenCount })
+            .ToList();
+        await keyword.DeleteChunksAsync(vectorIds, TestContext.Current.CancellationToken);
+        await keyword.IndexChunksAsync(bodiesOnly, TestContext.Current.CancellationToken);
+        (await vault.SearchAsync("zephyr", byFileName, TestContext.Current.CancellationToken)).Items
+            .Should().BeEmpty("fixture premise: rows written without metadata carry no file-name field");
+        (await vault.AuditIndexAsync(TestContext.Current.CancellationToken)).MismatchedEntryCount
+            .Should().Be(0, "fixture premise: the legs agree, which is exactly why the mismatch-only repair cannot help");
+        var embeddedBefore = _embedder.EmbeddedTexts;
+
+        var untouched = await vault.RepairKeywordIndexAsync(TestContext.Current.CancellationToken);
+        untouched.EntriesRepaired.Should().Be(0, "the mismatch-only scope leaves agreeing legs alone");
+
+        var result = await vault.RepairKeywordIndexAsync(KeywordIndexRepairScope.All, TestContext.Current.CancellationToken);
+
+        result.EntriesChecked.Should().Be(1);
+        result.EntriesRepaired.Should().Be(1);
+        result.KeywordRowsWritten.Should().Be(vectorIds.Count);
+        result.KeywordRowsRemoved.Should().Be(0, "every row was already present under the right id");
+        _embedder.EmbeddedTexts.Should().Be(embeddedBefore, "the keyword leg is rebuilt from rows the vector leg already holds");
+        (await vault.SearchAsync("zephyr", byFileName, TestContext.Current.CancellationToken)).Items
+            .Should().NotBeEmpty("the rebuilt rows carry the metadata the vector store returned, so the file-name field is back");
+    }
+
+    [Fact]
     public async Task RepairKeywordIndex_LeavesEntriesWhoseLegsAgreeAlone()
     {
         await using var provider = BuildStack(withKeywordIndex: true);

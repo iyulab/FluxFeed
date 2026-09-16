@@ -216,6 +216,19 @@ public interface IVault
     Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Rebuilds the keyword-index rows of the searchable entries <paramref name="scope"/> selects, from the
+    /// rows the vector store already holds. Nothing is re-embedded.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="KeywordIndexRepairScope.All"/> is the way to re-index the keyword leg alone after switching
+    /// the text analyzer or the keyword field set: those change what the rows contain, not which rows exist,
+    /// so the mismatch-only overload finds nothing to do while a full re-memorize re-extracts and re-embeds
+    /// everything. Pause the queue while it runs.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(KeywordIndexRepairScope scope, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets the diff between the working tree and HEAD for a vault entry's vault/ directory — i.e.
     /// uncommitted changes only. This vault normally auto-commits after every successful
     /// Memorize/RefreshAsync, so the working tree is typically clean by the time a caller gets around

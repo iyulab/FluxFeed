@@ -12,6 +12,32 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.30.0]
+
+### Added
+- **`KeywordIndexRepairScope`** — `IVault.RepairKeywordIndexAsync(scope)` and
+  `IVaultPipeline.RepairKeywordIndexAsync(entries, scope)`. `Mismatched` is the existing behaviour;
+  `All` rewrites every entry from the vector leg whether or not its legs agree. That is the shape a
+  text-analyzer or keyword-field change leaves behind: every keyword row present under the right id,
+  every one written the old way, so the id comparison found nothing to do and the only way to
+  re-index the keyword leg was a full re-memorize (re-extract, re-chunk, re-embed). The rows are
+  rebuilt from the chunks the vector store returns, metadata included, so the fields the current
+  configuration reads (`file_name`, `title`, ...) are populated; nothing is re-embedded.
+
+### Fixed
+- **A missing file is now recorded as a `Permanent` failure.** The worker's own `FileNotFoundException`
+  path reported through the unclassified `FailAsync` overload, so the job was persisted as "not
+  classified" — retried by budget and never refused on an operator's rerun request — although
+  `MemorizeFailureClassifier` already ranks a missing file `Permanent`.
+
+### Changed
+- `IVaultQueueService.FailAsync(jobId, errorMessage)` documents what "not classified" means: the queue
+  treats it as retryable, and only a recorded `Permanent` stops retries and refuses a rerun. A consumer
+  that replaces the default worker and reports deterministic failures through this overload gets them
+  retried and rerun with nothing to say why; prefer the classifying overload.
+
+---
+
 ## [0.29.5]
 
 ### Changed
