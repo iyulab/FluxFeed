@@ -510,6 +510,10 @@ public sealed partial class VaultManager : IVault
         };
     }
 
+    /// <param name="entryExists">Whether the vault already has an entry for the file.</param>
+    /// <param name="sourceExists">Whether the source file is present on disk.</param>
+    /// <param name="sourceChanged">Whether the source file's content differs from what the entry was built from.</param>
+    /// <param name="vaultChanged">Whether the entry's vault-side content changed since it was last indexed.</param>
     /// <param name="canRefresh">
     /// Whether a refresh could actually succeed for this entry (refined content present). Recommending
     /// a refresh that the pipeline is guaranteed to reject produces work that can never complete, and

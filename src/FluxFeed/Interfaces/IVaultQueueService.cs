@@ -17,6 +17,9 @@ public interface IVaultQueueService
     /// argument that has a sensible default, which left every caller and every test double picking one
     /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
     /// </remarks>
+    /// <param name="filepathHash">Hash that identifies the entry (the vault's key for the file).</param>
+    /// <param name="filePath">Source file path of the entry.</param>
+    /// <param name="priority">Queue priority; decides what runs next among waiting jobs.</param>
     /// <param name="groupKey">
     /// Optional fairness group, e.g. the owner this file belongs to. Jobs sharing a group are held to
     /// <c>FileVaultOptions.MaxInFlightPerGroup</c> concurrent jobs while another group has work
@@ -24,6 +27,7 @@ public interface IVaultQueueService
     /// ungrouped and is never capped. The queue does not derive this from the path - what counts as
     /// an owner is the caller's concept.
     /// </param>
+    /// <param name="ct">Cancellation token.</param>
     Task<VaultJob> EnqueueMemorizeAsync(
         string filepathHash,
         string filePath,
@@ -40,6 +44,9 @@ public interface IVaultQueueService
     /// argument that has a sensible default, which left every caller and every test double picking one
     /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
     /// </remarks>
+    /// <param name="filepathHash">Hash that identifies the entry (the vault's key for the file).</param>
+    /// <param name="filePath">Source file path of the entry.</param>
+    /// <param name="priority">Queue priority; decides what runs next among waiting jobs.</param>
     /// <param name="groupKey">
     /// Optional fairness group, e.g. the owner this file belongs to. Jobs sharing a group are held to
     /// <c>FileVaultOptions.MaxInFlightPerGroup</c> concurrent jobs while another group has work
@@ -47,6 +54,7 @@ public interface IVaultQueueService
     /// ungrouped and is never capped. The queue does not derive this from the path - what counts as
     /// an owner is the caller's concept.
     /// </param>
+    /// <param name="ct">Cancellation token.</param>
     Task<VaultJob> EnqueueRefreshAsync(
         string filepathHash,
         string filePath,
@@ -63,6 +71,9 @@ public interface IVaultQueueService
     /// argument that has a sensible default, which left every caller and every test double picking one
     /// arbitrarily. See <see cref="DequeueAsync"/> for why same-entry work is never run in parallel.
     /// </remarks>
+    /// <param name="filepathHash">Hash that identifies the entry (the vault's key for the file).</param>
+    /// <param name="filePath">Source file path of the entry.</param>
+    /// <param name="priority">Queue priority; decides what runs next among waiting jobs.</param>
     /// <param name="groupKey">
     /// Optional fairness group, e.g. the owner this file belongs to. Jobs sharing a group are held to
     /// <c>FileVaultOptions.MaxInFlightPerGroup</c> concurrent jobs while another group has work
@@ -70,6 +81,7 @@ public interface IVaultQueueService
     /// ungrouped and is never capped. The queue does not derive this from the path - what counts as
     /// an owner is the caller's concept.
     /// </param>
+    /// <param name="ct">Cancellation token.</param>
     Task<VaultJob> EnqueueRemoveAsync(
         string filepathHash,
         string filePath,
@@ -226,6 +238,10 @@ public interface IVaultQueueService
     /// the point: the alternative — appending them after <c>ct</c> — would have kept such a call compiling
     /// while it silently meant something else.
     /// </remarks>
+    /// <param name="statusFilter">Only jobs in this status; <c>null</c> for every status.</param>
+    /// <param name="typeFilter">Only jobs of this type; <c>null</c> for every type.</param>
+    /// <param name="limit">At most this many jobs; <c>null</c> for no cap.</param>
+    /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<VaultJob>> GetJobsAsync(
         VaultJobStatus? statusFilter = null,
         VaultJobType? typeFilter = null,

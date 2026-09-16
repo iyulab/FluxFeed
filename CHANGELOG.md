@@ -12,6 +12,19 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.30.2]
+
+### Fixed
+- The package now ships its XML documentation file. Every public member of `IVault`, `IVaultPipeline` and the
+  option types has carried `///` docs for a long time, but `GenerateDocumentationFile` was never set, so the
+  nupkg held only the dll and a consumer's IDE showed nothing — the 0.30.0 `RepairKeywordIndexAsync(KeywordIndexRepairScope, …)`
+  overload and `KeywordIndexRepairScope` itself read as undocumented from the outside. Generating the file also
+  surfaced what a never-compiled doc set hides: three `cref`s that did not resolve or were ambiguous
+  (`SyncAsync`, `RefreshAsync`, `RepairKeywordIndexAsync` — the ambiguity a consumer hit in its own docs) and
+  missing `<param>` tags on the `IVaultQueueService` enqueue and `GetJobsAsync` members; all fixed. No code changes.
+
+---
+
 ## [0.30.1]
 
 ### Changed

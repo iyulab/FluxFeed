@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>0.30.1</Version>
+    <Version>0.30.2</Version>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <Authors>iyulab</Authors>
@@ -16,6 +16,14 @@
   <!-- Ship the README inside the package so the gallery page is not blank -->
   <PropertyGroup Condition="($(MSBuildProjectDirectory.Contains('\src\')) OR $(MSBuildProjectDirectory.Contains('/src/'))) AND Exists('$(MSBuildThisFileDirectory)README.md')">
     <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <!-- Ship the XML documentation with the package: the interfaces carry full docs, but without this the
+       nupkg held only the dll and a consumer saw none of them (measured 2026-09-17 on 0.30.1 — the new
+       RepairKeywordIndexAsync(KeywordIndexRepairScope) overload read as undocumented from the outside).
+       CS1591 is muted as elsewhere in the ecosystem: the doc file is the goal, not a warning per member. -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('\src\')) OR $(MSBuildProjectDirectory.Contains('/src/'))">
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
   <ItemGroup Condition="($(MSBuildProjectDirectory.Contains('\src\')) OR $(MSBuildProjectDirectory.Contains('/src/'))) AND Exists('$(MSBuildThisFileDirectory)README.md')">
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />

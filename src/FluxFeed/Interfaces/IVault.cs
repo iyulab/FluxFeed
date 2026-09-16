@@ -119,7 +119,7 @@ public interface IVault
     /// This is the sweep <see cref="GetEntriesNeedingSyncAsync"/> reads the results of. It costs, per entry past
     /// <see cref="ProcessingStage.Source"/>, a hash of the source file and a <c>git status</c> process in the
     /// entry's vault directory — tens of milliseconds per entry — so call it when you need fresh sync state,
-    /// not as a status read. <see cref="SyncAsync()"/> and <see cref="ScanFolderAsync(string, CancellationToken)"/>
+    /// not as a status read. <see cref="SyncAsync(CancellationToken)"/> and <see cref="ScanFolderAsync(string, CancellationToken)"/>
     /// run the same detection for the files they visit.
     /// </remarks>
     Task<VaultChangeReport> DetectChangesAsync(CancellationToken ct = default);
@@ -258,7 +258,7 @@ public interface IVault
     /// specific commit from <see cref="LogAsync"/>, without checking anything out or mutating the
     /// vault. Read-only counterpart to reconstructing a past version: callers that want to actually
     /// roll back write the returned content through the entry's normal update path (e.g.
-    /// <see cref="RefreshAsync"/>) themselves.
+    /// <see cref="RefreshAsync(string, CancellationToken)"/>) themselves.
     /// </summary>
     /// <param name="filePath">Source file path identifying the entry.</param>
     /// <param name="commitHash">A commit hash from this entry's <see cref="LogAsync"/> history.</param>
@@ -599,7 +599,7 @@ public sealed class VaultIndexAudit
 
     /// <summary>
     /// Entries whose vector and keyword legs hold different id sets — the drift a re-index of that entry, or
-    /// <see cref="IVault.RepairKeywordIndexAsync"/>, removes. Zero when fewer than two legs are registered.
+    /// <see cref="IVault.RepairKeywordIndexAsync(CancellationToken)"/>, removes. Zero when fewer than two legs are registered.
     /// </summary>
     public int MismatchedEntryCount { get; init; }
 }

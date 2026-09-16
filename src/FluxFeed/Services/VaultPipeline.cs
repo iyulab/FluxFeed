@@ -1539,6 +1539,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// failure path instead. Deleting only what THIS run attempted cannot touch the prefix.
     /// </para>
     /// </remarks>
+    /// <param name="entry">The entry whose partial generation is being rolled back.</param>
     private async Task<IReadOnlyList<string>> TryRollbackAsync(
         VaultEntry entry,
         IReadOnlyList<string> attemptedChunkIds)
