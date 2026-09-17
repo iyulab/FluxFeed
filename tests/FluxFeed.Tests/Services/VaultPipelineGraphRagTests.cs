@@ -180,13 +180,13 @@ public sealed class VaultPipelineGraphRagTests : IDisposable
     public async Task Memorize_InATenantScopedVault_BuildsTheGraphInThePartitionOfItsVaultId()
     {
         var graph = CreateGraphMock();
-        var pipeline = CreatePipeline(graph, vaultId: "desk-7");
+        var pipeline = CreatePipeline(graph, vaultId: "tenant-7");
 
         await MemorizeFileAsync(pipeline, new MemorizeOptions { MaxChunkSize = 200, EnableGraphRAG = true });
 
         await graph.Received(1).BuildIndexAsync(
             Arg.Any<IEnumerable<DocumentChunk>>(),
-            Arg.Is<GraphRAGBuildOptions?>(o => o != null && o.Partition == "desk-7"),
+            Arg.Is<GraphRAGBuildOptions?>(o => o != null && o.Partition == "tenant-7"),
             Arg.Any<CancellationToken>());
     }
 
@@ -194,7 +194,7 @@ public sealed class VaultPipelineGraphRagTests : IDisposable
     public async Task Memorize_InATenantScopedVault_KeepsTheCallersOptions_AndDoesNotChangeThem()
     {
         var graph = CreateGraphMock();
-        var pipeline = CreatePipeline(graph, vaultId: "desk-7");
+        var pipeline = CreatePipeline(graph, vaultId: "tenant-7");
         var buildOptions = new GraphRAGBuildOptions { MaxChunks = 7 };
 
         await MemorizeFileAsync(
@@ -203,7 +203,7 @@ public sealed class VaultPipelineGraphRagTests : IDisposable
 
         await graph.Received(1).BuildIndexAsync(
             Arg.Any<IEnumerable<DocumentChunk>>(),
-            Arg.Is<GraphRAGBuildOptions?>(o => o != null && o.Partition == "desk-7" && o.MaxChunks == 7),
+            Arg.Is<GraphRAGBuildOptions?>(o => o != null && o.Partition == "tenant-7" && o.MaxChunks == 7),
             Arg.Any<CancellationToken>());
         buildOptions.Partition.Should().Be(GraphPartition.Default);
     }
@@ -212,14 +212,14 @@ public sealed class VaultPipelineGraphRagTests : IDisposable
     public async Task Memorize_InATenantScopedVault_RefusesOptionsNamingAnotherPartition()
     {
         var graph = CreateGraphMock();
-        var pipeline = CreatePipeline(graph, vaultId: "desk-7");
+        var pipeline = CreatePipeline(graph, vaultId: "tenant-7");
 
         var result = await MemorizeFileAsync(
             pipeline,
-            new MemorizeOptions { MaxChunkSize = 200, EnableGraphRAG = true, GraphRAGOptions = new GraphRAGBuildOptions { Partition = "desk-8" } });
+            new MemorizeOptions { MaxChunkSize = 200, EnableGraphRAG = true, GraphRAGOptions = new GraphRAGBuildOptions { Partition = "tenant-8" } });
 
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("desk-8").And.Contain("desk-7");
+        result.ErrorMessage.Should().Contain("tenant-8").And.Contain("tenant-7");
         await graph.DidNotReceive().BuildIndexAsync(
             Arg.Any<IEnumerable<DocumentChunk>>(),
             Arg.Any<GraphRAGBuildOptions?>(),
