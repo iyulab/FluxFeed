@@ -15,6 +15,7 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.30.3]
 
 ### Changed
+- Microsoft.Extensions.* / Microsoft.Data.Sqlite / EF Core pins raised to 10.0.12 (September 2026 .NET servicing).
 - Re-pinned sibling package(s) `FileFlux` 0.23.12 -> 0.23.14, `FluxIndex.Core` 0.43.0 -> 0.43.1, `FluxIndex.Storage.SQLite` 0.43.0 -> 0.43.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
 
 ---
