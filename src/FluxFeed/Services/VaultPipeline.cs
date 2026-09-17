@@ -1675,8 +1675,43 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
 
         LogBuildingGraphRagIndex(_logger, entry.FilepathHash, indexedChunks.Count);
-        await _graphRAGService.BuildIndexAsync(indexedChunks, options.GraphRAGOptions, ct);
+        await _graphRAGService.BuildIndexAsync(indexedChunks, ResolveGraphRagOptions(options.GraphRAGOptions), ct);
         LogGraphRagIndexBuilt(_logger, entry.FilepathHash);
+    }
+
+    /// <summary>
+    /// The GraphRAG build options a memorize runs with: a tenant-scoped vault writes its graph into the partition named
+    /// by its <see cref="FileVaultOptions.VaultId"/> — the same key its chunks carry as <c>vault_id</c> on the vector and
+    /// keyword legs — so vaults sharing one graph store neither merge each other's entities nor see each other's
+    /// communities. The caller's options object is copied, never changed. A vault without a <c>VaultId</c> passes the
+    /// options through as given.
+    /// </summary>
+    internal GraphRAGBuildOptions? ResolveGraphRagOptions(GraphRAGBuildOptions? requested)
+    {
+        if (string.IsNullOrEmpty(_options.VaultId))
+        {
+            return requested;
+        }
+
+        var partition = _options.VaultId;
+        if (requested is null)
+        {
+            return new GraphRAGBuildOptions { Partition = partition };
+        }
+
+        if (requested.Partition == partition)
+        {
+            return requested;
+        }
+
+        if (requested.Partition != GraphPartition.Default)
+        {
+            throw new ArgumentException(
+                $"MemorizeOptions.GraphRAGOptions.Partition is '{requested.Partition}', but this vault writes its graph into the partition of its VaultId '{partition}'.",
+                nameof(requested));
+        }
+
+        return requested.WithPartition(partition);
     }
 
     /// <summary>

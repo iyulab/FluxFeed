@@ -12,6 +12,14 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.31.0]
+
+### Changed
+- A tenant-scoped vault (`FileVaultOptions.VaultId` set) builds its GraphRAG index in the graph partition named by its `VaultId` (FluxIndex 0.44.0 partitions), so vaults sharing one graph store no longer merge each other's entities or see each other's communities. The caller's `MemorizeOptions.GraphRAGOptions` are copied, not changed; options that name a different partition are refused. A vault without a `VaultId` is unchanged.
+- FluxIndex dependency raised to 0.44.0.
+
+---
+
 ## [0.30.3]
 
 ### Changed
