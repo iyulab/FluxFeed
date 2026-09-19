@@ -34,6 +34,7 @@ Releases before 0.28.0 predate this file — see the git history.
 - Correction to the 0.32.0 note below: the keyword-index leg does not fuse by relative score at 0.7 / 0.3. It
   fuses by weighted reciprocal rank with weights chosen from the query's length — see "Hybrid" in the README.
   Hybrid scores were rank-sized before 0.32.0 as well; only the weights changed.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.6 -> 0.44.7, `FluxIndex.Storage.SQLite` 0.44.6 -> 0.44.7 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
 
 ---
 
