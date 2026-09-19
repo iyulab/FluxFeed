@@ -227,6 +227,15 @@ public sealed partial class VaultPipeline : IVaultPipeline
         {
             LogStartingMemorize(_logger, entry.SourcePath);
 
+            // FileVaultOptions.MaxFileSizeMB: a file over the limit is not processed. Thrown as InvalidDataException so
+            // the result classifies as a permanent failure — a retry reads the same size.
+            if (_options.MaxFileSizeMB > 0 && File.Exists(entry.SourcePath)
+                && new FileInfo(entry.SourcePath).Length is var sourceBytes && sourceBytes > _options.MaxFileSizeBytes)
+            {
+                throw new InvalidDataException(
+                    $"Source file is {sourceBytes / (1024d * 1024d):F1} MB, over FileVaultOptions.MaxFileSizeMB ({_options.MaxFileSizeMB} MB); it was not processed.");
+            }
+
             // Step 1: Backup user content if preserving (for re-memorize scenarios)
             string? existingQaContent = null;
             string? existingAppendText = null;

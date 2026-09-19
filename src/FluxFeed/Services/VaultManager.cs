@@ -1079,6 +1079,13 @@ public sealed partial class VaultManager : IVault
                 continue;
             }
 
+            // Over FileVaultOptions.MaxFileSizeMB: skipped, like an excluded file, rather than queued to fail.
+            if (_options.MaxFileSizeMB > 0 && new FileInfo(file).Length > _options.MaxFileSizeBytes)
+            {
+                skippedCount++;
+                continue;
+            }
+
             try
             {
                 var change = await DetectChangesAsync(file, ct);

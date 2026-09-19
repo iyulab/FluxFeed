@@ -704,17 +704,6 @@ public sealed class ScanError
 }
 
 /// <summary>
-/// Watch options for folder monitoring.
-/// </summary>
-public sealed class WatchOptions
-{
-    public bool IsRecursive { get; set; } = true;
-    public List<string> IncludePatterns { get; set; } = ["*.pdf", "*.docx", "*.md", "*.txt", "*.html"];
-    public List<string> ExcludePatterns { get; set; } = ["~$*", "*.tmp", ".*"];
-    public bool AutoMemorize { get; set; }
-}
-
-/// <summary>
 /// Search strategy for vault content search. The facade owns this enum (rather than reusing one of
 /// FluxIndex.Core's overlapping <c>SearchStrategy</c> types) so the public surface stays self-contained.
 /// </summary>

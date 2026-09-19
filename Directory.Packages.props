@@ -24,6 +24,7 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
     <PackageVersion Include="Microsoft.Testing.Extensions.HangDump" Version="2.3.3" />
     <PackageVersion Include="AwesomeAssertions" Version="9.6.0" />
+    <PackageVersion Include="Iyu.Conventions.Testing" Version="0.1.0" />
     <PackageVersion Include="NSubstitute" Version="6.2.0" />
     <!-- Real sqlite-vec store for the README default-stack integration test (same family version as FluxIndex.Core) -->
     <PackageVersion Include="FluxIndex.Storage.SQLite" Version="0.44.5" />

@@ -37,8 +37,8 @@ public sealed class FileVaultOptions
     public string? VaultId { get; set; }
 
     /// <summary>
-    /// Maximum file size in megabytes to process.
-    /// Larger files will be skipped.
+    /// Maximum source file size in megabytes. A folder scan skips larger files (counted as skipped), and memorizing
+    /// one fails permanently with the size in the message instead of extracting it. Zero or less means no limit.
     /// </summary>
     public int MaxFileSizeMB { get; set; } = 100;
 
@@ -138,7 +138,7 @@ public sealed class FileVaultOptions
     public int MaxImageEnrichmentAttempts { get; set; } = 3;
 
     /// <summary>
-    /// Maximum file size in bytes.
+    /// <see cref="MaxFileSizeMB"/> in bytes.
     /// </summary>
     public long MaxFileSizeBytes => MaxFileSizeMB * 1024L * 1024L;
 

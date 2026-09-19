@@ -573,7 +573,7 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 |---|---|---|
 | `VaultBasePath` | `null` | Vault root. When null, `.vault` next to each source file |
 | `VaultId` | `null` | Tenant id; set by `IVaultFactory`. Required for `PurgeAsync`. Also the GraphRAG graph partition — vaults sharing one graph store keep separate entities and communities |
-| `MaxFileSizeMB` | `100` | Larger files are skipped |
+| `MaxFileSizeMB` | `100` | A folder scan skips larger files; memorizing one fails permanently with the size in the message. `0` = no limit |
 | `EnableRealTimeWatch` | `true` | Folder watching |
 | `DebounceDelayMs` | `500` | Merge window for rapid change events |
 | `EnableBackgroundProcessing` | `true` | Background queue; when false the service idles |

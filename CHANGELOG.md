@@ -12,6 +12,23 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.33.0]
+
+### Fixed
+- **`FileVaultOptions.MaxFileSizeMB` is enforced.** It was declared (default 100 MB, documented as "larger files will be
+  skipped") and read by nothing, so files of any size were extracted and indexed. A folder scan now skips a file over
+  the limit (counted in `ScanResult.SkippedFilesCount`), and memorizing one fails permanently with the size in the
+  message — the queue does not retry it. `0` or less means no limit.
+
+### Removed
+- **Breaking: `WatchOptions`.** No API accepted it; folder watching is configured through `FileVaultOptions` and the
+  watch call's own parameters.
+
+### Added
+- An options-reachability roster test (`Iyu.Conventions.Testing`) keeps every public option read by the library.
+
+---
+
 ## [0.32.0]
 
 ### Changed
