@@ -48,6 +48,9 @@ public static class ServiceCollectionExtensions
         // Register queue service as Singleton (stateful, one per app)
         services.TryAddSingleton<IVaultQueueService, VaultQueueService>();
 
+        // What the scoped pipeline must remember across scopes (a request, for a web or MCP host).
+        services.TryAddSingleton<VaultScopeTagBackfillState>();
+
         // Register pipeline and vault as Scoped (they may depend on scoped services like IVectorStore)
         services.TryAddScoped<IVaultPipeline, VaultPipeline>();
         services.TryAddScoped<IVault, VaultManager>();

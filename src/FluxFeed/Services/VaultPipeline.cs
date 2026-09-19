@@ -118,10 +118,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <summary>
     /// Documents whose chunks have already been examined for the "document_id" scope tag by
     /// <see cref="BackfillDocumentScopeTagsAsync"/>. Keeps the one-time migration from re-reading
-    /// every document on every search; a document that failed to migrate is removed again so the
-    /// next search retries it.
+    /// every document on every search; a document that failed to migrate is forgotten again so the
+    /// next search retries it. A singleton under the library's registration, because this pipeline
+    /// is scoped and a field of its own would last one request.
     /// </summary>
-    private readonly ConcurrentDictionary<string, byte> _scopeTagCheckedDocuments = new(StringComparer.OrdinalIgnoreCase);
+    private readonly VaultScopeTagBackfillState _scopeTagBackfill;
 
     /// <summary>
     /// Value of the <c>chunk_kind</c> metadata tag on a chunk that holds an image description
@@ -167,8 +168,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IVaultImageEnricher? imageEnricher = null,
         IRAGSecurityPipeline? ragSecurityPipeline = null,
         IContextualEnrichmentService? contextualEnrichment = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        VaultScopeTagBackfillState? scopeTagBackfillState = null)
     {
+        _scopeTagBackfill = scopeTagBackfillState ?? new VaultScopeTagBackfillState();
         _git = git ?? throw new ArgumentNullException(nameof(git));
         _hasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -904,9 +907,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// the stored vector untouched.
     /// </para>
     /// <para>
-    /// Each document is examined at most once per pipeline instance, and a document whose first
-    /// chunk already carries the tag is skipped without any write, so a store written entirely by a
-    /// current release pays one read per document and nothing after that.
+    /// Each document is examined at most once per process (<see cref="VaultScopeTagBackfillState"/>),
+    /// and a document whose chunks already carry the tag is skipped without any write, so a store
+    /// written entirely by a current release pays one read per document and nothing after that.
     /// </para>
     /// </remarks>
     private async Task BackfillDocumentScopeTagsAsync(HashSet<string>? docIdSet, CancellationToken ct)
@@ -920,7 +923,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         foreach (var documentId in docIdSet)
         {
-            if (!_scopeTagCheckedDocuments.TryAdd(documentId, 0))
+            if (!_scopeTagBackfill.TryBegin(documentId))
                 continue;
 
             try
@@ -953,7 +956,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
                     // Discarding that answer is how a store-side no-op became invisible here for
                     // three releases: every search re-ran the same migration, reported success,
                     // and the scoped search kept returning nothing.
-                    _scopeTagCheckedDocuments.TryRemove(documentId, out _);
+                    _scopeTagBackfill.Forget(documentId);
                     failedDocuments++;
                     LogBackfillDocumentScopeTagsNotPersisted(_logger, written, untagged.Count, documentId);
                     continue;
@@ -968,7 +971,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 // it must also not be remembered as settled — drop it from the checked set so the
                 // next search tries again instead of silently serving that document's chunks as
                 // unreachable forever.
-                _scopeTagCheckedDocuments.TryRemove(documentId, out _);
+                _scopeTagBackfill.Forget(documentId);
                 failedDocuments++;
                 LogBackfillDocumentScopeTagsFailed(_logger, ex, documentId);
             }

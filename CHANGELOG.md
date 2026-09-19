@@ -21,6 +21,12 @@ Releases before 0.28.0 predate this file — see the git history.
   the vector leg, applied before fusion, as it was through 0.31.4 and still is on the native leg. The same holds
   when you register your own `IHybridSearchService`: the threshold now arrives as `VectorOptions.MinScore`, not as
   `MinFusedScore`, so such a consumer may see *more* results than before for the same threshold.
+- **A search no longer re-reads every document of the vault.** The one-time check for chunks that predate the
+  `document_id` scope tag remembered what it had examined on the pipeline, which is registered scoped — so a host
+  that opens a scope per request paid one `GetByDocumentIdAsync` per vault entry on every search (6 206 reads per
+  search on a 6 206-entry vault). What it has examined is now a singleton (`VaultScopeTagBackfillState`, registered
+  by `AddFileVault`): each document is read once per process. A pipeline you construct yourself keeps a private one
+  unless you pass the new optional constructor argument.
 - **A `Hybrid` search returns up to `TopK` results.** Since 0.32.0 each leg fetched its default of 10 candidates
   whatever `TopK` asked for, so a request for 25 returned about 15. Each leg now fetches `TopK * 2`.
 
