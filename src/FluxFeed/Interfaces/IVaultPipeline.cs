@@ -17,6 +17,14 @@ public interface IVaultPipeline
     bool SupportsKeywordIndex { get; }
 
     /// <summary>
+    /// Which keyword index the <see cref="VaultSearchStrategy.Hybrid"/> strategy fuses with the vector leg. When a
+    /// keyword search service is wired in, hybrid fuses over that same index, so a registered text analyzer and
+    /// keyword fields apply to keyword and hybrid alike. Only without one does it use the vector store's own
+    /// native hybrid.
+    /// </summary>
+    HybridKeywordLeg HybridKeywordLeg { get; }
+
+    /// <summary>
     /// Whether a GraphRAG service is wired into this pipeline. When false, a memorize call with
     /// <see cref="MemorizeOptions.EnableGraphRAG"/> == true will throw.
     /// </summary>
@@ -118,7 +126,7 @@ public interface IVaultPipeline
     /// <param name="topK">Maximum results to return.</param>
     /// <param name="minScore">Minimum score threshold.</param>
     /// <param name="strategy">Requested search strategy. A <see cref="VaultSearchStrategy.Hybrid"/>
-    /// request degrades to vector when no <c>IHybridSearchService</c> is available, and a
+    /// request degrades to vector when no keyword leg is available (see <see cref="HybridKeywordLeg"/>), and a
     /// <see cref="VaultSearchStrategy.Keyword"/> request degrades to vector when no
     /// <c>IKeywordSearchService</c> is available; the response reports the strategy actually
     /// executed.</param>
@@ -500,4 +508,22 @@ public sealed class IndexingFailedException : Exception
 
     /// <summary>Stage and scale of the failure.</summary>
     public IndexingFailure Failure { get; }
+}
+
+/// <summary>
+/// The keyword index a hybrid search fuses with the vector leg (<see cref="IVaultPipeline.HybridKeywordLeg"/>).
+/// </summary>
+public enum HybridKeywordLeg
+{
+    /// <summary>No keyword leg: a hybrid request runs as vector search and reports that.</summary>
+    None = 0,
+
+    /// <summary>
+    /// The registered keyword search service, the same index the keyword strategy searches and this pipeline writes
+    /// at ingestion. Fusion goes through the registered hybrid search service, or the stock one when none is registered.
+    /// </summary>
+    KeywordIndex = 1,
+
+    /// <summary>The vector store's own native hybrid (for example sqlite-vec with its FTS5 table).</summary>
+    Native = 2,
 }

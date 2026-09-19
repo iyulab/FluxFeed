@@ -726,10 +726,12 @@ public enum VaultSearchStrategy
     Vector = 0,
 
     /// <summary>
-    /// Hybrid vector + keyword (BM25) fused search via <c>IHybridSearchService</c>. Requires the
-    /// consumer to register <c>IHybridSearchService</c> in the same container; when it is absent the
-    /// request executes as <see cref="Vector"/> and the result reports that via
-    /// <see cref="VaultSearchResult.ExecutedStrategy"/> (no silent mismatch).
+    /// Hybrid vector + keyword fused search. When <c>IKeywordSearchService</c> is registered, the keyword leg is that
+    /// same index (the one the <see cref="Keyword"/> strategy searches and ingestion writes), fused through the
+    /// registered <c>IHybridSearchService</c> or the stock one; otherwise a vector store with native hybrid (e.g.
+    /// sqlite-vec + FTS5) fuses over its own keyword rows. With neither, the request executes as
+    /// <see cref="Vector"/> and the result reports that via <see cref="VaultSearchResult.ExecutedStrategy"/>
+    /// (no silent mismatch). <c>IVaultPipeline.HybridKeywordLeg</c> says which leg is in use.
     /// </summary>
     Hybrid = 1,
 
@@ -904,8 +906,8 @@ public sealed class VaultSearchResult
 
     /// <summary>
     /// The strategy actually executed. May differ from <see cref="RequestedStrategy"/> when a
-    /// <see cref="VaultSearchStrategy.Hybrid"/> request degrades to vector because no
-    /// <c>IHybridSearchService</c> is registered. Consumers should report this value (not the request)
+    /// <see cref="VaultSearchStrategy.Hybrid"/> request degrades to vector because no keyword leg is
+    /// available (no <c>IKeywordSearchService</c>, no hybrid service, no native hybrid store). Consumers should report this value (not the request)
     /// as the effective strategy.
     /// </summary>
     public VaultSearchStrategy ExecutedStrategy { get; init; } = VaultSearchStrategy.Vector;

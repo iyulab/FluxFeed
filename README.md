@@ -465,16 +465,22 @@ degenerates to vector-only. Check `IVaultPipeline.SupportsKeywordIndex` to confi
 it is on the interface, so holding the pipeline as `IVaultPipeline` is enough (`SupportsGraphRAG`
 reports the GraphRAG leg the same way).
 
-### Hybrid search — store-native, or `IHybridSearchService`
+### Hybrid search — over the keyword index, or store-native
 
-`VaultSearchOptions.SearchStrategy = VaultSearchStrategy.Hybrid` is honored when either the vector
-store fuses natively (`INativeHybridSearch` — `FluxIndex.Storage.SQLite`'s sqlite-vec store does,
-over the FTS5 rows it writes itself at ingestion; preferred, no second index) or an
-`IHybridSearchService` is registered. A `PathScope` is pushed into the native path as a filter and
-applied to both legs before fusion, so a scoped request gets the fused ranking of the in-scope
-chunks (FluxIndex.Core 0.32.0+). Otherwise the query runs as vector search and says so via
-`VaultSearchResult.ExecutedStrategy` — compare it against `RequestedStrategy` rather than assuming
-the request was honored.
+`VaultSearchOptions.SearchStrategy = VaultSearchStrategy.Hybrid` fuses the vector leg with a keyword leg, chosen
+once from what is registered — `IVaultPipeline.HybridKeywordLeg` reports it and the pipeline logs it once:
+
+| Registered | Keyword leg | |
+|---|---|---|
+| `IKeywordSearchService` | `KeywordIndex` | the same index the `Keyword` strategy searches and ingestion writes, fused through the registered `IHybridSearchService` or the stock `HybridSearchService` — a registered `ITextAnalyzer` and `KeywordFieldOptions` apply to hybrid too |
+| no keyword service, vector store with `INativeHybridSearch` | `Native` | the store fuses over keyword rows it wrote itself (`FluxIndex.Storage.SQLite`'s sqlite-vec store: FTS5, its own tokenizer) |
+| neither | `None` | runs as vector search |
+
+A `PathScope` reaches both legs before fusion either way, so a scoped request gets the fused ranking of the
+in-scope chunks. When hybrid is not available the query runs as vector search and says so via
+`VaultSearchResult.ExecutedStrategy` — compare it against `RequestedStrategy` rather than assuming the request was
+honored. The keyword-index leg fuses with `HybridSearchOptions`' defaults (relative score fusion, vector 0.7 /
+keyword 0.3); the native leg uses the store's own weighting.
 
 ### Keyword-only search — `VaultSearchStrategy.Keyword`
 

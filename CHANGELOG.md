@@ -12,6 +12,25 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.32.0]
+
+### Changed
+- **Hybrid search fuses over your keyword index when you register one, so a text analyzer and keyword fields apply to
+  hybrid too.** With `IKeywordSearchService` registered, a `Hybrid` request now fuses the vector leg with that same
+  index — the one the `Keyword` strategy searches and ingestion writes — through the registered `IHybridSearchService`,
+  or the stock `HybridSearchService` when none is registered. Before, a vector store with native hybrid (sqlite-vec +
+  FTS5) always won, so hybrid ran over a second keyword table with its own tokenizer: a registered `ITextAnalyzer`
+  (for example `CjkBigramTextAnalyzer`) and `KeywordFieldOptions` reached the keyword strategy only. Native hybrid is
+  still used when no keyword service is registered. The document scope reaches both legs before fusion either way.
+  **Scores change** for consumers with both registered: fusion is `HybridSearchOptions`' (relative score, vector 0.7 /
+  keyword 0.3) rather than the store's, so re-check any `MinScore` tuned against hybrid results.
+
+### Added
+- **`IVaultPipeline.HybridKeywordLeg` reports which keyword index hybrid uses** (`KeywordIndex`, `Native` or `None`),
+  and the pipeline logs it once at Information. **Breaking** for code that implements `IVaultPipeline` itself.
+
+---
+
 ## [0.31.4]
 
 ### Changed

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using FluxGuard.Remote.RAG;
 using FluxIndex.Core.Application.Interfaces;
+using FluxIndex.Core.Services;
 using FluxIndex.Core.Domain.Entities;
 using FluxFeed.Adapters;
 using FluxFeed.Domain.Entities;
@@ -9,6 +10,7 @@ using FluxFeed.Domain.Enums;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace FluxFeed.Services;
@@ -89,6 +91,20 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private readonly IVectorStore? _vectorStore;
     private readonly IEmbeddingService? _embeddingService;
     private readonly IHybridSearchService? _hybridSearch;
+
+    // Which keyword index hybrid fuses with the vector leg, decided once from what is wired in. When a keyword
+    // service is registered this pipeline writes it at ingestion, so hybrid fuses over that same index (through
+    // _hybridSearch, which is the registered service or the stock one built over the same parts) — otherwise a
+    // registered text analyzer and keyword fields would reach the keyword strategy only, while hybrid ran over a
+    // second index with its own tokenizer (the store's native FTS).
+    private readonly HybridKeywordLeg _hybridKeywordLeg;
+
+    // Logs for the stock HybridSearchService built above when no hybrid service is registered.
+    private readonly ILoggerFactory? _loggerFactory;
+
+    // One log line per distinct leg per process: the pipeline is scoped, so a per-instance line would repeat on
+    // every request.
+    private static readonly ConcurrentDictionary<string, byte> LoggedHybridLegs = new(StringComparer.Ordinal);
     private readonly IGraphRAGService? _graphRAGService;
     private readonly IKeywordSearchService? _keywordSearchService;
     private readonly IVaultImageEnricher? _imageEnricher;
@@ -126,6 +142,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// </summary>
     public bool SupportsKeywordIndex => _keywordSearchService != null;
 
+    /// <inheritdoc />
+    public HybridKeywordLeg HybridKeywordLeg => _hybridKeywordLeg;
+
     /// <summary>
     /// Whether contextual enrichment will run for text chunks: a <see cref="IContextualEnrichmentService"/> (FluxIndex.Core port) is wired in
     /// <em>and</em> <see cref="FileVaultOptions.ContextualEnrichment"/> is enabled. Either one alone is a no-op.
@@ -147,7 +166,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IKeywordSearchService? keywordSearchService = null,
         IVaultImageEnricher? imageEnricher = null,
         IRAGSecurityPipeline? ragSecurityPipeline = null,
-        IContextualEnrichmentService? contextualEnrichment = null)
+        IContextualEnrichmentService? contextualEnrichment = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _git = git ?? throw new ArgumentNullException(nameof(git));
         _hasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
@@ -161,9 +181,38 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // The store's physical layout may depend on the embedding identity; bind before the first
         // store access so consumers never have to call BindIdentity themselves.
         VectorStoreIdentityBinding.EnsureBound(_vectorStore, _embeddingService);
-        _hybridSearch = hybridSearch;
         _graphRAGService = graphRAGService;
         _keywordSearchService = keywordSearchService;
+        _loggerFactory = loggerFactory;
+
+        if (keywordSearchService != null && vectorStore != null && embeddingService != null)
+        {
+            _hybridSearch = hybridSearch ?? new HybridSearchService(
+                vectorStore, keywordSearchService, embeddingService,
+                (_loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<HybridSearchService>());
+            _hybridKeywordLeg = HybridKeywordLeg.KeywordIndex;
+        }
+        else if (vectorStore is INativeHybridSearch)
+        {
+            // No keyword index of ours: the store's native hybrid fuses over the keyword rows it wrote itself,
+            // while a separately registered hybrid service would search a keyword index nothing fills.
+            _hybridSearch = hybridSearch;
+            _hybridKeywordLeg = HybridKeywordLeg.Native;
+        }
+        else
+        {
+            _hybridSearch = hybridSearch;
+            _hybridKeywordLeg = hybridSearch != null ? HybridKeywordLeg.KeywordIndex : HybridKeywordLeg.None;
+        }
+
+        var legDescription = _hybridKeywordLeg switch
+        {
+            HybridKeywordLeg.KeywordIndex => $"keyword index ({(keywordSearchService ?? (object?)_hybridSearch)!.GetType().Name})",
+            HybridKeywordLeg.Native => $"native ({vectorStore!.GetType().Name})",
+            _ => "none",
+        };
+        if (LoggedHybridLegs.TryAdd(legDescription, 0))
+            LogHybridKeywordLeg(_logger, legDescription);
         _imageEnricher = imageEnricher;
         _ragSecurityPipeline = ragSecurityPipeline;
         _contextualEnrichment = contextualEnrichment;
@@ -946,21 +995,18 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         if (strategy == VaultSearchStrategy.Hybrid)
         {
-            // Prefer the vector store's native hybrid (vec + the keyword rows the store itself wrote
-            // at ingestion, e.g. chunk_fts) over a separately-registered IHybridSearchService: the
-            // native path needs no second index and no reindex. A document-id scope is pushed into
-            // it as a metadata filter, which the store applies to both legs before fusion — so a
-            // scoped request gets the fused ranking of the in-scope chunks, not a fused ranking of
-            // everything filtered afterwards (FluxFeed docket #214: until the interface carried a
-            // filter, every scoped Hybrid request here silently ran as Vector).
-            if (_vectorStore is INativeHybridSearch nativeHybrid)
+            // The leg was decided at construction (see _hybridKeywordLeg). Native hybrid is used only when no
+            // keyword index of ours is wired in; either way a document-id scope reaches both legs before fusion —
+            // as a metadata filter on the native call, or as HybridSearchOptions.Filters — so a scoped request gets
+            // the fused ranking of the in-scope chunks, not a fused ranking of everything filtered afterwards.
+            if (_hybridKeywordLeg == HybridKeywordLeg.Native && _vectorStore is INativeHybridSearch nativeHybrid)
             {
                 var nativeResults = await NativeHybridSearchAsync(nativeHybrid, query, docIdSet, topK, minScore, ct);
                 LogSearchResults(_logger, query, nativeResults.Count);
                 return new VaultPipelineSearchResponse(nativeResults, VaultSearchStrategy.Hybrid);
             }
 
-            if (_hybridSearch != null)
+            if (_hybridKeywordLeg == HybridKeywordLeg.KeywordIndex && _hybridSearch != null)
             {
                 var hybridResults = await HybridSearchAsync(query, docIdSet, topK, minScore, ct);
                 LogSearchResults(_logger, query, hybridResults.Count);
@@ -2024,6 +2070,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogNoVectorStoreCannotSearch(ILogger logger);
     [LoggerMessage(Level = LogLevel.Information, Message = "Search for '{Query}' returned {Count} results")]
     private static partial void LogSearchResults(ILogger logger, string query, int count);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Hybrid search keyword leg: {Leg}")]
+    private static partial void LogHybridKeywordLeg(ILogger logger, string leg);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Hybrid search requested but IHybridSearchService is not registered; executing vector search (reported as ExecutedStrategy=Vector)")]
     private static partial void LogHybridUnavailableFallback(ILogger logger);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Keyword search requested but IKeywordSearchService is not registered; executing vector search (reported as ExecutedStrategy=Vector)")]

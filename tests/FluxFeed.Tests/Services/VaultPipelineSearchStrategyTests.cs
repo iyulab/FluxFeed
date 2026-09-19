@@ -215,6 +215,92 @@ public class VaultPipelineSearchStrategyTests
         response.Results.Should().ContainSingle().Which.Content.Should().Be("fts hit");
     }
 
+    // The keyword leg of hybrid is the registered keyword index whenever one is wired in: the pipeline writes it at
+    // ingestion, so the population gap that made the store's native hybrid preferable does not exist, and fusing
+    // over the store's own FTS rows would bypass the registered text analyzer and keyword fields.
+
+    private static INativeHybridSearch NativeStoreReturning(out IVectorStore store)
+    {
+        store = Substitute.For<IVectorStore, INativeHybridSearch>();
+        var native = (INativeHybridSearch)store;
+        native.HybridSearchAsync(
+                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>
+            {
+                new() { Chunk = new DocumentChunk { Id = "n", DocumentId = "doc-native", Content = "native fused", ChunkIndex = 0 }, FusedScore = 0.99 }
+            });
+        store.SearchAsync(Arg.Any<float[]>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<DocumentChunk> { new() { Id = "kw", DocumentId = "doc-kw", Content = "indexed", ChunkIndex = 0, Score = 0.8f } });
+        return native;
+    }
+
+    private static IKeywordSearchService KeywordIndexReturning()
+    {
+        var keyword = Substitute.For<IKeywordSearchService>();
+        keyword.SearchAsync(Arg.Any<string>(), Arg.Any<KeywordSearchOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<KeywordSearchResult>
+            {
+                new() { Chunk = new DocumentChunk { Id = "kw", DocumentId = "doc-kw", Content = "indexed", ChunkIndex = 0 }, Score = 3.0 }
+            });
+        return keyword;
+    }
+
+    private VaultPipeline CreatePipelineWith(IVectorStore store, IHybridSearchService? hybrid, IKeywordSearchService? keyword)
+    {
+        _embedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new float[] { 0.1f, 0.2f, 0.3f, 0.4f });
+        return new VaultPipeline(
+            _git, _hasher, _storage, NullLogger<VaultPipeline>.Instance,
+            options: null, extractor: null, chunker: null,
+            vectorStore: store, embeddingService: _embedding, hybridSearch: hybrid, keywordSearchService: keyword);
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_WithKeywordIndex_FusesOverIt_NotTheStoreNativeHybrid()
+    {
+        var native = NativeStoreReturning(out var store);
+        var keyword = KeywordIndexReturning();
+        var pipeline = CreatePipelineWith(store, hybrid: null, keyword);
+
+        var response = await pipeline.SearchAsync("q", documentIds: new[] { "doc-kw" }, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
+
+        pipeline.HybridKeywordLeg.Should().Be(HybridKeywordLeg.KeywordIndex);
+        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
+        response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("doc-kw");
+        await native.DidNotReceive().HybridSearchAsync(
+            Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>());
+        // The stock fusion runs both legs over our index and store, each scoped before fusion.
+        await keyword.Received().SearchAsync("q", Arg.Is<KeywordSearchOptions?>(o => o != null && o.MetadataFilter != null && o.MetadataFilter.ContainsKey("document_id")), Arg.Any<CancellationToken>());
+        await store.Received().SearchAsync(Arg.Any<float[]>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Is<Dictionary<string, object>?>(f => f != null && f.ContainsKey("document_id")), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_WithKeywordIndex_UsesTheRegisteredHybridService()
+    {
+        NativeStoreReturning(out var store);
+        var hybrid = Substitute.For<IHybridSearchService>();
+        hybrid.SearchAsync(Arg.Any<string>(), Arg.Any<HybridSearchOptions?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>
+            {
+                new() { Chunk = new DocumentChunk { Id = "h", DocumentId = "doc-hybrid", Content = "registered fusion", ChunkIndex = 0 }, FusedScore = 0.7 }
+            });
+        var pipeline = CreatePipelineWith(store, hybrid, KeywordIndexReturning());
+
+        var response = await pipeline.SearchAsync("q", documentIds: null, topK: 5, minScore: 0f, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
+
+        pipeline.HybridKeywordLeg.Should().Be(HybridKeywordLeg.KeywordIndex);
+        response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("doc-hybrid");
+    }
+
+    [Fact]
+    public void HybridKeywordLeg_ReportsNative_WithoutAKeywordIndex_AndNone_WithNothing()
+    {
+        NativeStoreReturning(out var store);
+        CreatePipelineWith(store, hybrid: Substitute.For<IHybridSearchService>(), keyword: null)
+            .HybridKeywordLeg.Should().Be(HybridKeywordLeg.Native, "a hybrid service without our keyword index would search an index nothing fills");
+        CreatePipeline(hybrid: null).HybridKeywordLeg.Should().Be(HybridKeywordLeg.None);
+    }
+
     // FluxFeed docket #172 (VectorSearchAsync/HybridSearchAsync/KeywordSearchAsync never pushed a
     // filter into the underlying store, so a document-id scope was only ever applied as a client-side
     // Where() over an unscoped candidate window — silent-empty in any vault where unrelated content
