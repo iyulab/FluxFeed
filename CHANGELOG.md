@@ -12,6 +12,25 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.33.1]
+
+### Fixed
+- **A `MinScore` on a `Hybrid` search no longer empties the result (regression in 0.32.0).** With a keyword service
+  registered, 0.32.0 compared `VaultSearchOptions.MinScore` with the fused score, which is rank-sized (about 0.016
+  at best), so any similarity-sized threshold — `0.3`, say — dropped every hit. It is again a similarity floor on
+  the vector leg, applied before fusion, as it was through 0.31.4 and still is on the native leg. The same holds
+  when you register your own `IHybridSearchService`: the threshold now arrives as `VectorOptions.MinScore`, not as
+  `MinFusedScore`, so such a consumer may see *more* results than before for the same threshold.
+- **A `Hybrid` search returns up to `TopK` results.** Since 0.32.0 each leg fetched its default of 10 candidates
+  whatever `TopK` asked for, so a request for 25 returned about 15. Each leg now fetches `TopK * 2`.
+
+### Changed
+- Correction to the 0.32.0 note below: the keyword-index leg does not fuse by relative score at 0.7 / 0.3. It
+  fuses by weighted reciprocal rank with weights chosen from the query's length — see "Hybrid" in the README.
+  Hybrid scores were rank-sized before 0.32.0 as well; only the weights changed.
+
+---
+
 ## [0.33.0]
 
 ### Changed
@@ -42,8 +61,8 @@ Releases before 0.28.0 predate this file — see the git history.
   FTS5) always won, so hybrid ran over a second keyword table with its own tokenizer: a registered `ITextAnalyzer`
   (for example `CjkBigramTextAnalyzer`) and `KeywordFieldOptions` reached the keyword strategy only. Native hybrid is
   still used when no keyword service is registered. The document scope reaches both legs before fusion either way.
-  **Scores change** for consumers with both registered: fusion is `HybridSearchOptions`' (relative score, vector 0.7 /
-  keyword 0.3) rather than the store's, so re-check any `MinScore` tuned against hybrid results.
+  **Scores change** for consumers with both registered: fusion is `HybridSearchService`'s rather than the store's.
+  (This note first said "relative score, vector 0.7 / keyword 0.3"; that was wrong — see 0.33.1.)
 
 ### Added
 - **`IVaultPipeline.HybridKeywordLeg` reports which keyword index hybrid uses** (`KeywordIndex`, `Native` or `None`),

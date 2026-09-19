@@ -1125,9 +1125,20 @@ public sealed partial class VaultPipeline : IVaultPipeline
     {
         var options = new FluxIndex.Core.Domain.Models.HybridSearchOptions
         {
-            // Over-fetch so document-id filtering does not starve the result set.
+            // Over-fetch so document-id filtering does not starve the result set. The service reads the
+            // candidate count per leg, not from MaxResults, so each leg needs it too — left at their
+            // default of 10, two legs fuse to at most 20 rows whatever topK asks for.
             MaxResults = topK * 2,
-            MinFusedScore = minScore
+            VectorOptions = new FluxIndex.Core.Domain.Models.VectorSearchOptions
+            {
+                MaxResults = topK * 2,
+                // MinScore is a similarity floor on the vector leg, applied before fusion — the same
+                // meaning it has for the Vector strategy and for the native hybrid path. It is not a
+                // fused-score floor: fused scores are rank-sized (about 0.01), so a similarity-sized
+                // threshold there would drop every hit.
+                MinScore = minScore
+            },
+            SparseOptions = new FluxIndex.Core.Domain.Models.SparseSearchOptions { MaxResults = topK * 2 }
         };
         if (BuildDocScopeFilter(docIdSet) is { } scopeFilter)
             options.Filters = scopeFilter;

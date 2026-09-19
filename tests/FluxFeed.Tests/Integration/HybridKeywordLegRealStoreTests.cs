@@ -63,7 +63,74 @@ public sealed class HybridKeywordLegRealStoreTests : IDisposable
             "only the bigram-analyzed keyword index matches 월세 inside 월세공제; the store's FTS5 does not");
     }
 
-    private ServiceProvider BuildStack()
+    /// <summary>
+    /// <c>MinScore</c> under Hybrid is a similarity floor on the vector leg — on both keyword legs. A
+    /// similarity-sized threshold compared with the fused score (rank-sized, about 0.01) drops every hit, and an
+    /// assertion of the form "every returned score is above the threshold" passes over that empty list; so this
+    /// asserts the hit is there, and that the threshold did filter something.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Hybrid_MinScore_IsAVectorSimilarityFloor_NotAFusedScoreFloor(bool withKeywordIndex)
+    {
+        await using var provider = BuildStack(withKeywordIndex);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        scope.ServiceProvider.GetRequiredService<IVaultPipeline>().HybridKeywordLeg
+            .Should().Be(withKeywordIndex ? HybridKeywordLeg.KeywordIndex : HybridKeywordLeg.Native);
+        await MemorizeAllAsync(vault);
+
+        const string query = "rollback command health check";
+        // sqlite-vec similarity is (cosine + 1) / 2: an unrelated chunk scores 0.5, the matching one about 0.69.
+        const float threshold = 0.6f;
+        var ct = TestContext.Current.CancellationToken;
+
+        // Positive control: the vector leg has a hit above the threshold, and hits below it.
+        var vectorAll = await vault.SearchAsync(query, new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Vector, TopK = 10 }, ct);
+        var similarities = string.Join(", ", vectorAll.Items.Select(i => $"{Path.GetFileName(i.SourcePath)}={i.Score:F3}"));
+        vectorAll.Items.Any(i => i.Score >= threshold).Should().BeTrue($"the control needs a vector hit above the threshold ({similarities})");
+        vectorAll.Items.Any(i => i.Score < threshold).Should().BeTrue($"the control needs a vector hit below the threshold ({similarities})");
+
+        var unfiltered = await vault.SearchAsync(query, new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Hybrid, TopK = 10 }, ct);
+        var filtered = await vault.SearchAsync(query, new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Hybrid, TopK = 10, MinScore = threshold }, ct);
+
+        filtered.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
+        filtered.Items.Should().NotBeEmpty("a vector hit above the threshold exists, so the threshold must not empty the result");
+        filtered.Items[0].SourcePath.Should().EndWith("deploy.md");
+        filtered.Items.Count.Should().BeLessThan(unfiltered.Items.Count, "the threshold drops the vector hits below it");
+    }
+
+    [Fact]
+    public async Task Hybrid_WithAKeywordIndex_ReturnsTopKResults_WhenTopKExceedsTheLegDefault()
+    {
+        for (var i = 0; i < 30; i++)
+            File.WriteAllText(Path.Combine(_docs, $"note-{i:D2}.md"), $"# Note {i}\n\nquarterly budget review item{i:D2} for the finance team.\n");
+
+        await using var provider = BuildStack();
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        await MemorizeAllAsync(vault);
+
+        var result = await vault.SearchAsync("quarterly budget review",
+            new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Hybrid, TopK = 25 }, TestContext.Current.CancellationToken);
+
+        result.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
+        result.Items.Should().HaveCount(25, "30 chunks match and 25 were asked for");
+    }
+
+    private async Task MemorizeAllAsync(IVault vault)
+    {
+        foreach (var file in Directory.GetFiles(_docs, "*.md"))
+        {
+            var entry = await vault.MemorizeAsync(file, waitForCompletion: true, TestContext.Current.CancellationToken);
+            entry.Stage.Should().Be(ProcessingStage.Memorized, because: $"{Path.GetFileName(file)}: {entry.LastError}");
+        }
+    }
+
+    private ServiceProvider BuildStack(bool withKeywordIndex = true)
     {
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
@@ -76,10 +143,13 @@ public sealed class HybridKeywordLegRealStoreTests : IDisposable
         });
         services.AddSingleton<IEmbeddingService>(_embedder);
         services.AddSingleton<ITextAnalyzer, CjkBigramTextAnalyzer>();
-        services.AddSingleton<IKeywordSearchService>(sp => new SQLiteKeywordSearchService(
-            $"Data Source={dbPath}",
-            sp.GetRequiredService<ILogger<SQLiteKeywordSearchService>>(),
-            sp.GetRequiredService<ITextAnalyzer>()));
+        if (withKeywordIndex)
+        {
+            services.AddSingleton<IKeywordSearchService>(sp => new SQLiteKeywordSearchService(
+                $"Data Source={dbPath}",
+                sp.GetRequiredService<ILogger<SQLiteKeywordSearchService>>(),
+                sp.GetRequiredService<ITextAnalyzer>()));
+        }
         services.AddFileVaultWithFluxIndex(o =>
         {
             o.VaultBasePath = Path.Combine(_root, ".vault");

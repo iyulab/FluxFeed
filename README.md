@@ -479,8 +479,16 @@ once from what is registered — `IVaultPipeline.HybridKeywordLeg` reports it an
 A `PathScope` reaches both legs before fusion either way, so a scoped request gets the fused ranking of the
 in-scope chunks. When hybrid is not available the query runs as vector search and says so via
 `VaultSearchResult.ExecutedStrategy` — compare it against `RequestedStrategy` rather than assuming the request was
-honored. The keyword-index leg fuses with `HybridSearchOptions`' defaults (relative score fusion, vector 0.7 /
-keyword 0.3); the native leg uses the store's own weighting.
+honored.
+
+Both legs fuse by weighted reciprocal rank, so **hybrid scores are rank-sized** — about 0.016 for a chunk both legs
+rank first, never near 1. On the keyword-index leg `HybridSearchService` picks the weights from the query's length
+(one or two terms: vector 0.3 / keyword 0.7; three to five: 0.6 / 0.4; longer: 0.8 / 0.2); the native leg uses the
+store's own weighting. FluxFeed does not expose these weights yet.
+
+`VaultSearchOptions.MinScore` under `Hybrid` is a **similarity floor on the vector leg, applied before fusion** —
+the same meaning it has for `Vector`, so one similarity-sized value works whichever of the two runs. It is never
+compared with the fused score. A chunk the keyword leg matches is fused in whatever its similarity.
 
 ### Keyword-only search — `VaultSearchStrategy.Keyword`
 

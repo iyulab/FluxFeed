@@ -759,6 +759,14 @@ public sealed class VaultSearchOptions
     /// <summary>
     /// Minimum score threshold for results.
     /// </summary>
+    /// <remarks>
+    /// The threshold is on the strategy's own relevance score: cosine similarity for
+    /// <see cref="VaultSearchStrategy.Vector"/>, the BM25 score for <see cref="VaultSearchStrategy.Keyword"/>.
+    /// For <see cref="VaultSearchStrategy.Hybrid"/> it is a similarity floor on the vector leg, applied
+    /// before fusion — one similarity-sized value therefore means the same thing whether the request runs
+    /// as vector or as hybrid. It is not compared with the fused score, which is rank-sized (about 0.01).
+    /// A chunk the keyword leg matches is still fused in, whatever its similarity.
+    /// </remarks>
     public float MinScore { get; init; }
 
     /// <summary>
