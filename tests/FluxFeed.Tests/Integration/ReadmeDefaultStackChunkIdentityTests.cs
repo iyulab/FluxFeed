@@ -457,9 +457,7 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         if (withKeywordIndex)
         {
             // The README's keyword leg on the same database, the way FluxIndexContext wires it.
-            services.AddSingleton<IKeywordSearchService>(sp => new SQLiteKeywordSearchService(
-                $"Data Source={databasePath}",
-                sp.GetRequiredService<ILogger<SQLiteKeywordSearchService>>()));
+            services.AddSQLiteKeywordSearch();
         }
         services.AddSingleton<IEmbeddingService>(_embedder);
         services.AddFileVaultWithFluxIndex(o =>

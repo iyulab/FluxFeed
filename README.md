@@ -465,6 +465,10 @@ degenerates to vector-only. Check `IVaultPipeline.SupportsKeywordIndex` to confi
 it is on the interface, so holding the pipeline as `IVaultPipeline` is enough (`SupportsGraphRAG`
 reports the GraphRAG leg the same way).
 
+On the SQLite stack, `services.AddSQLiteKeywordSearch()` (`FluxIndex.Storage.SQLite` 0.45.0) registers one in the
+vector store's database and picks up a registered `ITextAnalyzer` and `KeywordFieldOptions`;
+`AddPostgreSQLKeywordSearch(connectionString)` does the same for PostgreSQL.
+
 ### Hybrid search — over the keyword index, or store-native
 
 `VaultSearchOptions.SearchStrategy = VaultSearchStrategy.Hybrid` fuses the vector leg with a keyword leg, chosen

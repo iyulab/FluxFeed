@@ -12,6 +12,16 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.33.2]
+
+### Changed
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.7 -> 0.45.0, `FluxIndex.Storage.SQLite` 0.44.7 -> 0.45.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- README: how to register the keyword index on the SQLite stack (`AddSQLiteKeywordSearch`, FluxIndex 0.45.0).
+  FluxIndex 0.45.0 also makes every hybrid leg fetch at least as many candidates as the fused list returns, for any
+  caller of `HybridSearchService`.
+
+---
+
 ## [0.33.1]
 
 ### Fixed

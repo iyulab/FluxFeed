@@ -145,10 +145,8 @@ public sealed class HybridKeywordLegRealStoreTests : IDisposable
         services.AddSingleton<ITextAnalyzer, CjkBigramTextAnalyzer>();
         if (withKeywordIndex)
         {
-            services.AddSingleton<IKeywordSearchService>(sp => new SQLiteKeywordSearchService(
-                $"Data Source={dbPath}",
-                sp.GetRequiredService<ILogger<SQLiteKeywordSearchService>>(),
-                sp.GetRequiredService<ITextAnalyzer>()));
+            // In the vector store's database, with the analyzer registered above.
+            services.AddSQLiteKeywordSearch();
         }
         services.AddFileVaultWithFluxIndex(o =>
         {
