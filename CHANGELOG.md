@@ -14,6 +14,9 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [0.33.0]
 
+### Changed
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.5 -> 0.44.6, `FluxIndex.Storage.SQLite` 0.44.5 -> 0.44.6 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+
 ### Fixed
 - **`FileVaultOptions.MaxFileSizeMB` is enforced.** It was declared (default 100 MB, documented as "larger files will be
   skipped") and read by nothing, so files of any size were extracted and indexed. A folder scan now skips a file over
