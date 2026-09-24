@@ -5,6 +5,7 @@ using FluxFeed.Domain.Enums;
 using FluxFeed.Domain.Exceptions;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
+using FluxIndex.Core.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -24,6 +25,7 @@ public sealed partial class VaultManager : IVault
     private readonly PatternMatcher _patternMatcher;
     private readonly ILogger<VaultManager> _logger;
     private readonly FileVaultOptions _options;
+    private readonly IReranker? _reranker;
 
     private readonly ConcurrentDictionary<Guid, WatchedFolder> _watchedFolders = new();
     private DateTimeOffset? _lastSyncTime;
@@ -38,7 +40,8 @@ public sealed partial class VaultManager : IVault
         IFileWatcherService fileWatcher,
         IVaultStorageService storage,
         ILogger<VaultManager> logger,
-        IOptions<FileVaultOptions> options)
+        IOptions<FileVaultOptions> options,
+        IReranker? reranker = null)
     {
         _hasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
         _git = git ?? throw new ArgumentNullException(nameof(git));
@@ -48,6 +51,7 @@ public sealed partial class VaultManager : IVault
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _reranker = reranker;
         _patternMatcher = new PatternMatcher();
 
         VaultBasePath = _options.VaultBasePath ?? _options.VaultDirectoryName;
@@ -1318,6 +1322,20 @@ public sealed partial class VaultManager : IVault
         var sw = Stopwatch.StartNew();
         options ??= VaultSearchOptions.All();
 
+        // A request the vault cannot honour is a setup error, not an empty result.
+        if (options.UseReranker && _reranker == null)
+        {
+            throw new InvalidOperationException(
+                "VaultSearchOptions.UseReranker is set but no IReranker is registered. Register one " +
+                "(AddLMSupplyReranker, AddOpenAICompatibleReranker, or your own IReranker) or leave UseReranker unset.");
+        }
+
+        // The reranker orders candidates, so retrieval fetches more than the caller gets back
+        // (the same pool as FluxIndex SearchOptions.RerankCandidateCount).
+        var fetchCount = options.UseReranker
+            ? Math.Max(options.TopK, options.RerankCandidateCount ?? options.TopK * 3)
+            : options.TopK;
+
         try
         {
             // Every entry whose rows are in the index - not only Stage == Memorized. An entry whose
@@ -1397,11 +1415,16 @@ public sealed partial class VaultManager : IVault
 
             // Execute pipeline search with the requested strategy
             var pipelineResponse = await _pipeline.SearchAsync(
-                query, documentIds, options.TopK, options.MinScore, options.SearchStrategy, ct);
+                query, documentIds, fetchCount, options.MinScore, options.SearchStrategy, ct);
+
+            var ranked = options.UseReranker
+                ? await RerankAsync(query, pipelineResponse.Results, options.TopK, ct)
+                : pipelineResponse.Results.Select(r => (Result: r, Score: r.Score, RetrievalScore: (float?)null)).ToList();
 
             // Map to VaultSearchResultItem
-            var items = pipelineResponse.Results.Select(r =>
+            var items = ranked.Select(x =>
             {
+                var r = x.Result;
                 entriesDict.TryGetValue(r.DocumentId, out var entry);
                 return new VaultSearchResultItem
                 {
@@ -1410,7 +1433,8 @@ public sealed partial class VaultManager : IVault
                     FileName = entry?.FileName ?? Path.GetFileName(r.DocumentId),
                     ChunkIndex = r.ChunkIndex,
                     Content = options.IncludeContent ? r.Content : null,
-                    Score = r.Score,
+                    Score = x.Score,
+                    RetrievalScore = x.RetrievalScore,
                     Metadata = options.IncludeMetadata ? r.Metadata : null
                 };
             }).ToList();
@@ -1442,6 +1466,50 @@ public sealed partial class VaultManager : IVault
             LogSearchFailed(_logger, ex, query);
             return VaultSearchResult.Error(query, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Orders the retrieved candidates with the registered reranker and keeps <paramref name="topK"/>.
+    /// The score becomes the reranker's; the retrieval score is kept alongside.
+    /// </summary>
+    private async Task<List<(PipelineSearchResult Result, float Score, float? RetrievalScore)>> RerankAsync(
+        string query,
+        IReadOnlyList<PipelineSearchResult> results,
+        int topK,
+        CancellationToken ct)
+    {
+        var ranked = new List<(PipelineSearchResult Result, float Score, float? RetrievalScore)>(Math.Min(topK, results.Count));
+        if (results.Count == 0)
+            return ranked;
+
+        var byId = new Dictionary<string, PipelineSearchResult>(StringComparer.Ordinal);
+        var candidates = new List<RetrievalCandidate>(results.Count);
+        for (var i = 0; i < results.Count; i++)
+        {
+            var r = results[i];
+            if (!byId.TryAdd(r.ChunkId, r))
+                continue;
+            candidates.Add(new RetrievalCandidate
+            {
+                Id = r.ChunkId,
+                DocumentId = r.DocumentId,
+                ChunkId = r.ChunkId,
+                Content = r.Content,
+                InitialScore = r.Score,
+                InitialRank = i + 1,
+                Metadata = r.Metadata,
+            });
+        }
+
+        var reranked = await _reranker!.RerankAsync(query, candidates, new RerankOptions { TopN = topK }, ct);
+        foreach (var item in reranked.OrderBy(x => x.NewRank).ThenByDescending(x => x.RerankScore))
+        {
+            if (ranked.Count == topK || !byId.Remove(item.Id, out var result))
+                continue;
+            ranked.Add((result, item.RerankScore, result.Score));
+        }
+
+        return ranked;
     }
 
     #endregion

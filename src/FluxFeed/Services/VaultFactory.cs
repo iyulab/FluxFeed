@@ -216,8 +216,10 @@ public sealed partial class VaultFactory : IVaultFactory
             optionsWrapper);
 
         // Create VaultManager with mixed shared/tenant-specific services
+        // Same rule as the pipeline: optional services (the reranker) come from the tenant's scope.
         var managerLogger = _loggerFactory.CreateLogger<VaultManager>();
-        var vault = new VaultManager(
+        var vault = ActivatorUtilities.CreateInstance<VaultManager>(
+            scoped,
             _sharedHasher,
             _sharedGitService,
             pipeline,

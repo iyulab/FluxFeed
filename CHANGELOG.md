@@ -12,6 +12,19 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.34.0]
+
+### Added
+- **Vault search can rerank.** `VaultSearchOptions.UseReranker = true` hands a candidate pool to the registered
+  FluxIndex `IReranker` and returns `TopK` of its order; `RerankCandidateCount` sets the pool (default `TopK * 3`,
+  never below `TopK`). Same names and meaning as FluxIndex `SearchOptions`, so a vault search and an SDK search over
+  one index rerank the same way. `VaultSearchResultItem.Score` is then the reranker's score and the new
+  `RetrievalScore` keeps the retrieval score; `MinScore` still filters on the retrieval score, before reranking.
+  Setting `UseReranker` with no reranker registered throws `InvalidOperationException`. Off by default.
+- Tenant vaults from `IVaultFactory` resolve the reranker from their scope, like the pipeline's optional services.
+
+---
+
 ## [0.33.19]
 
 ### Changed

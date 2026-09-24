@@ -32,6 +32,8 @@ document's extracted content, see its commit history, and edit it without touchi
 - **Damage-aware records** — records are swapped in atomically, and an unreadable one is reported rather than dropped from listings
 - **Image enrichment** — plug in a vision model and extracted images become indexed content
 - **Hybrid-ready** — chunks are written to the keyword index alongside the vector store when one is registered
+- **Reranking** — `VaultSearchOptions.UseReranker` orders an over-fetched candidate pool with the registered FluxIndex
+  `IReranker` (opt-in; see [Reranked search](#reranked-search--vaultsearchoptionsusereranker))
 
 ## Installation
 
@@ -502,6 +504,25 @@ It degrades to vector the same way `Hybrid` does when no `IKeywordSearchService`
 (reported via `ExecutedStrategy`). Use this over `Hybrid` with a zero vector weight when you actually
 want keyword-only: a weighted hybrid request still generates a query embedding and runs a vector
 search it then discards.
+
+### Reranked search — `VaultSearchOptions.UseReranker`
+
+Register a FluxIndex `IReranker` (`AddLMSupplyReranker`, `AddOpenAICompatibleReranker`, or your own) and ask for it
+per search:
+
+```csharp
+var results = await vault.SearchAsync("vacation policy", new VaultSearchOptions
+{
+    TopK = 5,
+    UseReranker = true,          // retrieval fetches TopK * 3 (or RerankCandidateCount), the reranker orders them
+    RerankCandidateCount = 30,   // optional pool size, never below TopK
+});
+```
+
+The semantics are FluxIndex `SearchOptions.UseReranker`'s. Each item's `Score` is the reranker's (on its own scale —
+logits for some models, so not necessarily 0 to 1) and `RetrievalScore` keeps the strategy's score; `MinScore` filters
+on the retrieval score before reranking. `UseReranker` without a registered reranker throws
+`InvalidOperationException` rather than returning unreranked results.
 
 ### RAG security — `FluxGuard.Remote.RAG.IRAGSecurityPipeline`
 

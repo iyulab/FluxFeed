@@ -790,6 +790,23 @@ public sealed class VaultSearchOptions
     public VaultSearchStrategy SearchStrategy { get; init; } = VaultSearchStrategy.Vector;
 
     /// <summary>
+    /// Reorder the retrieved chunks with the registered <c>IReranker</c> (FluxIndex) before returning
+    /// <see cref="TopK"/> of them. Default <c>false</c>. Setting it with no reranker registered throws
+    /// <see cref="InvalidOperationException"/>. When set, <see cref="VaultSearchResultItem.Score"/> is the
+    /// reranker's score and <see cref="VaultSearchResultItem.RetrievalScore"/> keeps the retrieval score;
+    /// <see cref="MinScore"/> still filters on the retrieval score, before reranking. Same meaning as FluxIndex
+    /// <c>SearchOptions.UseReranker</c>.
+    /// </summary>
+    public bool UseReranker { get; init; }
+
+    /// <summary>
+    /// How many chunks retrieval hands the reranker when <see cref="UseReranker"/> is set:
+    /// <c>Max(TopK, RerankCandidateCount ?? TopK * 3)</c>. Ignored otherwise. Same meaning as FluxIndex
+    /// <c>SearchOptions.RerankCandidateCount</c>.
+    /// </summary>
+    public int? RerankCandidateCount { get; init; }
+
+    /// <summary>
     /// Creates options for searching all files.
     /// </summary>
     public static VaultSearchOptions All(int topK = 10) => new() { TopK = topK };
@@ -841,9 +858,16 @@ public sealed class VaultSearchResultItem
     public string? Content { get; init; }
 
     /// <summary>
-    /// Similarity score (0.0 to 1.0).
+    /// Relevance score: the retrieval strategy's own score (see <see cref="VaultSearchOptions.MinScore"/>), or the
+    /// reranker's when <see cref="VaultSearchOptions.UseReranker"/> is set - on the reranker's scale, which is not
+    /// necessarily 0 to 1.
     /// </summary>
     public float Score { get; init; }
+
+    /// <summary>
+    /// The retrieval score this chunk had before reranking; <c>null</c> when the search was not reranked.
+    /// </summary>
+    public float? RetrievalScore { get; init; }
 
     /// <summary>
     /// Chunk metadata (if included).
