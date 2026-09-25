@@ -553,7 +553,11 @@ are not enriched. Refresh re-runs it, since it happens at the chunk stage.
 
 The port is FluxIndex.Core's own `IContextualEnrichmentService` (`GenerateContextBatchAsync(chunks, fullDocumentText)`
 → one context per chunk, in order). FluxFeed does not depend on any particular LLM library for it; the FluxImprover-backed
-implementation ships in `FluxIndex.Integrations.FluxImprover`, or implement the two methods yourself.
+implementation ships in `FluxIndex.Integrations.FluxImprover`, or implement the two methods yourself. With that
+implementation, `services.AddContextualEnrichmentWrapper(new ContextualEnrichmentOptions { … })` sets the generation
+options every chunk uses (output budget, temperature, `Thinking` — FluxImprover asks the model not to reason by
+default), and a context the model cut off at the output budget is dropped rather than stored, so that chunk is
+tagged `enrichment=empty` too.
 
 Two things are required — registering the port alone does nothing, so a container that already has an enrichment
 service for other reasons never pays one LLM call per chunk by accident:
