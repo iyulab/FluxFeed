@@ -16,8 +16,7 @@ public sealed partial class AtomicFileConventionTests
     /// </summary>
     private static readonly Dictionary<string, string> Allowed = new(StringComparer.Ordinal)
     {
-        // A private temporary input handed to the chunker; nothing else ever reads or rewrites it.
-        ["Adapters/FileFluxChunker.cs"] = "temporary chunker input under the system temp directory",
+        // None today. (The chunker's temporary input file went away when it began handing FileFlux the text directly.)
     };
 
     [Fact]

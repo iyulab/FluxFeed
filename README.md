@@ -29,6 +29,7 @@ document's extracted content, see its commit history, and edit it without touchi
 - **Background queue** — bounded concurrency, automatic retry, operator requeue, pause/resume, SQLite-persisted
 - **Multi-tenant** — isolated vaults via `IVaultFactory`, with single-call vector purge per tenant
 - **Extraction diagnostics** — a legitimate zero-chunk result (scanned PDF, blank page) says so
+- **Source locations** — a hit carries the page (`pageNumber`) or the stretch of a recording (`ff_start_seconds`) it came from — see [Where a hit came from](#where-a-hit-came-from)
 - **Damage-aware records** — records are swapped in atomically, and an unreadable one is reported rather than dropped from listings
 - **Image enrichment** — plug in a vision model and extracted images become indexed content
 - **Hybrid-ready** — chunks are written to the keyword index alongside the vector store when one is registered
@@ -158,6 +159,16 @@ refined content without re-extracting — use it after hand-editing `append-text
 With background processing on, both only enqueue a job and return the entry as it was; pass
 `waitForCompletion: true` (`MemorizeAsync(path, waitForCompletion: true)`,
 `RefreshAsync(path, waitForCompletion: true)`) to get the re-indexed entry — and its new commit — back.
+
+### Where a hit came from
+
+With the FileFlux extractor, each text chunk records where it came from in its source, as search-hit metadata:
+`pageNumber` / `ff_start_page` / `ff_end_page` for paginated documents (PDF, …) and `ff_start_seconds` /
+`ff_end_seconds` for recordings (with `AddLMSupplyTranscriber`). The keys are `VaultPipeline.PageNumberMetadataKey`
+and its siblings. The locations are recorded at extraction (`extracted.spans.json`) and apply while `refined.md` is
+unchanged; after a hand edit the chunks are indexed without a location (and a warning is logged) until the next
+re-extraction. A custom `IChunker` receives the spans as `ChunkAsync(content, spans, options, ct)` and returns
+`ContentChunk`s with a `Location`.
 
 ### Re-indexing: chunk identity, swap, rollback
 

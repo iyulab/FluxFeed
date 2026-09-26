@@ -414,6 +414,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         string extractedContent;
         IReadOnlyDictionary<string, string>? extractionHints = null;
         IReadOnlyList<string>? extractionWarnings = null;
+        IReadOnlyList<ContentSpan>? extractionSpans = null;
 
         if (_extractor != null)
         {
@@ -421,6 +422,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             extractedContent = result.Content;
             extractionHints = result.Hints;
             extractionWarnings = result.Warnings;
+            extractionSpans = result.Spans;
 
             // Store images if any - identity and alt text come from the extractor as-is.
             if (result.Images?.Count > 0)
@@ -433,8 +435,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
             extractedContent = await ExtractFallbackAsync(entry.SourcePath, ct);
         }
 
-        // Store raw extracted content (not git-tracked)
+        // Store raw extracted content (not git-tracked), and where its stretches came from in the source. Always
+        // written, even as "none": a re-extraction must not leave the previous extraction's locations behind.
         await _storage.StoreExtractedContentAsync(entry, extractedContent, ct);
+        await _storage.StoreContentSpansAsync(
+            entry,
+            extractionSpans is { Count: > 0 } ? ContentSpanSet.For(extractedContent, extractionSpans) : null,
+            ct);
 
         // Update entry to Extracted stage, carrying the extractor's structured diagnostics so a
         // legitimate 0-chunk outcome (scanned/blank document) is explainable downstream instead of
@@ -606,8 +613,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
             IReadOnlyList<string> parts;
             if (_chunker != null)
             {
-                parts = await _chunker.ChunkAsync(
+                var located = await _chunker.ChunkAsync(
                     description,
+                    spans: null,
                     new ChunkingOptions
                     {
                         MaxChunkSize = options.MaxChunkSize,
@@ -616,6 +624,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
                         Language = options.Language
                     },
                     ct);
+                parts = located.Select(c => c.Text).ToList();
             }
             else
             {
@@ -653,6 +662,57 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// A chunk the pipeline suggests blocking is dropped from the batch entirely; one it suggests
     /// sanitizing has its content replaced with the pipeline's sanitized version.
     /// </summary>
+    /// <summary>Metadata key holding the first page (1-based) a text chunk covers — the key FluxIndex's own FileFlux integration uses.</summary>
+    public const string PageNumberMetadataKey = "pageNumber";
+
+    /// <summary>Metadata key holding the first page (1-based) a text chunk covers.</summary>
+    public const string StartPageMetadataKey = "ff_start_page";
+
+    /// <summary>Metadata key holding the last page (1-based) a text chunk covers.</summary>
+    public const string EndPageMetadataKey = "ff_end_page";
+
+    /// <summary>Metadata key holding where, in seconds from the start of a recording, a text chunk begins.</summary>
+    public const string StartSecondsMetadataKey = "ff_start_seconds";
+
+    /// <summary>Metadata key holding where, in seconds from the start of a recording, a text chunk ends.</summary>
+    public const string EndSecondsMetadataKey = "ff_end_seconds";
+
+    /// <summary>
+    /// Projects a chunk's source location onto metadata a consumer can read from a search hit (a page, a time).
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object>? LocationMetadata(ContentLocation? location)
+    {
+        if (location is null || location.IsEmpty)
+            return null;
+
+        var metadata = new Dictionary<string, object>();
+        if (location.StartPage is { } startPage)
+        {
+            metadata[PageNumberMetadataKey] = startPage;
+            metadata[StartPageMetadataKey] = startPage;
+        }
+        if (location.EndPage is { } endPage)
+            metadata[EndPageMetadataKey] = endPage;
+        if (location.StartTime is { } startTime)
+            metadata[StartSecondsMetadataKey] = startTime.TotalSeconds;
+        if (location.EndTime is { } endTime)
+            metadata[EndSecondsMetadataKey] = endTime.TotalSeconds;
+        return metadata;
+    }
+
+    private async Task<IReadOnlyList<ContentSpan>?> GetTrustedSpansAsync(VaultEntry entry, string? refinedContent, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(refinedContent))
+            return null;
+        if (await _storage.GetContentSpansAsync(entry, ct) is not { } set)
+            return null;
+        if (set.ContentHash == ContentSpanSet.Hash(refinedContent))
+            return set.Spans;
+
+        LogContentSpansStale(_logger, entry.SourcePath);
+        return null;
+    }
+
     /// <summary>Metadata key holding the LLM-written context summary that was prepended to an enriched chunk.</summary>
     public const string ContextSummaryMetadataKey = "context_summary";
 
@@ -1274,8 +1334,14 @@ public sealed partial class VaultPipeline : IVaultPipeline
             return (0, 0);
         }
 
+        // Where stretches of the refined text came from (pages, time ranges). The offsets index the text extraction
+        // produced; refined.md can be edited by hand, so they are trusted only while it still hashes the same. Refined
+        // content is the first part of the combined content, so the offsets hold there; appended notes and Q&A carry
+        // no location.
+        var spans = await GetTrustedSpansAsync(entry, vaultContent.RefinedContent, ct);
+
         // Chunk the content
-        IReadOnlyList<string> chunks = [];
+        IReadOnlyList<ContentChunk> chunks = [];
 
         if (string.IsNullOrWhiteSpace(combinedContent))
         {
@@ -1302,17 +1368,17 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 Strategy = effectiveStrategy,
                 Language = options.Language
             };
-            chunks = await _chunker.ChunkAsync(combinedContent, chunkingOptions, ct);
+            chunks = await _chunker.ChunkAsync(combinedContent, spans, chunkingOptions, ct);
         }
         else
         {
-            chunks = ChunkFallback(combinedContent, options.MaxChunkSize);
+            chunks = ChunkFallback(combinedContent, options.MaxChunkSize).Select(t => new ContentChunk(t)).ToList();
         }
 
         // Identity is taken from the chunker's raw output, before enrichment prepends a context or
         // security sanitizes: those change the wording of a passage, not which passage it is.
-        var textIds = ChunkIdentity.ForTexts(entry.FilepathHash, chunks);
-        var textChunks = chunks.Select((text, i) => new VaultChunk(textIds[i], text, null)).ToList();
+        var textIds = ChunkIdentity.ForTexts(entry.FilepathHash, chunks.Select(c => c.Text).ToList());
+        var textChunks = chunks.Select((c, i) => new VaultChunk(textIds[i], c.Text, LocationMetadata(c.Location))).ToList();
         if (SupportsContextualEnrichment)
         {
             // Text chunks only — image-description chunks are already a description, not a passage of the document.
@@ -2072,6 +2138,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogRefiningContent(ILogger logger, string sourcePath);
     [LoggerMessage(Level = LogLevel.Information, Message = "Refined {Length} chars to {Path}")]
     private static partial void LogRefined(ILogger logger, int length, string path);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Refined content of {SourcePath} no longer matches the text its source locations were recorded for (refined.md was edited); its chunks are indexed without page or time locations until it is re-extracted")]
+    private static partial void LogContentSpansStale(ILogger logger, string sourcePath);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "No vector store configured, skipping removal")]
     private static partial void LogNoVectorStoreSkipRemoval(ILogger logger);
     [LoggerMessage(Level = LogLevel.Information, Message = "Backfilled document scope tag on {ChunkCount} chunks across {DocumentCount} documents predating it ({FailedCount} documents could not be migrated)")]
@@ -2194,6 +2263,14 @@ public sealed class ExtractionResult
     /// (e.g. "image-only/scanned document ... requires OCR"). Null or empty when none.
     /// </summary>
     public IReadOnlyList<string>? Warnings { get; init; }
+
+    /// <summary>
+    /// Where stretches of <see cref="Content"/> came from in the source — pages of a paginated document, time ranges of
+    /// a recording. Offsets index <see cref="Content"/>. The pipeline stores them beside the extracted text and hands
+    /// them to the <see cref="IChunker"/> at memorize, so each chunk can say which page or second it covers. Null when
+    /// the extractor has no locations.
+    /// </summary>
+    public IReadOnlyList<ContentSpan>? Spans { get; init; }
 }
 
 /// <summary>
@@ -2201,7 +2278,45 @@ public sealed class ExtractionResult
 /// </summary>
 public interface IChunker
 {
-    Task<IReadOnlyList<string>> ChunkAsync(string content, ChunkingOptions options, CancellationToken ct = default);
+    /// <summary>
+    /// Splits <paramref name="content"/> into chunks.
+    /// </summary>
+    /// <param name="content">The text to chunk.</param>
+    /// <param name="spans">
+    /// Where stretches of <paramref name="content"/> came from in the source (offsets index <paramref name="content"/>),
+    /// or null when unknown. A chunker that honours them sets each chunk's <see cref="ContentChunk.Location"/>.
+    /// </param>
+    /// <param name="options">Chunking options.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<ContentChunk>> ChunkAsync(
+        string content, IReadOnlyList<ContentSpan>? spans, ChunkingOptions options, CancellationToken ct = default);
+}
+
+/// <summary>A chunk of text and, when the chunker knew it, where it came from in the source.</summary>
+/// <param name="Text">The chunk text.</param>
+public sealed record ContentChunk(string Text)
+{
+    /// <summary>The pages or time range the chunk covers; null when unknown.</summary>
+    public ContentLocation? Location { get; init; }
+}
+
+/// <summary>The pages or time range a chunk covers in its source.</summary>
+public sealed record ContentLocation
+{
+    /// <summary>First page (1-based) the chunk covers.</summary>
+    public int? StartPage { get; init; }
+
+    /// <summary>Last page (1-based) the chunk covers.</summary>
+    public int? EndPage { get; init; }
+
+    /// <summary>Start of the stretch of a recording the chunk covers.</summary>
+    public TimeSpan? StartTime { get; init; }
+
+    /// <summary>End of the stretch of a recording the chunk covers.</summary>
+    public TimeSpan? EndTime { get; init; }
+
+    /// <summary>True when no field is set.</summary>
+    public bool IsEmpty => StartPage is null && EndPage is null && StartTime is null && EndTime is null;
 }
 
 /// <summary>

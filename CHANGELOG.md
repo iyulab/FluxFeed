@@ -12,6 +12,19 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.35.0] - Unreleased
+
+### Added
+- **A vault search hit can say which page or stretch of a recording it came from.** Chunks now carry `pageNumber`, `ff_start_page`/`ff_end_page` (paginated sources) and `ff_start_seconds`/`ff_end_seconds` (recordings) metadata — the keys are `VaultPipeline.*MetadataKey` constants and match FluxIndex's own FileFlux integration. Extraction records where each stretch of the stored text came from (`ExtractionResult.Spans`, kept beside `extracted.md` as `extracted.spans.json`), and memorize hands those spans to the chunker. If `refined.md` was edited by hand, the stored offsets no longer fit it: its chunks are indexed without a location and a warning is logged, until the document is re-extracted.
+
+### Changed
+- **Breaking**: `IChunker.ChunkAsync(string content, IReadOnlyList<ContentSpan>? spans, ChunkingOptions options, CancellationToken ct)` returns `IReadOnlyList<ContentChunk>` (text plus `Location`). A custom chunker takes the extra `spans` argument (it may ignore it) and wraps each string in `new ContentChunk(text)`.
+- `IVaultStorageService` gains `StoreContentSpansAsync` / `GetContentSpansAsync`; a custom storage implementation adds them.
+- The FileFlux extractor stores the refined text (rule-based, then LLM when a refiner is registered) instead of the text of one whole-document chunk, and the FileFlux chunker hands FileFlux the stored text directly (`IDocumentProcessorFactory.Create(RawContent)`, FileFlux 0.31.0) instead of writing it to a temporary `.txt` file. The chunker no longer runs LLM refinement a second time on text that was already refined at extraction.
+- Re-pinned sibling package(s) `FileFlux` 0.30.0 -> 0.31.0.
+
+---
+
 ## [0.34.5]
 
 ### Changed

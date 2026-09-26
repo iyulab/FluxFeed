@@ -50,6 +50,19 @@ public interface IVaultStorageService
     Task<string?> GetRefinedContentAsync(VaultEntry entry, CancellationToken ct = default);
 
     /// <summary>
+    /// Stores where stretches of the extracted text came from (pages, time ranges) beside extracted.md, keyed by the
+    /// hash of the text they index. Null or no spans removes any stored set, so a re-extraction never leaves the
+    /// previous document's locations behind.
+    /// </summary>
+    Task StoreContentSpansAsync(VaultEntry entry, ContentSpanSet? spans, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the stored span set, or null when none was stored. The caller compares
+    /// <see cref="ContentSpanSet.ContentHash"/> with the text it is about to chunk before trusting the offsets.
+    /// </summary>
+    Task<ContentSpanSet?> GetContentSpansAsync(VaultEntry entry, CancellationToken ct = default);
+
+    /// <summary>
     /// Stores extracted images to images/ directory.
     /// </summary>
     Task StoreImagesAsync(VaultEntry entry, IEnumerable<ImageArtifact> images, CancellationToken ct = default);
@@ -254,4 +267,34 @@ public sealed class EnrichmentFailure
 
     /// <summary>When this failure was recorded.</summary>
     public DateTimeOffset LastAttemptAt { get; init; }
+}
+
+/// <summary>
+/// A stretch of extracted text, <c>[Start, End)</c> in character offsets, and where it came from in the source.
+/// </summary>
+/// <param name="Start">Offset of the first character.</param>
+/// <param name="End">Offset one past the last character.</param>
+public sealed record ContentSpan(int Start, int End)
+{
+    /// <summary>1-based page number, for paginated sources.</summary>
+    public int? Page { get; init; }
+
+    /// <summary>Start of the stretch in a timed source (audio, video).</summary>
+    public TimeSpan? StartTime { get; init; }
+
+    /// <summary>End of the stretch in a timed source.</summary>
+    public TimeSpan? EndTime { get; init; }
+}
+
+/// <summary>Spans over one text, and the hash of that text (SHA-256, lowercase hex of its UTF-8 bytes).</summary>
+/// <param name="ContentHash">Hash of the text the offsets index.</param>
+/// <param name="Spans">The spans.</param>
+public sealed record ContentSpanSet(string ContentHash, IReadOnlyList<ContentSpan> Spans)
+{
+    /// <summary>Hashes a text the way <see cref="ContentHash"/> is computed.</summary>
+    public static string Hash(string text) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
+
+    /// <summary>Creates a set over <paramref name="text"/>.</summary>
+    public static ContentSpanSet For(string text, IReadOnlyList<ContentSpan> spans) => new(Hash(text), spans);
 }

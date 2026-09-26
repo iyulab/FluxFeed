@@ -15,10 +15,22 @@ namespace FluxFeed.Tests.Adapters;
 /// </summary>
 public class FileFluxExtractorDiagnosticsTests
 {
-    private static FileFluxExtractor CreateExtractor(RawContent raw, IReadOnlyList<DocumentChunk>? chunks = null)
+    // The extractor reads the refined text (and its spans); `chunks` stand in for what that text says.
+    private static FileFluxExtractor CreateExtractor(
+        RawContent raw,
+        IReadOnlyList<DocumentChunk>? chunks = null,
+        IReadOnlyList<SourceSpan>? spans = null,
+        string? llmText = null)
     {
         var processor = Substitute.For<IDocumentProcessor>();
-        var result = new ProcessingResult { Raw = raw, Chunks = chunks };
+        var refinedText = chunks is { Count: > 0 } ? string.Join("\n\n", chunks.Select(c => c.Content)) : raw.Text;
+        var refined = new RefinedContent { Text = refinedText, Spans = spans ?? [] };
+        var result = new ProcessingResult
+        {
+            Raw = raw,
+            Refined = refined,
+            LlmRefined = llmText is null ? null : new LlmRefinedContent { Text = llmText },
+        };
         processor.Result.Returns(result);
 
         var factory = Substitute.For<IDocumentProcessorFactory>();
@@ -66,6 +78,34 @@ public class FileFluxExtractorDiagnosticsTests
         var result = await extractor.ExtractAsync("blank.pdf", TestContext.Current.CancellationToken);
 
         result.Hints!["extraction_failure_reason"].Should().Be("blank_page");
+    }
+
+    // The refined text's spans (pages, time ranges) reach the vault, indexing the stored content.
+    [Fact]
+    public async Task ExtractAsync_CarriesRefinedSpans()
+    {
+        var spans = new List<SourceSpan> { new(0, 5) { Page = 1 }, new(7, 12) { Page = 2, StartTime = TimeSpan.FromSeconds(3) } };
+        var extractor = CreateExtractor(new RawContent { Text = "raw" }, [new DocumentChunk { Content = "first" }, new DocumentChunk { Content = "again" }], spans);
+
+        var result = await extractor.ExtractAsync("two-pages.pdf", TestContext.Current.CancellationToken);
+
+        result.Content.Should().Be("first\n\nagain");
+        result.Spans.Should().NotBeNull();
+        result.Spans!.Select(s => (s.Start, s.End, s.Page)).Should().Equal((0, 5, 1), (7, 12, 2));
+        result.Spans[1].StartTime.Should().Be(TimeSpan.FromSeconds(3));
+    }
+
+    // An LLM rewrite is stored instead of the refined text; the spans indexed the refined text, so none are kept.
+    [Fact]
+    public async Task ExtractAsync_LlmRewrite_StoresItAndDropsTheSpans()
+    {
+        var extractor = CreateExtractor(new RawContent { Text = "raw" }, [new DocumentChunk { Content = "refined" }],
+            [new SourceSpan(0, 7) { Page = 1 }], llmText: "rewritten by the model");
+
+        var result = await extractor.ExtractAsync("doc.pdf", TestContext.Current.CancellationToken);
+
+        result.Content.Should().Be("rewritten by the model");
+        result.Spans.Should().BeNull();
     }
 
     [Fact]

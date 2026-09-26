@@ -569,6 +569,11 @@ public sealed class VaultEntry
     public string ExtractedMdPath => Path.Combine(EntryPath, "extracted.md");
 
     /// <summary>
+    /// Path to extracted.spans.json (where stretches of extracted.md came from in the source, not git-tracked).
+    /// </summary>
+    public string ExtractedSpansPath => Path.Combine(EntryPath, "extracted.spans.json");
+
+    /// <summary>
     /// Path to refined.md (LLM-refined content with image descriptions).
     /// </summary>
     public string RefinedMdPath => Path.Combine(VaultPath, "refined.md");

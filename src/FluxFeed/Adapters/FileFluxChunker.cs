@@ -1,5 +1,6 @@
 using FileFlux;
 using FileFlux.Core;
+using FluxFeed.Interfaces;
 using FluxFeed.Services;
 using Microsoft.Extensions.Logging;
 using FileFluxChunkingOptions = FileFlux.Core.ChunkingOptions;
@@ -9,7 +10,9 @@ namespace FluxFeed.Adapters;
 
 /// <summary>
 /// FileFlux adapter for content chunking.
-/// Bridges IChunker to FileFlux's chunking capabilities.
+/// Bridges IChunker to FileFlux's chunking capabilities. The text goes to FileFlux as already-read content
+/// (<see cref="IDocumentProcessorFactory.Create(RawContent)"/>) together with its source spans, so each chunk comes back
+/// with the pages or time range it covers.
 /// </summary>
 public sealed partial class FileFluxChunker : IChunker
 {
@@ -24,8 +27,9 @@ public sealed partial class FileFluxChunker : IChunker
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<IReadOnlyList<string>> ChunkAsync(
+    public async Task<IReadOnlyList<ContentChunk>> ChunkAsync(
         string content,
+        IReadOnlyList<ContentSpan>? spans,
         VaultChunkingOptions options,
         CancellationToken ct = default)
     {
@@ -33,54 +37,70 @@ public sealed partial class FileFluxChunker : IChunker
 
         try
         {
-            // Create a temporary in-memory document for chunking
-            var tempPath = Path.GetTempFileName();
-            try
+            var raw = new RawContent
             {
-                await File.WriteAllTextAsync(tempPath, content, ct);
+                Text = content,
+                Spans = spans is { Count: > 0 }
+                    ? spans.Select(s => new SourceSpan(s.Start, s.End) { Page = s.Page, StartTime = s.StartTime, EndTime = s.EndTime }).ToList()
+                    : [],
+                // Stored vault content is markdown (extracted.md / refined.md).
+                File = new SourceFileInfo { Name = "content.md", Extension = ".md", Size = content.Length },
+            };
 
-                await using var processor = _processorFactory.Create(tempPath);
+            await using var processor = _processorFactory.Create(raw);
 
-                var chunkingOptions = new FileFluxChunkingOptions
-                {
-                    Strategy = MapStrategy(options.Strategy),
-                    MaxChunkSize = options.MaxChunkSize,
-                    OverlapSize = options.OverlapSize
-                };
-
-                // Apply language if specified via CustomProperties
-                if (!string.IsNullOrEmpty(options.Language))
-                {
-                    chunkingOptions.CustomProperties["language"] = options.Language;
-                }
-
-                var processingOptions = new ProcessingOptions
-                {
-                    Chunking = chunkingOptions
-                };
-
-                await processor.ProcessAsync(processingOptions, ct);
-
-                var chunks = (processor.Result.Chunks ?? [])
-                    .Select(c => c.Content)
-                    .Where(t => !string.IsNullOrWhiteSpace(t))
-                    .ToList();
-
-                LogCreatedChunks(_logger, chunks.Count, content.Length);
-
-                return chunks;
-            }
-            finally
+            var chunkingOptions = new FileFluxChunkingOptions
             {
-                // Cleanup temp file
-                try { File.Delete(tempPath); } catch { /* ignore */ }
+                Strategy = MapStrategy(options.Strategy),
+                MaxChunkSize = options.MaxChunkSize,
+                OverlapSize = options.OverlapSize
+            };
+
+            // Apply language if specified via CustomProperties
+            if (!string.IsNullOrEmpty(options.Language))
+            {
+                chunkingOptions.CustomProperties["language"] = options.Language;
             }
+
+            // The stored text was already refined (LLM refinement included) when it was extracted. A second LLM pass
+            // here would pay again and, by rewriting the text, drop the source spans.
+            var processingOptions = new ProcessingOptions
+            {
+                Chunking = chunkingOptions,
+                IncludeLlmRefine = false
+            };
+
+            await processor.ProcessAsync(processingOptions, ct);
+
+            var chunks = (processor.Result.Chunks ?? [])
+                .Where(c => !string.IsNullOrWhiteSpace(c.Content))
+                .Select(c => new ContentChunk(c.Content) { Location = ToLocation(c.Location) })
+                .ToList();
+
+            LogCreatedChunks(_logger, chunks.Count, content.Length);
+
+            return chunks;
         }
         catch (Exception ex)
         {
             LogChunkingFailed(_logger, ex);
             throw;
         }
+    }
+
+    private static ContentLocation? ToLocation(SourceLocation? location)
+    {
+        if (location is null)
+            return null;
+
+        var result = new ContentLocation
+        {
+            StartPage = location.StartPage,
+            EndPage = location.EndPage,
+            StartTime = location.StartTime,
+            EndTime = location.EndTime,
+        };
+        return result.IsEmpty ? null : result;
     }
 
     #region LoggerMessage Definitions

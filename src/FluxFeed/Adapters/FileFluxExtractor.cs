@@ -32,25 +32,19 @@ public sealed partial class FileFluxExtractor : IExtractor
         {
             await using var processor = _processorFactory.Create(sourcePath);
 
-            // Process with minimal chunking to get raw extracted text
-            // FileFlux requires a strategy - use Auto with large chunk size to get full content
-            var options = new ProcessingOptions
-            {
-                Chunking = new FileFlux.Core.ChunkingOptions
-                {
-                    Strategy = ChunkingStrategies.Auto,
-                    MaxChunkSize = int.MaxValue // Get full content as single chunk
-                }
-            };
-
-            await processor.ProcessAsync(options, ct);
+            // Read and refine only (rule-based, then LLM when a refiner is registered): the vault chunks the stored
+            // text later, at memorize. The refined text is what gets stored, and its spans (pages, time ranges) index
+            // exactly that text. An LLM rewrite changes the text, so its spans no longer apply and are not kept.
+            await processor.RefineAsync(cancellationToken: ct);
+            await processor.LlmRefineAsync(cancellationToken: ct);
 
             var result = processor.Result;
-
-            // Get content from chunks (FileFlux stores extracted text in chunks)
-            var content = result.Chunks?.Count > 0
-                ? string.Join("\n\n", result.Chunks.Select(c => c.Content))
-                : string.Empty;
+            var refinedText = result.Refined?.Text ?? string.Empty;
+            var llmText = result.LlmRefined?.Text;
+            var content = !string.IsNullOrEmpty(llmText) && llmText != refinedText ? llmText : refinedText;
+            var spans = content == refinedText && result.Refined?.Spans is { Count: > 0 } refinedSpans
+                ? refinedSpans.Select(s => new ContentSpan(s.Start, s.End) { Page = s.Page, StartTime = s.StartTime, EndTime = s.EndTime }).ToList()
+                : null;
 
             // Extract images from RawContent if available
             List<ImageArtifact>? images = null;
@@ -90,7 +84,8 @@ public sealed partial class FileFluxExtractor : IExtractor
                 Content = content,
                 Images = images,
                 Hints = hints,
-                Warnings = warnings
+                Warnings = warnings,
+                Spans = spans
             };
         }
         catch (Exception ex)
