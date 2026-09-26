@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.35.0] - Unreleased
+## [0.35.0] - 2026-09-26
 
 ### Added
 - **A vault search hit can say which page or stretch of a recording it came from.** Chunks now carry `pageNumber`, `ff_start_page`/`ff_end_page` (paginated sources) and `ff_start_seconds`/`ff_end_seconds` (recordings) metadata — the keys are `VaultPipeline.*MetadataKey` constants and match FluxIndex's own FileFlux integration. Extraction records where each stretch of the stored text came from (`ExtractionResult.Spans`, kept beside `extracted.md` as `extracted.spans.json`), and memorize hands those spans to the chunker. If `refined.md` was edited by hand, the stored offsets no longer fit it: its chunks are indexed without a location and a warning is logged, until the document is re-extracted.
