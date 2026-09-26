@@ -22,6 +22,7 @@ Releases before 0.28.0 predate this file — see the git history.
 - `IVaultStorageService` gains `StoreContentSpansAsync` / `GetContentSpansAsync`; a custom storage implementation adds them.
 - The FileFlux extractor stores the refined text (rule-based, then LLM when a refiner is registered) instead of the text of one whole-document chunk, and the FileFlux chunker hands FileFlux the stored text directly (`IDocumentProcessorFactory.Create(RawContent)`, FileFlux 0.31.0) instead of writing it to a temporary `.txt` file. The chunker no longer runs LLM refinement a second time on text that was already refined at extraction.
 - Re-pinned sibling package(s) `FileFlux` 0.30.0 -> 0.31.0.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.52.3 -> 0.53.0, `FluxIndex.Storage.SQLite` 0.52.3 -> 0.53.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
 
 ---
 
