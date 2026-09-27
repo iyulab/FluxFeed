@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.36.0] - Unreleased
+## [0.36.0] - 2026-09-27
 
 ### Fixed
 - **Removing or re-indexing a document now also cleans the GraphRAG graph store.** The vault deleted a document's chunks
