@@ -12,6 +12,21 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.36.0] - Unreleased
+
+### Fixed
+- **Removing or re-indexing a document now also cleans the GraphRAG graph store.** The vault deleted a document's chunks
+  from the vector and keyword legs only. The graph store kept the communities, entity-to-chunk links and relationships
+  derived from them, so a removed document stayed in community listings and entity lookups, and an edit that replaced
+  every chunk left the old communities behind. `RemoveAsync` and the re-index swap now call FluxIndex's
+  `IGraphRAGService.ForgetChunksAsync` with the chunks they delete, in the vault's graph partition. It does nothing when
+  no GraphRAG service or graph store is registered.
+
+### Dependencies
+- FluxIndex.Core / FluxIndex.Storage.SQLite 0.58.0 -> 0.59.0 (`ForgetChunksAsync`).
+
+---
+
 ## [0.35.11] - 2026-09-27
 
 ### Changed

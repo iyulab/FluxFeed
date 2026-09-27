@@ -861,11 +861,20 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // Delete by document ID (filepath hash) from every backend this entry was written to.
         var documentId = entry.FilepathHash;
 
+        // The graph leg keys its rows by chunk id, and the vector store is where the document's chunk ids are read from —
+        // so read them before the rows go.
+        IReadOnlyList<string> graphChunkIds = _graphRAGService != null && _vectorStore != null
+            ? await _vectorStore.GetChunkIdsByDocumentIdAsync(documentId, ct)
+            : [];
+
         if (_vectorStore != null)
             await _vectorStore.DeleteByDocumentIdAsync(documentId, ct);
 
         if (_keywordSearchService != null)
             await _keywordSearchService.DeleteByDocumentIdAsync(documentId, ct);
+
+        if (graphChunkIds.Count > 0)
+            await _graphRAGService!.ForgetChunksAsync(graphChunkIds, GraphPartitionFor(null), ct);
 
         LogRemovedChunks(_logger, documentId);
     }
@@ -1329,7 +1338,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // Replacing content with nothing is still a replacement: a document whose content is
             // gone must lose its rows rather than keep serving text it no longer has. This is the
             // one path where the swap commits with no new generation to swap to.
-            await DeleteChunksAsync(previousChunkIds, ct);
+            await DeleteChunksAsync(previousChunkIds, GraphPartitionFor(options.GraphRAGOptions), ct);
             LogNoContentToIndex(_logger, entry.SourcePath);
             return (0, 0);
         }
@@ -1456,7 +1465,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // Only now is the previous generation superseded - the part of it this run did not
             // write again.
             var supersededChunkIds = previousChunkIds.Except(attemptedChunkIds, StringComparer.Ordinal).ToList();
-            await DeleteChunksAsync(supersededChunkIds, ct);
+            await DeleteChunksAsync(supersededChunkIds, GraphPartitionFor(options.GraphRAGOptions), ct);
 
             if (written.Count == 0 && supersededChunkIds.Count > 0)
             {
@@ -1620,7 +1629,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// the swap: dropping the superseded generation on success, and dropping the partial one on
     /// failure.
     /// </summary>
-    private async Task DeleteChunksAsync(IReadOnlyCollection<string> chunkIds, CancellationToken ct)
+    /// <param name="chunkIds">The chunks to delete from every leg.</param>
+    /// <param name="graphPartition">
+    /// The GraphRAG partition the chunks were built into, so the graph leg forgets them too; null when no graph was built
+    /// from them (a rolled-back partial generation — the graph is built only after the swap commits).
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task DeleteChunksAsync(IReadOnlyCollection<string> chunkIds, string? graphPartition, CancellationToken ct)
     {
         if (chunkIds.Count == 0)
         {
@@ -1637,7 +1652,16 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // chunks hold, and deleting chunk by chunk rewrote those rows once per chunk.
         if (_keywordSearchService != null)
             await _keywordSearchService.DeleteChunksAsync(chunkIds, ct);
+
+        // The graph leg answers for its own rows too: communities, entity-to-chunk links and relationships derived from
+        // these chunks would otherwise outlive them (FluxIndex ForgetChunksAsync is a no-op without a graph store).
+        if (graphPartition != null && _graphRAGService != null)
+            await _graphRAGService.ForgetChunksAsync(chunkIds, graphPartition, ct);
     }
+
+    /// <summary>The graph partition a memorize requesting <paramref name="requested"/> builds into (see <see cref="ResolveGraphRagOptions"/>).</summary>
+    private string GraphPartitionFor(GraphRAGBuildOptions? requested) =>
+        ResolveGraphRagOptions(requested)?.Partition ?? GraphPartition.Default;
 
     /// <summary>
     /// Drops whatever the failed run managed to write, leaving the previous generation as the only
@@ -1695,7 +1719,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             {
                 // CancellationToken.None throughout: a cancelled indexing run is exactly when the
                 // rollback must still happen, and a token that is already cancelled would abort it.
-                await DeleteChunksAsync([chunkId], CancellationToken.None);
+                await DeleteChunksAsync([chunkId], graphPartition: null, CancellationToken.None);
             }
             catch (Exception ex)
             {

@@ -101,6 +101,38 @@ public sealed class VaultPipelineGraphRagTests : IDisposable
         return await pipeline.MemorizeAsync(entry, options);
     }
 
+    // Removing a document removes it from the graph leg too: the pipeline reads the document's chunk ids before the vector
+    // rows go and hands them to ForgetChunksAsync, in the partition the vault builds its graph into.
+    [Fact]
+    public async Task Remove_ForgetsTheDocumentsChunksInTheVaultsGraphPartition()
+    {
+        var graph = CreateGraphMock();
+        var pipeline = CreatePipeline(graph, vaultId: "tenant-a");
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "doc.txt"), _vaultDir);
+        _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<string>>(["c1", "c2"]));
+
+        await pipeline.RemoveAsync(entry);
+
+        await _vectorStore.Received(1).DeleteByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>());
+        await graph.Received(1).ForgetChunksAsync(
+            Arg.Is<IEnumerable<string>>(ids => ids.SequenceEqual(new[] { "c1", "c2" })),
+            "tenant-a",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Remove_WithoutAGraphService_DoesNotReadChunkIds()
+    {
+        var pipeline = CreatePipeline(graphRAG: null);
+        var entry = VaultEntry.Create(Path.Combine(_testDir, "doc.txt"), _vaultDir);
+
+        await pipeline.RemoveAsync(entry);
+
+        await _vectorStore.Received(1).DeleteByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>());
+        await _vectorStore.DidNotReceive().GetChunkIdsByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task Memorize_WithGraphRagServiceRegistered_AutoBuildsGraphIndex()
     {

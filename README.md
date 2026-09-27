@@ -182,7 +182,9 @@ text, not its id: identity is taken from the chunker's raw output. Two identical
 document get distinct ids (by occurrence), so neither shadows the other.
 
 Re-indexing is a swap. The previous generation's rows are identified first, the new generation is
-written, and only the previous rows this run did not write again are deleted. If indexing fails halfway
+written, and only the previous rows this run did not write again are deleted. With GraphRAG registered, the graph
+leg forgets those chunks too (`IGraphRAGService.ForgetChunksAsync`): their communities, entity links and relationships
+go, and so do a removed document's. If indexing fails halfway
 — an embedding error on one chunk — the rows this run added are removed and the previous generation is
 left whole: the entry lands on `Error`, but it keeps answering searches with its last good index
 (`VaultEntry.IsSearchable`), and the job's resume checkpoint is rewound to where the run started so a
