@@ -12,6 +12,14 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.37.4] - Unreleased
+
+### Fixed
+- **The "GraphRAG is enabled but IGraphRAGService is not registered" error names only `AddFullGraphRAG()`.** It also suggested
+  `AddGraphRAGService()`, which registered the service without what it needs and is removed in FluxIndex 0.60.0.
+
+---
+
 ## [0.37.3] - 2026-09-29
 
 ### Fixed

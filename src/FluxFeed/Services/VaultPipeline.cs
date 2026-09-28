@@ -1824,7 +1824,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         {
             throw new InvalidOperationException(
                 "GraphRAG is enabled but IGraphRAGService is not registered. " +
-                "Register it via AddFullGraphRAG()/AddGraphRAGService(), or set MemorizeOptions.EnableGraphRAG = false.");
+                "Register it via AddFullGraphRAG(), or set MemorizeOptions.EnableGraphRAG = false.");
         }
 
         // Nothing newly indexed this run (e.g. resumable path resumed past the last chunk) — skip.
