@@ -982,8 +982,9 @@ public sealed partial class VaultManager : IVault
 
         _watchedFolders[folder.Id] = folder;
 
-        // Start watching
-        await _fileWatcher.StartWatchingAsync(folder, ct);
+        // Start watching (EnableRealTimeWatch off: the folder is registered for scans and sync, not watched)
+        if (_options.EnableRealTimeWatch)
+            await _fileWatcher.StartWatchingAsync(folder, ct);
 
         LogAddedWatchedFolder(_logger, folder.Name, folder.Path);
         return folder;
@@ -1035,7 +1036,8 @@ public sealed partial class VaultManager : IVault
             throw new KeyNotFoundException($"Watched folder not found: {folderId}");
 
         folder.Resume();
-        await _fileWatcher.StartWatchingAsync(folder, ct);
+        if (_options.EnableRealTimeWatch)
+            await _fileWatcher.StartWatchingAsync(folder, ct);
         LogResumedWatching(_logger, folder.Name);
     }
 

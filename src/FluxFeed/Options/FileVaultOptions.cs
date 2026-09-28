@@ -43,7 +43,8 @@ public sealed class FileVaultOptions
     public int MaxFileSizeMB { get; set; } = 100;
 
     /// <summary>
-    /// Enable real-time file watching.
+    /// Watch added folders for changes as they happen. When false, a watched folder is still registered (scans and sync
+    /// use it) but no file-system watcher runs for it, so changes are picked up only by the next scan. Default: true.
     /// </summary>
     public bool EnableRealTimeWatch { get; set; } = true;
 
@@ -58,11 +59,6 @@ public sealed class FileVaultOptions
     /// Larger buffers reduce the chance of missing events but use more memory.
     /// </summary>
     public int WatcherBufferSize { get; set; } = 65536;
-
-    /// <summary>
-    /// Number of versions to retain for each file.
-    /// </summary>
-    public int VersionRetentionCount { get; set; } = 5;
 
     /// <summary>
     /// Automatically cleanup orphaned files during sync.
@@ -150,11 +146,6 @@ public sealed class FileVaultOptions
     public int MaxConcurrentProcessing { get; set; } = 4;
 
     /// <summary>
-    /// Polling interval in milliseconds when queue is empty.
-    /// </summary>
-    public int QueuePollingIntervalMs { get; set; } = 1000;
-
-    /// <summary>
     /// Enable automatic retry on failure.
     /// </summary>
     public bool EnableAutoRetry { get; set; } = true;
@@ -215,7 +206,8 @@ public sealed class FileVaultOptions
         string.IsNullOrEmpty(QueueGroupKey) ? VaultId : QueueGroupKey;
 
     /// <summary>
-    /// Maximum retry attempts for failed items.
+    /// How many times a failed job is retried (with <see cref="EnableAutoRetry"/>) before it stays failed. Jobs take the
+    /// value of the options the queue service is built with, when they are enqueued. Default: 3.
     /// </summary>
     public int MaxRetryCount { get; set; } = 3;
 

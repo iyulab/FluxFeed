@@ -12,6 +12,18 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.37.0] - Unreleased
+
+### Fixed
+- **`FileVaultOptions.MaxRetryCount` sets how often a failed job is retried.** Every job was created with three retries whatever the option said; jobs now take the value of the options the queue service is built with.
+- **`FileVaultOptions.EnableRealTimeWatch = false` stops file watching.** Every added or resumed folder was watched regardless. With it off, a watched folder is still registered for scans and sync, but no file-system watcher runs for it.
+
+### Removed
+- **Breaking: `FileVaultOptions.QueuePollingIntervalMs`.** The queue worker waits on a job signal rather than polling, so the setting had nothing to control. Delete the assignment.
+- **Breaking: `FileVaultOptions.VersionRetentionCount`.** The vault keeps no per-file version history, so there was nothing to retain. Delete the assignment.
+
+---
+
 ## [0.36.3] - 2026-09-28
 
 ### Changed

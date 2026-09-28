@@ -45,6 +45,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     /// per dequeue would make the policy change under jobs already picked under the old one.
     /// </summary>
     private readonly int _maxInFlightPerGroup;
+    private readonly int _maxRetryCount;
     private readonly object _workerLock = new();
     private int _activeWorkers;
     private TaskCompletionSource _workerAvailable = NewWorkerSignal();
@@ -71,6 +72,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         var opts = options?.Value ?? new FileVaultOptions();
         _workerStartupTimeout = opts.WorkerStartupTimeout;
         _maxInFlightPerGroup = opts.MaxInFlightPerGroup;
+        _maxRetryCount = opts.MaxRetryCount;
         var basePath = opts.VaultBasePath ?? Path.Combine(Directory.GetCurrentDirectory(), opts.VaultDirectoryName);
         Directory.CreateDirectory(basePath);
 
@@ -206,7 +208,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         CancellationToken ct)
     {
         var fullPath = Path.GetFullPath(filePath);
-        var job = VaultJob.Create(fullPath, filepathHash, jobType, priority, groupKey: groupKey);
+        var job = VaultJob.Create(fullPath, filepathHash, jobType, priority, maxRetries: _maxRetryCount, groupKey: groupKey);
 
         await _dbLock.WaitAsync(ct);
         try
