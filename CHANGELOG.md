@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.37.0] - Unreleased
+## [0.37.0] - 2026-09-28
 
 ### Fixed
 - **`FileVaultOptions.MaxRetryCount` sets how often a failed job is retried.** Every job was created with three retries whatever the option said; jobs now take the value of the options the queue service is built with.
