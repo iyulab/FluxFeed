@@ -12,6 +12,16 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.37.3] - Unreleased
+
+### Fixed
+- **The `VaultBasePath` documentation states the real default:** one vault at `<working directory>/.vault` (`VaultDirectoryName`),
+  not a `.vault` next to each source file. The `AdditionalTextExtensions` doc now says where the extensions apply (the plain-text
+  fallback and the indexable set).
+- **README:** the vector-store package the examples use (`FluxIndex.Storage.SQLite`), options binding from configuration, the RAG
+  security DI registration, the queue operations on `IVaultQueueService`, what `AddFileVaultWithFluxIndex` adds, and the other
+  registration entry points and options.
+
 ## [0.37.2] - 2026-09-28
 
 ### Changed

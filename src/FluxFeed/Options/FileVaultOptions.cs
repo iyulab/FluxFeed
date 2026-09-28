@@ -22,9 +22,16 @@ public sealed class FileVaultOptions
     public string VaultDirectoryName { get; set; } = DefaultVaultDirectoryName;
 
     /// <summary>
-    /// Base path for vault data.
-    /// If null, uses VaultDirectoryName relative to source file's directory.
+    /// Base path for vault data (entry directories and the queue database).
+    /// If null, one vault is used at <c>&lt;working directory&gt;/</c><see cref="VaultDirectoryName"/>
+    /// (<c>.vault</c> by default) — resolved against the process working directory, not next to each
+    /// source file. Services and hosts should set this explicitly, since their working directory is
+    /// often not where the data should live.
     /// </summary>
+    /// <remarks>
+    /// With <c>IVaultFactory</c>, each tenant's vault is <c>&lt;base&gt;/&lt;tenantId&gt;/</c><see cref="VaultDirectoryName"/>,
+    /// where <c>&lt;base&gt;</c> is this value or the same working-directory default.
+    /// </remarks>
     public string? VaultBasePath { get; set; }
 
     /// <summary>
@@ -99,8 +106,8 @@ public sealed class FileVaultOptions
     ];
 
     /// <summary>
-    /// Additional text file extensions for fallback extraction.
-    /// These extensions are added to the built-in list when FileFlux is not available.
+    /// Additional file extensions read as plain text, on top of the built-in document and code extensions. They are used
+    /// when no <c>IExtractor</c> handles the file (the plain-text fallback) and in the set of indexable extensions.
     /// Use lowercase with leading dot (e.g., ".myext").
     /// </summary>
     /// <remarks>

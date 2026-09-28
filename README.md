@@ -42,6 +42,13 @@ document's extracted content, see its commit history, and edit it without touchi
 dotnet add package FluxFeed
 ```
 
+FluxFeed indexes into whatever FluxIndex vector store you register; it does not ship one. The examples below
+use the SQLite store, which is a separate package:
+
+```bash
+dotnet add package FluxIndex.Storage.SQLite   # the vector store the examples use (AddSQLiteVecVectorStore)
+```
+
 ### Requirements
 
 - **.NET 10**, and a registered FluxIndex vector store + `IEmbeddingService` (see Quick Start). The package
@@ -139,6 +146,21 @@ fixes above.
 | `AddFileVaultWithFileFlux` | The above + FileFlux extraction and chunking |
 | `AddFileVaultWithFluxIndex` | The above + FluxIndex indexing (recommended default) |
 | `AddFileVaultFactory*` | Same three, but tenant-scoped via `IVaultFactory` instead of a single `IVault` |
+
+Indexing into FluxIndex happens in the vault pipeline whenever an `IVectorStore` and an `IEmbeddingService`
+are registered, whichever of these entry points you call. `AddFileVaultWithFluxIndex` adds one thing on top of `AddFileVaultWithFileFlux`: a
+`FluxIndexMemorizer` (Scoped) for memorizing chunks outside the pipeline in your own flows; the pipeline does not use it.
+
+Other public entry points:
+
+- `AddFileVaultWithPipeline` — same registrations as `AddFileVault`; the name documents that you bring your own
+  `IExtractor` / `IChunker` (and a vector store + embedder for indexing).
+- `UseFileVaultHasher<T>()` / `UseFileVaultGitService<T>()` — replace the content hasher (`IContentHasher`) or the
+  git service (`IGitService`); both are registered as Singleton.
+- `UseFileVaultPipeline<T>()` — replace `IVaultPipeline`. Note that it registers your pipeline as **Singleton**,
+  while the default pipeline is Scoped.
+- `FluxIndexContextBuilderExtensions.UseFileVault(...)` — calls `AddFileVault` from a builder that exposes
+  `ConfigureServices(Action<IServiceCollection>)`.
 
 FileFlux services are registered only if you have not registered them yourself, so a prior
 `AddFileFlux(ServiceLifetime.Singleton)` keeps its lifetime.
@@ -382,7 +404,8 @@ no per-group weights. Ungrouped jobs are never capped, and priority still orders
 - **An operator can put a failed job back in the queue** (since 0.24.0). `RetryAsync` enforces the
   automatic retry budget, which is right for the worker deciding whether to keep going unattended and
   wrong for a person: the jobs someone reaches for a retry button over are precisely the ones that
-  have used the budget up, so that call succeeded only when it was not needed. `RequeueAsync` is the
+  have used the budget up, so that call succeeded only when it was not needed. `RequeueAsync` (on
+  `IVaultQueueService` — see [Observing the queue](#observing-the-queue) for how to reach it) is the
   operator's path — it clears `RetryCount` and re-queues, and it throws rather than returning a bool,
   because the ways it can decline call for different answers. `VaultJobNotFoundException` means the
   list is stale; `VaultJobNotRetryableException` carries a `VaultRetryRefusal` of `NotFailed` (someone
@@ -544,6 +567,16 @@ indexing — a chunk the pipeline suggests blocking (RAG poisoning / indirect pr
 dropped from the batch entirely, one it suggests sanitizing has its content replaced. Off by
 default; nothing changes without it.
 
+The usual way is to register it in the container, next to the vault registration:
+
+```csharp
+using FluxGuard.Remote.RAG;
+
+services.AddSingleton<IRAGSecurityPipeline, IndirectInjectionDetector>();
+```
+
+Constructing the pipeline by hand works the same way:
+
 ```csharp
 using FluxGuard.Remote.RAG;
 
@@ -619,13 +652,19 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 
 `FileVaultOptions` (bindable from the `FileVault` configuration section):
 
+```csharp
+services.Configure<FileVaultOptions>(configuration.GetSection(FileVaultOptions.SectionName));
+```
+
 | Option | Default | Description |
 |---|---|---|
-| `VaultBasePath` | `null` | Vault root. When null, `.vault` next to each source file |
+| `VaultBasePath` | `null` | Vault root. When null, one vault at `<working directory>/<VaultDirectoryName>` (`.vault` by default) — the process working directory, not next to each source file. Set it explicitly in services and hosts |
+| `VaultDirectoryName` | `.vault` | Directory name used for the default vault root above, and for each tenant's vault under `IVaultFactory` |
 | `VaultId` | `null` | Tenant id; set by `IVaultFactory`. Required for `PurgeAsync`. Also the GraphRAG graph partition — vaults sharing one graph store keep separate entities and communities |
 | `MaxFileSizeMB` | `100` | A folder scan skips larger files; memorizing one fails permanently with the size in the message. `0` = no limit |
 | `EnableRealTimeWatch` | `true` | Folder watching |
 | `DebounceDelayMs` | `500` | Merge window for rapid change events |
+| `WatcherBufferSize` | `65536` | `FileSystemWatcher` internal buffer, in bytes; larger misses fewer events |
 | `EnableBackgroundProcessing` | `true` | Background queue; when false the service idles |
 | `GitExecutablePath` | `git` | Git CLI used for vault history; set an explicit path when git is not on PATH |
 | `AllowMissingGit` | `false` | When true, a missing git CLI degrades to a history-less vault (one warning) instead of failing the first vault operation |
@@ -635,6 +674,8 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 | `EnableAutoRetry` / `MaxRetryCount` / `RetryDelayMs` | `true` / `3` / `5000` | Retry policy — how many attempts and how long to wait. **Whether an attempt can help is not configurable**: a deterministic failure is never retried (see below) |
 | `AutoCleanupOrphans` | `false` | Remove entries whose source file is gone, during sync |
 | `Chunking.MaxChunkSize` / `OverlapSize` / `Strategy` | `1024` / `128` / `Intelligent` | Chunking defaults, with per-extension overrides via `Chunking.FormatStrategies` |
+| `Chunking.Language` | `null` | Chunking language; null = auto-detect |
+| `AdditionalTextExtensions` | empty | Extra extensions (lowercase, leading dot, e.g. `.myext`) read as plain text by the fallback extraction used when no `IExtractor` is registered (e.g. `AddFileVault` without FileFlux) |
 | `DefaultIncludePatterns` / `DefaultExcludePatterns` | common document / temp-file globs | See [File selection patterns](#file-selection-patterns) |
 
 The background worker (`VaultBackgroundService`) holds a lease from `IVaultQueueService.RegisterWorker()` while it consumes the queue; that lease is
@@ -669,6 +710,10 @@ await vault.MemorizeAsync(path, VaultJobPriority.High, waitForCompletion: true, 
 ```
 
 ### Observing the queue
+
+`GetStatisticsAsync`, `GetJobsAsync` and `RequeueAsync` are on `IVaultQueueService`, not `IVault`. For a single vault,
+resolve `IVaultQueueService` from the container; for tenants, use the tenant's own queue,
+`IVaultFactory.GetContext(tenantId)?.QueueService` (null until the tenant has been created with `GetOrCreate`).
 
 `GetStatisticsAsync()` answers two different questions, and conflating them is a reported source of false alarms:
 
