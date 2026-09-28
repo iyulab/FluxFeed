@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.37.3] - Unreleased
+## [0.37.3] - 2026-09-29
 
 ### Fixed
 - **The `VaultBasePath` documentation states the real default:** one vault at `<working directory>/.vault` (`VaultDirectoryName`),
