@@ -14,6 +14,9 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [0.37.4] - Unreleased
 
+### Changed
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.59.5 -> 0.60.0, `FluxIndex.Storage.SQLite` 0.59.5 -> 0.60.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
+
 ### Fixed
 - **The "GraphRAG is enabled but IGraphRAGService is not registered" error names only `AddFullGraphRAG()`.** It also suggested
   `AddGraphRAGService()`, which registered the service without what it needs and is removed in FluxIndex 0.60.0.
