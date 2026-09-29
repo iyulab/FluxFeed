@@ -12,6 +12,13 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.37.11] - 2026-09-29
+
+### Changed
+- Re-pinned sibling package(s) `FileFlux` 0.33.4 -> 0.33.5, `FluxIndex.Core` 0.61.4 -> 0.61.5, `FluxIndex.Storage.SQLite` 0.61.4 -> 0.61.5 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+
+---
+
 ## [0.37.10] - 2026-09-29
 
 ### Changed
