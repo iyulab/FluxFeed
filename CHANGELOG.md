@@ -12,6 +12,13 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.37.13] - 2026-09-30
+
+### Changed
+- Re-pinned sibling package(s) `FileFlux` 0.33.5 -> 0.33.6 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+
+---
+
 ## [0.37.12] - 2026-09-29
 
 ### Changed
