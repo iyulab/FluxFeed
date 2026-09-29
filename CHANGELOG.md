@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.37.14] - Unreleased
+## [0.37.14] - 2026-09-30
 
 ### Changed
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.17.0 -> 0.17.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
