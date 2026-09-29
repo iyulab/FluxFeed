@@ -106,9 +106,12 @@ using (var scope = host.Services.CreateScope())
 await host.StopAsync();
 ```
 
-FluxFeed binds the vector store to the embedder's identity for you — there is no `BindIdentity` call
-to make, and a store already bound to a different embedder fails at startup with
-`EmbeddingModelMismatchException` rather than mixing vectors.
+FluxFeed binds the vector store to the embedder's identity for you when it builds the vault pipeline (the
+first `IVault` you resolve, not host start) — there is no `BindIdentity` call to make. What the identity
+does is the store's business: the sqlite-vec store names its vector table by the embedder's fingerprint, so
+a different embedder over the same database gets a vector table of its own rather than mixing vectors
+(re-memorize to fill it), and binding one store instance to two different embedders throws
+`EmbeddingModelMismatchException`.
 
 `IVault` is scoped — resolve it from a scope, or inject it into a scoped service, rather than from
 the root provider.
@@ -353,6 +356,8 @@ await vault.ResumeQueueAsync();
 ```
 
 ```csharp
+using Microsoft.Extensions.Logging;
+
 var audit = await vault.AuditIndexAsync();
 if (audit.MismatchedEntryCount > 0)
     logger.LogWarning("{Count} entries have keyword rows the vector store never keyed", audit.MismatchedEntryCount);
@@ -432,6 +437,8 @@ leaves half a record behind.
 An unreadable record is distinguished from an absent one:
 
 ```csharp
+using FluxFeed.Domain.Entities;   // VaultEntry
+
 // absent → null; present but unreadable → VaultRecordUnreadableException
 var entry = VaultEntry.LoadByHash(hash, vaultBasePath);
 
@@ -463,14 +470,15 @@ Images extracted from documents are always stored. Register a describer and thos
 indexed too, which is what makes scanned or diagram-only documents searchable at all.
 
 ```csharp
-public sealed class VisionEnricher : IVaultImageEnricher
+services.AddSingleton<IVaultImageEnricher, VisionEnricher>();
+
+// MyVisionModel stands for whatever vision client you use.
+public sealed class VisionEnricher(MyVisionModel vision) : IVaultImageEnricher
 {
-    public async Task<string?> DescribeAsync(VaultImageDescriptionRequest request, CancellationToken ct)
-        => await _vision.CaptionAsync(request.Image.FilePath, request.DocumentText, ct);
+    public Task<string?> DescribeAsync(VaultImageDescriptionRequest request, CancellationToken ct = default)
+        => vision.CaptionAsync(request.Image.FilePath, request.DocumentText, ct);
         // returning null means "not this time" — the pipeline retries that image on the next run
 }
-
-services.AddSingleton<IVaultImageEnricher, VisionEnricher>();
 ```
 
 Descriptions are persisted per image, so re-memorizing does not re-describe images that already
@@ -516,17 +524,20 @@ once from what is registered — `IVaultPipeline.HybridKeywordLeg` reports it an
 |---|---|---|
 | `IKeywordSearchService` | `KeywordIndex` | the same index the `Keyword` strategy searches and ingestion writes, fused through the registered `IHybridSearchService` or the stock `HybridSearchService` — a registered `ITextAnalyzer` and `KeywordFieldOptions` apply to hybrid too |
 | no keyword service, vector store with `INativeHybridSearch` | `Native` | the store fuses over keyword rows it wrote itself (`FluxIndex.Storage.SQLite`'s sqlite-vec store: FTS5, its own tokenizer) |
-| neither | `None` | runs as vector search |
+| no keyword service, no native store, an `IHybridSearchService` | `KeywordIndex` | fused by that service over whatever keyword index it was built with — FluxFeed's ingestion does not write to it, and `Keyword` requests still run as vector search |
+| none of these | `None` | runs as vector search |
 
 A `PathScope` reaches both legs before fusion either way, so a scoped request gets the fused ranking of the
 in-scope chunks. When hybrid is not available the query runs as vector search and says so via
 `VaultSearchResult.ExecutedStrategy` — compare it against `RequestedStrategy` rather than assuming the request was
 honored.
 
-Both legs fuse by weighted reciprocal rank, so **hybrid scores are rank-sized** — about 0.016 for a chunk both legs
-rank first, never near 1. On the keyword-index leg `HybridSearchService` picks the weights from the query's length
-(one or two terms: vector 0.3 / keyword 0.7; three to five: 0.6 / 0.4; longer: 0.8 / 0.2); the native leg uses the
-store's own weighting. FluxFeed does not expose these weights yet.
+The legs are fused by weighted reciprocal rank, so **hybrid scores are usually rank-sized** — about 0.016 for a chunk
+both legs rank first, never near 1. On the keyword-index leg the stock `HybridSearchService` picks the weights from the
+query's length (one or two terms: vector 0.3 / keyword 0.7; three to five: 0.6 / 0.4; longer: 0.8 / 0.2), and a query
+containing one of the whole words `API`, `HTTP`, `JSON`, `SQL`, `AI` or `ML` is fused by weighted sum of normalized
+scores instead — not rank-sized. The native leg uses the store's own weighting. FluxFeed does not expose these weights
+yet.
 
 `VaultSearchOptions.MinScore` under `Hybrid` is a **similarity floor on the vector leg, applied before fusion** —
 the same meaning it has for `Vector`, so one similarity-sized value works whichever of the two runs. It is never
@@ -578,6 +589,7 @@ services.AddSingleton<IRAGSecurityPipeline, IndirectInjectionDetector>();
 Constructing the pipeline by hand works the same way:
 
 ```csharp
+using FluxFeed.Services;
 using FluxGuard.Remote.RAG;
 
 var pipeline = new VaultPipeline(
@@ -633,6 +645,7 @@ holds only the stateless singletons (hasher, git, file watcher) and is valid und
 ```csharp
 services.AddFileVaultFactoryWithFluxIndex(o => o.VaultBasePath = "./data");
 
+// factory: the IVaultFactory resolved from the container (it is a singleton).
 var vault = factory.GetOrCreate("tenant-a");
 await vault.MemorizeAsync(path);
 
@@ -653,6 +666,8 @@ Chunks are tagged with a `vault_id` metadata field, which is what makes the bulk
 `FileVaultOptions` (bindable from the `FileVault` configuration section):
 
 ```csharp
+using FluxFeed.Options;
+
 services.Configure<FileVaultOptions>(configuration.GetSection(FileVaultOptions.SectionName));
 ```
 
@@ -705,6 +720,8 @@ The queue handles this itself, so **a consumer does not need a per-file lock of 
 nothing on `IVault` could set it, so a bulk crawl and a user waiting on one file competed purely on arrival order.
 
 ```csharp
+using FluxFeed.Domain.Entities;   // VaultJobPriority
+
 await vault.SyncAsync(VaultJobPriority.Low, ct);                              // background crawl, yields
 await vault.MemorizeAsync(path, VaultJobPriority.High, waitForCompletion: true, ct);   // user is waiting
 ```
@@ -729,6 +746,8 @@ jobs; it is the pair (`ProcessingCount` + a fresh `LastAttemptedAt`) that says "
 `GetJobsAsync` orders and pages in SQL:
 
 ```csharp
+using FluxFeed.Domain.Entities;   // VaultJobStatus
+
 // the latest 50 failures, not the oldest 50
 var recent = await queue.GetJobsAsync(VaultJobStatus.Failed, limit: 50, newestFirst: true, ct: ct);
 // second page

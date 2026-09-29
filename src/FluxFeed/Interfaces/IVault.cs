@@ -781,8 +781,10 @@ public sealed class VaultSearchOptions
 
     /// <summary>
     /// Search strategy to use. Defaults to <see cref="VaultSearchStrategy.Vector"/>. A
-    /// <see cref="VaultSearchStrategy.Hybrid"/> request is honored only when the consumer registered
-    /// <c>IHybridSearchService</c> (or the vector store exposes a native hybrid path); a
+    /// <see cref="VaultSearchStrategy.Hybrid"/> request is honored when the consumer registered
+    /// <c>IKeywordSearchService</c> (fused through a registered <c>IHybridSearchService</c> or the stock one), when the
+    /// vector store exposes a native hybrid path, or when an <c>IHybridSearchService</c> alone is registered
+    /// (<c>IVaultPipeline.HybridKeywordLeg</c> says which); a
     /// <see cref="VaultSearchStrategy.Keyword"/> request is honored only when the consumer registered
     /// <c>IKeywordSearchService</c>. Either degrades to vector when its backend is absent, and the
     /// degradation is reported on <see cref="VaultSearchResult.ExecutedStrategy"/>.

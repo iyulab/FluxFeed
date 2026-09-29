@@ -12,6 +12,25 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.37.14] - Unreleased
+
+### Fixed
+- **Every C# example in the README compiles against the current API, and a test keeps it that way.** Seven examples did
+  not compile as written: six used types (`VaultEntry`, `VaultJobPriority`, `VaultJobStatus`, `FileVaultOptions`,
+  `VaultPipeline`, the `LogWarning` extension) from namespaces they did not import, and the image-enricher example read an
+  undeclared field and declared its class before a statement. A test now compiles each block.
+- **The README no longer says a store bound to a different embedder fails at startup.** FluxFeed binds the store when the
+  vault pipeline is first built, not at host start; the sqlite-vec store gives a different embedder its own vector table
+  rather than throwing, and `EmbeddingModelMismatchException` is thrown only when one store instance is bound to two
+  different embedders.
+- **The hybrid-search documentation describes every keyword leg and both fusion modes.** A registered
+  `IHybridSearchService` without `IKeywordSearchService` also reports `KeywordIndex`, over an index FluxFeed does not
+  write; the stock hybrid service fuses queries containing `API`, `HTTP`, `JSON`, `SQL`, `AI` or `ML` by weighted sum, so
+  their scores are not rank-sized. The `VaultSearchOptions.SearchStrategy` XML doc now names the `IKeywordSearchService`
+  path it omitted.
+
+---
+
 ## [0.37.13] - 2026-09-30
 
 ### Changed

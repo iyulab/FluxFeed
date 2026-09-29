@@ -19,7 +19,7 @@
     <PackageVersion Include="FluxGuard.Remote" Version="0.17.0" />
   </ItemGroup>
   <ItemGroup>
-    <!-- Testing (xUnit v3 / Microsoft.Testing.Platform — BD-20260829-xunit-v3-pilot rollout) -->
+    <!-- Testing (xUnit v3 / Microsoft.Testing.Platform) -->
     <PackageVersion Include="xunit.v3" Version="4.0.0" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />
     <PackageVersion Include="Microsoft.Testing.Extensions.HangDump" Version="2.3.3" />
@@ -28,5 +28,9 @@
     <PackageVersion Include="NSubstitute" Version="6.2.0" />
     <!-- Real sqlite-vec store for the README default-stack integration test (same family version as FluxIndex.Core) -->
     <PackageVersion Include="FluxIndex.Storage.SQLite" Version="0.62.0" />
+    <!-- Compiles the README's C# blocks against the current API (ReadmeSnippetCompileTests) -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <!-- Host.CreateApplicationBuilder in the README Quick Start -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
   </ItemGroup>
 </Project>
