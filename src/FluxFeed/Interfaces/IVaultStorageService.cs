@@ -124,6 +124,15 @@ public interface IVaultStorageService
     Task DeleteEntryStorageAsync(VaultEntry entry, CancellationToken ct = default);
 
     /// <summary>
+    /// Moves an entry's whole storage directory — record, artifacts, images and the git-tracked <c>vault/</c> folder with
+    /// its history — to the directory of <paramref name="destinationFilepathHash"/>. The entry record itself is not
+    /// changed; the caller relocates and saves it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The destination directory already exists.</exception>
+    /// <exception cref="DirectoryNotFoundException">The entry has no storage directory.</exception>
+    Task MoveEntryStorageAsync(VaultEntry entry, string destinationFilepathHash, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets total storage size for an entry.
     /// </summary>
     Task<long> GetStorageSizeAsync(VaultEntry entry, CancellationToken ct = default);

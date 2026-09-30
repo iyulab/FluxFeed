@@ -444,6 +444,40 @@ public sealed partial class VaultStorageService : IVaultStorageService
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// One directory rename, so the git repository in <c>vault/</c> keeps every commit. Retried like a delete: on
+    /// Windows a concurrent reader of <c>meta.json</c> briefly holds the directory.
+    /// </remarks>
+    public async Task MoveEntryStorageAsync(VaultEntry entry, string destinationFilepathHash, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (!FilepathHasher.IsValidHash(destinationFilepathHash))
+            throw new ArgumentException($"'{destinationFilepathHash}' is not a filepath hash.", nameof(destinationFilepathHash));
+
+        var source = entry.EntryPath;
+        var destination = Path.Combine(entry.VaultBasePath, destinationFilepathHash);
+        if (!Directory.Exists(source))
+            throw new DirectoryNotFoundException($"Entry storage does not exist: {source}");
+        if (Directory.Exists(destination))
+            throw new InvalidOperationException($"Entry storage already exists at the destination: {destination}");
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                Directory.Move(source, destination);
+                LogMovedStorage(_logger, entry.Id, destinationFilepathHash);
+                return;
+            }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < DeleteMaxAttempts && !Directory.Exists(destination))
+            {
+                LogStorageMoveRetry(_logger, entry.Id, attempt, ex.Message);
+                await Task.Delay(DeleteRetryDelayMs, ct);
+            }
+        }
+    }
+
     public Task<long> GetStorageSizeAsync(VaultEntry entry, CancellationToken ct = default)
     {
         if (!Directory.Exists(entry.EntryPath))
@@ -532,6 +566,12 @@ public sealed partial class VaultStorageService : IVaultStorageService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Storage delete for entry {EntryId} hit a transient lock (attempt {Attempt}), retrying: {Error}")]
     private static partial void LogStorageDeleteRetry(ILogger logger, Guid entryId, int attempt, string error);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Moved storage for entry {EntryId} to {FilepathHash}")]
+    private static partial void LogMovedStorage(ILogger logger, Guid entryId, string filepathHash);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Storage move for entry {EntryId} hit a transient lock (attempt {Attempt}), retrying: {Error}")]
+    private static partial void LogStorageMoveRetry(ILogger logger, Guid entryId, int attempt, string error);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Image manifest for entry {EntryId} at {ManifestPath} is unreadable and is being rebuilt; descriptions it held are not carried forward: {Error}")]
     private static partial void LogRebuildingUnreadableManifest(ILogger logger, Guid entryId, string manifestPath, string error);

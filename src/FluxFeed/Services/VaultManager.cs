@@ -649,6 +649,161 @@ public sealed partial class VaultManager : IVault
         }
     }
 
+    /// <inheritdoc />
+    public async Task<VaultMoveResult> MoveAsync(string sourcePath, string destinationPath, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+
+        var from = Path.GetFullPath(sourcePath);
+        var to = Path.GetFullPath(destinationPath);
+        if (string.Equals(from, to, StringComparison.Ordinal))
+            throw new ArgumentException($"The source and destination are both '{from}'.", nameof(destinationPath));
+
+        var entry = await GetAsync(from, ct)
+            ?? throw new KeyNotFoundException($"No vault entry tracks '{from}'.");
+        if (entry.SyncStatus is SyncStatus.RemovalPending or SyncStatus.RemovalPartial)
+            throw new InvalidOperationException($"The entry for '{from}' is being removed and cannot be moved.");
+
+        var previousPath = entry.SourcePath;
+        var previousHash = entry.FilepathHash;
+        var newHash = FilepathHasher.ComputeHash(to);
+
+        if (string.Equals(previousHash, newHash, StringComparison.Ordinal))
+        {
+            // Same entry under another spelling: only the recorded path changes.
+            entry.Relocate(to);
+            RecordMovedSource(entry);
+            LogMovedRecordOnly(_logger, previousPath, entry.SourcePath);
+            return new VaultMoveResult
+            {
+                SourcePath = previousPath,
+                DestinationPath = entry.SourcePath,
+                PreviousFilepathHash = previousHash,
+                FilepathHash = newHash,
+                IndexRekeyed = false
+            };
+        }
+
+        if (Directory.Exists(Path.Combine(_storage.BasePath, newHash)))
+            throw new InvalidOperationException(
+                $"'{to}' is already tracked by the vault; remove that entry first. Nothing was changed.");
+
+        await EnsureNoPendingJobAsync(from, [previousHash, newHash], ct);
+
+        // The entry directory moves first — one rename, which carries the git history along and is undone by renaming
+        // back. The index legs are re-keyed after it; the pipeline checks every chunk before writing any leg and moves
+        // the legs it wrote back if a later one fails, so a failure here only has the directory and record to undo.
+        await _storage.MoveEntryStorageAsync(entry, newHash, ct);
+        entry.Relocate(to);
+
+        VaultMoveIndexResult indexResult;
+        try
+        {
+            RecordMovedSource(entry);
+            indexResult = await _pipeline.ReassignAsync(entry, previousPath, ct);
+        }
+        catch (Exception ex)
+        {
+            LogMoveUndoing(_logger, previousPath, to, ex.GetType().Name);
+            try
+            {
+                await _storage.MoveEntryStorageAsync(entry, previousHash, CancellationToken.None);
+                entry.Relocate(previousPath);
+                entry.SaveMetadata();
+            }
+            catch (Exception undo)
+            {
+                LogMoveUndoFailed(_logger, undo, previousPath, to);
+            }
+
+            throw;
+        }
+
+        LogMovedEntry(_logger, previousPath, entry.SourcePath, indexResult.VectorChunksMoved, indexResult.KeywordChunksMoved);
+        return new VaultMoveResult
+        {
+            SourcePath = previousPath,
+            DestinationPath = entry.SourcePath,
+            PreviousFilepathHash = previousHash,
+            FilepathHash = newHash,
+            IndexRekeyed = true,
+            VectorChunksMoved = indexResult.VectorChunksMoved,
+            KeywordChunksMoved = indexResult.KeywordChunksMoved,
+            Graph = indexResult.Graph
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<VaultFolderMoveResult> MoveFolderAsync(string sourceFolder, string destinationFolder, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceFolder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationFolder);
+
+        var from = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceFolder));
+        var to = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destinationFolder));
+        if (string.Equals(from, to, StringComparison.Ordinal))
+            throw new ArgumentException($"The source and destination folders are both '{from}'.", nameof(destinationFolder));
+
+        // Up to a separator, so "docs" does not claim "docs2".
+        var prefix = from + Path.DirectorySeparatorChar;
+        var entries = (await ListAsync(ct: ct))
+            .Where(e => e.SourcePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(e => e.SourcePath, StringComparer.Ordinal)
+            .ToList();
+
+        var moved = new List<VaultMoveResult>(entries.Count);
+        var errors = new List<VaultMoveError>();
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            var destination = Path.Combine(to, entry.SourcePath[prefix.Length..]);
+            try
+            {
+                moved.Add(await MoveAsync(entry.SourcePath, destination, ct));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogFolderEntryMoveFailed(_logger, ex, entry.SourcePath, destination);
+                errors.Add(new VaultMoveError
+                {
+                    SourcePath = entry.SourcePath,
+                    DestinationPath = destination,
+                    ErrorMessage = ex.Message,
+                    Exception = ex
+                });
+            }
+        }
+
+        return new VaultFolderMoveResult { Moved = moved, Errors = errors };
+    }
+
+    /// <summary>
+    /// Saves the moved record. An entry the sync marked deleted because its file left the old path has a source again
+    /// at the new one.
+    /// </summary>
+    private static void RecordMovedSource(VaultEntry entry)
+    {
+        if (entry.SyncStatus == SyncStatus.SourceDeleted && entry.SourceExists)
+            entry.UpdateSyncStatus(SyncStatus.InSync);
+        entry.SaveMetadata();
+    }
+
+    /// <summary>
+    /// Refuses a move while the queue holds an unfinished job for either path: a memorize finishing after the move would
+    /// write the old document id back.
+    /// </summary>
+    private async Task EnsureNoPendingJobAsync(string sourcePath, IReadOnlyCollection<string> filepathHashes, CancellationToken ct)
+    {
+        foreach (var status in new[] { VaultJobStatus.Queued, VaultJobStatus.Processing })
+        {
+            var jobs = await _queue.GetJobsAsync(status, ct: ct);
+            if (jobs.Any(job => filepathHashes.Contains(job.FilepathHash)))
+                throw new InvalidOperationException(
+                    $"'{sourcePath}' has a {status.ToString().ToLowerInvariant()} job; move it after the job finishes. Nothing was changed.");
+        }
+    }
+
     public async Task RemoveAsync(IEnumerable<string> filePaths, CancellationToken ct = default)
     {
         foreach (var filePath in filePaths)
@@ -1583,6 +1738,21 @@ public sealed partial class VaultManager : IVault
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Search '{Query}' in {Count} documents returned {Results} results in {Duration}ms")]
     private static partial void LogSearchCompleted(ILogger logger, string query, int count, int results, long duration);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Moved entry {PreviousPath} to {SourcePath}: {VectorChunks} vector and {KeywordChunks} keyword chunks re-keyed, none re-embedded")]
+    private static partial void LogMovedEntry(ILogger logger, string previousPath, string sourcePath, int vectorChunks, int keywordChunks);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Moved entry {PreviousPath} to {SourcePath}: same entry, record updated only")]
+    private static partial void LogMovedRecordOnly(ILogger logger, string previousPath, string sourcePath);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Moving {PreviousPath} to {DestinationPath} failed ({ExceptionType}); moving the entry directory back")]
+    private static partial void LogMoveUndoing(ILogger logger, string previousPath, string destinationPath, string exceptionType);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Moving the entry directory back from {DestinationPath} to {PreviousPath} failed; the entry record may name the wrong path")]
+    private static partial void LogMoveUndoFailed(ILogger logger, Exception exception, string previousPath, string destinationPath);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Folder move: {SourcePath} was not moved to {DestinationPath}")]
+    private static partial void LogFolderEntryMoveFailed(ILogger logger, Exception exception, string sourcePath, string destinationPath);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Search failed for query: {Query}")]
     private static partial void LogSearchFailed(ILogger logger, Exception exception, string query);

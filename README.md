@@ -33,6 +33,9 @@ document's extracted content, see its commit history, and edit it without touchi
 - **Damage-aware records** — records are swapped in atomically, and an unreadable one is reported rather than dropped from listings
 - **Image enrichment** — plug in a vision model and extracted images become indexed content
 - **Hybrid-ready** — chunks are written to the keyword index alongside the vector store when one is registered
+- **Move and rename without re-embedding** — `IVault.MoveAsync(sourcePath, destinationPath)` and
+  `MoveFolderAsync(sourceFolder, destinationFolder)` move a tracked file's entry, git history and index rows (vector,
+  keyword, GraphRAG) to its new path; always available — see [Moving and renaming files](#moving-and-renaming-files--moveasync)
 - **Reranking** — `VaultSearchOptions.UseReranker` orders an over-fetched candidate pool with the registered FluxIndex
   `IReranker` (opt-in; see [Reranked search](#reranked-search--vaultsearchoptionsusereranker))
 
@@ -262,6 +265,40 @@ why there is no ignore file at the entry level, where git would never read one.
 > **Breaking in 0.8.0** — `VaultEntry.GitignorePath` and `IVaultStorageService.CreateGitignoreAsync`
 > were removed for that reason. There is no replacement; the file they produced had no effect under
 > any condition, so calls to them can simply be deleted.
+
+### Moving and renaming files — `MoveAsync`
+
+An entry and its chunk ids derive from the file's path, so a moved file would otherwise mean `RemoveAsync` plus
+`MemorizeAsync`: extraction, chunking and embedding all over again, with the document missing from search in between.
+`MoveAsync` re-keys what is already there instead (0.39.0):
+
+```csharp
+// The file has already moved on disk; the entry, its history and its index rows follow it.
+VaultMoveResult moved = await vault.MoveAsync("docs/draft.md", "docs/final/report.md", ct);
+Console.WriteLine($"{moved.VectorChunksMoved} chunks re-keyed, none re-embedded");
+
+// A whole folder is one move per entry; an entry that cannot move is reported and the rest still move.
+VaultFolderMoveResult folder = await vault.MoveFolderAsync("docs/2025", "archive/2025", ct);
+foreach (var error in folder.Errors)
+    Console.WriteLine($"{error.SourcePath}: {error.ErrorMessage}");
+```
+
+- The entry directory moves with its git repository, so `LogAsync` at the new path shows the commits made before.
+- Every chunk gets the id a memorize at the new path would give it (`ChunkIdentity`), on the vector store, the keyword
+  index and the GraphRAG graph, with `source_path`, `file_name`, `filepath_hash` and `document_id` rewritten. The
+  vectors are kept as stored (FluxIndex `ReassignDocumentAsync`), so the next memorize of the file is an update.
+- Everything is checked before anything is written. A chunk whose id no longer follows from its stored text — rewritten
+  by the RAG security pipeline, or indexed before 0.26.0 — or a keyword row with no vector row makes the move throw
+  with nothing changed; `RepairKeywordIndexAsync` fixes the second, removing and memorizing the entry the first. A
+  destination that is already tracked, an entry being removed, or a queued or running job for either path also throws.
+  If a later index leg fails, the earlier ones and the directory are moved back.
+- It records a move that already happened: it neither moves the file nor checks that it exists. It runs at once,
+  not through the queue.
+- A rename that only changes letter case names the same entry (paths are compared case-insensitively); only the
+  recorded path changes and `VaultMoveResult.IndexRekeyed` is `false`.
+- The folder watcher raises `IFileWatcherService.FileRenamed`, but the vault does not subscribe to it: to follow
+  renames in a watched folder, handle that event and call `MoveAsync(e.OldPath, e.NewPath)` (after the debounce your
+  application needs).
 
 ## File selection patterns
 

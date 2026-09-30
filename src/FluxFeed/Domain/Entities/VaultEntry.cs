@@ -501,6 +501,24 @@ public sealed class VaultEntry
     }
 
     /// <summary>
+    /// Points the entry at a new source path: <see cref="SourcePath"/> and the <see cref="FilepathHash"/> derived from it,
+    /// and with them <see cref="EntryPath"/>. Everything else — id, stage, content hash, chunk count, history — stays.
+    /// </summary>
+    /// <remarks>
+    /// This only changes the record in memory. The caller moves the entry directory to the new
+    /// <see cref="EntryPath"/> and saves the record there; <c>IVault.MoveAsync</c> does all of it.
+    /// </remarks>
+    /// <param name="newSourcePath">The file's new path.</param>
+    public void Relocate(string newSourcePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(newSourcePath);
+
+        var fullPath = Path.GetFullPath(newSourcePath);
+        SourcePath = fullPath;
+        FilepathHash = FilepathHasher.ComputeHash(fullPath);
+    }
+
+    /// <summary>
     /// Saves entry metadata to disk.
     /// </summary>
     public void SaveMetadata()

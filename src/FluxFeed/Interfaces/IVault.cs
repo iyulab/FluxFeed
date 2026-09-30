@@ -165,6 +165,62 @@ public interface IVault
     Task RemoveAsync(IEnumerable<string> filePaths, CancellationToken ct = default);
 
     /// <summary>
+    /// Records that a tracked file now lives at <paramref name="destinationPath"/>: the entry, its vault history and its
+    /// index rows move to the new path without extracting, chunking or embedding anything again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A vault entry and its chunks are identified by a hash of the file path, so a moved file used to mean
+    /// <see cref="RemoveAsync(string, CancellationToken)"/> plus <see cref="MemorizeAsync(string, CancellationToken)"/> —
+    /// every chunk extracted and embedded again, and the document missing from search in between. This re-keys what is
+    /// there instead: the entry directory (with its git history — <see cref="LogAsync"/> at the new path shows the
+    /// commits made before the move), the entry record, and every index leg (vector store, keyword index, GraphRAG graph),
+    /// whose chunks get the ids a memorize at the new path would give them and new provenance metadata
+    /// (<c>source_path</c>, <c>file_name</c>, <c>filepath_hash</c>, <c>document_id</c>). Vectors are kept as stored.
+    /// </para>
+    /// <para>
+    /// It does not move the file itself; call it after the file has moved (for example from
+    /// <see cref="IFileWatcherService.FileRenamed"/>). It runs immediately rather than through the queue, and refuses
+    /// while a queued or running job targets either path; a job enqueued while it runs is not held back.
+    /// </para>
+    /// <para>
+    /// A rename that only changes letter case names the same entry (paths are compared case-insensitively), so only
+    /// the record's <see cref="VaultEntry.SourcePath"/> changes; the index keeps the previous spelling in its metadata
+    /// until the next memorize, and <see cref="VaultMoveResult.IndexRekeyed"/> is <c>false</c>.
+    /// </para>
+    /// <para>
+    /// The default implementation throws <see cref="NotSupportedException"/>; <c>VaultManager</c> implements it.
+    /// </para>
+    /// </remarks>
+    /// <param name="sourcePath">The path the entry is tracked under.</param>
+    /// <param name="destinationPath">The file's new path.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>What moved.</returns>
+    /// <exception cref="ArgumentException">Both paths are the same.</exception>
+    /// <exception cref="KeyNotFoundException">No entry tracks <paramref name="sourcePath"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The destination is already tracked, the entry is being removed or has a queued or running job, or a stored chunk
+    /// cannot be re-keyed (see <see cref="IVaultPipeline.ReassignAsync"/>) — in every case with nothing changed.
+    /// </exception>
+    Task<VaultMoveResult> MoveAsync(string sourcePath, string destinationPath, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not support MoveAsync.");
+
+    /// <summary>
+    /// Moves every entry tracked under <paramref name="sourceFolder"/> to the same relative path under
+    /// <paramref name="destinationFolder"/> — <see cref="MoveAsync"/> once per entry. An entry that cannot be moved is
+    /// reported in <see cref="VaultFolderMoveResult.Errors"/> and left where it was; the others still move.
+    /// </summary>
+    /// <remarks>
+    /// Entries match by path prefix up to a directory separator, so moving <c>docs</c> does not touch <c>docs2</c>.
+    /// The default implementation throws <see cref="NotSupportedException"/>; <c>VaultManager</c> implements it.
+    /// </remarks>
+    /// <param name="sourceFolder">The folder the entries are tracked under.</param>
+    /// <param name="destinationFolder">The folder's new path.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<VaultFolderMoveResult> MoveFolderAsync(string sourceFolder, string destinationFolder, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not support MoveFolderAsync.");
+
+    /// <summary>
     /// Bulk-removes everything belonging to this (tenant-scoped) vault from the shared search
     /// backends — vectors and, when a keyword index is wired, its rows too — in one filtered delete
     /// per backend rather than a per-entry loop. Requires the vault to be tenant-scoped
@@ -622,6 +678,75 @@ public sealed class QueueStatus
     public DateTimeOffset? LastAttemptedAt { get; init; }
 
     public double AverageProcessingTimeMs { get; init; }
+}
+
+/// <summary>
+/// What <see cref="IVault.MoveAsync"/> moved.
+/// </summary>
+public sealed class VaultMoveResult
+{
+    /// <summary>The path the entry was tracked under.</summary>
+    public string SourcePath { get; init; } = string.Empty;
+
+    /// <summary>The path the entry is tracked under now.</summary>
+    public string DestinationPath { get; init; } = string.Empty;
+
+    /// <summary>The entry's filepath hash (document id) before the move.</summary>
+    public string PreviousFilepathHash { get; init; } = string.Empty;
+
+    /// <summary>The entry's filepath hash (document id) after the move.</summary>
+    public string FilepathHash { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Whether the index rows were re-keyed. <c>false</c> only when both paths name the same entry (a rename that
+    /// changes letter case only), where the record alone changes.
+    /// </summary>
+    public bool IndexRekeyed { get; init; }
+
+    /// <summary>Chunks the vector store moved.</summary>
+    public int VectorChunksMoved { get; init; }
+
+    /// <summary>Chunks the keyword index moved; 0 without a keyword index.</summary>
+    public int KeywordChunksMoved { get; init; }
+
+    /// <summary>What the GraphRAG graph rewrote, or <c>null</c> without a GraphRAG service.</summary>
+    public FluxIndex.Core.Application.Interfaces.GraphReassignResult? Graph { get; init; }
+}
+
+/// <summary>
+/// What <see cref="IVault.MoveFolderAsync"/> moved and what it could not.
+/// </summary>
+public sealed class VaultFolderMoveResult
+{
+    /// <summary>The entries that moved.</summary>
+    public IReadOnlyList<VaultMoveResult> Moved { get; init; } = [];
+
+    /// <summary>The entries that did not move, each with the reason. They are still tracked under their old path.</summary>
+    public IReadOnlyList<VaultMoveError> Errors { get; init; } = [];
+
+    /// <summary>Number of entries that did not move.</summary>
+    public int ErrorCount => Errors.Count;
+
+    /// <summary>Whether every entry under the folder moved.</summary>
+    public bool IsSuccess => Errors.Count == 0;
+}
+
+/// <summary>
+/// An entry <see cref="IVault.MoveFolderAsync"/> could not move.
+/// </summary>
+public sealed class VaultMoveError
+{
+    /// <summary>The path the entry is still tracked under.</summary>
+    public string SourcePath { get; init; } = string.Empty;
+
+    /// <summary>The path it was to move to.</summary>
+    public string DestinationPath { get; init; } = string.Empty;
+
+    /// <summary>Why it did not move.</summary>
+    public string ErrorMessage { get; init; } = string.Empty;
+
+    /// <summary>The exception the move threw.</summary>
+    public Exception? Exception { get; init; }
 }
 
 /// <summary>

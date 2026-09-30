@@ -109,6 +109,31 @@ public interface IVaultPipeline
     Task RemoveAsync(VaultEntry entry, CancellationToken ct = default);
 
     /// <summary>
+    /// Re-keys an entry's index rows after its source path changed: every leg (vector store, keyword index, GraphRAG
+    /// graph) moves the rows of the previous document id to the entry's current one, under the chunk ids a memorize
+    /// at the new path would write, with the provenance metadata (<c>document_id</c>, <c>source_path</c>,
+    /// <c>filepath_hash</c>, <c>file_name</c>) rewritten. Content and vectors are kept — nothing is embedded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The chunk-id map is derived from the stored chunks and checked against their stored ids before any leg is
+    /// written. A chunk whose id cannot be reproduced — its text was rewritten by the RAG security pipeline, it was
+    /// indexed before chunk ids derived from content, or it exists on the keyword leg only — makes the whole call throw
+    /// with nothing changed; <see cref="RepairKeywordIndexAsync(IReadOnlyList{VaultEntry}, CancellationToken)"/> heals
+    /// keyword-only rows, and removing and memorizing the entry again handles the rest.
+    /// </para>
+    /// <para>
+    /// If a leg fails after an earlier one was written, the earlier legs are moved back before the failure is
+    /// rethrown.
+    /// </para>
+    /// </remarks>
+    /// <param name="entry">The entry, already pointing at its new source path (<see cref="VaultEntry.Relocate"/>).</param>
+    /// <param name="previousSourcePath">The source path the rows were indexed under.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">A stored chunk's id cannot be reproduced, or a leg rejected the move.</exception>
+    Task<VaultMoveIndexResult> ReassignAsync(VaultEntry entry, string previousSourcePath, CancellationToken ct = default);
+
+    /// <summary>
     /// Bulk-deletes everything tagged with the given vault id — vectors and, when a keyword index is
     /// wired, its rows too — in one filtered delete per backend. Used by tenant/vault purge.
     /// </summary>
@@ -234,6 +259,14 @@ public sealed class MemorizeOptions
     /// </summary>
     public GraphRAGBuildOptions? GraphRAGOptions { get; set; }
 }
+
+/// <summary>
+/// What <see cref="IVaultPipeline.ReassignAsync"/> moved on each index leg. A leg that is not registered reports 0.
+/// </summary>
+/// <param name="VectorChunksMoved">Chunks the vector store moved to the new document id.</param>
+/// <param name="KeywordChunksMoved">Chunks the keyword index moved to the new document id.</param>
+/// <param name="Graph">What the GraphRAG graph rewrote, or <c>null</c> when no GraphRAG service is registered.</param>
+public readonly record struct VaultMoveIndexResult(int VectorChunksMoved, int KeywordChunksMoved, GraphReassignResult? Graph);
 
 /// <summary>
 /// Row counts per index leg for a set of entries — see <see cref="IVaultPipeline.GetIndexRowCountsAsync"/>.

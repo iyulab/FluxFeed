@@ -12,6 +12,27 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.39.0] - Unreleased
+
+### Added
+- **A tracked file can be moved or renamed without being embedded again.** `IVault.MoveAsync(sourcePath,
+  destinationPath)` moves the entry directory (git history included), the entry record and every index leg — vector
+  store, keyword index, GraphRAG graph — to the new path. Chunks get the ids a memorize at the new path would write and
+  new `source_path`, `file_name`, `filepath_hash` and `document_id` metadata; their vectors are kept. Everything is
+  checked before anything is written, and a later failure moves the earlier legs and the directory back. Returns a
+  `VaultMoveResult`.
+- **`IVault.MoveFolderAsync(sourceFolder, destinationFolder)`** moves every entry under a folder; an entry that cannot
+  move is reported in `VaultFolderMoveResult.Errors` and stays tracked under its old path while the others move.
+- `IVaultPipeline.ReassignAsync`, `IVaultStorageService.MoveEntryStorageAsync` and `VaultEntry.Relocate` are the steps
+  the move is made of. The two `IVault` members have a default implementation that throws `NotSupportedException`, so
+  other `IVault` implementations keep compiling.
+
+### Dependencies
+- Requires FluxIndex.Core 0.64.0 (`ReassignDocumentAsync` on the vector store and keyword index, `ReassignChunksAsync`
+  on the GraphRAG service).
+
+---
+
 ## [0.38.0] - 2026-09-30
 
 ### Changed

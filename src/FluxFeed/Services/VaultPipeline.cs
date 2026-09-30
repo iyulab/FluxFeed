@@ -868,6 +868,213 @@ public sealed partial class VaultPipeline : IVaultPipeline
         LogRemovedChunks(_logger, documentId);
     }
 
+    /// <inheritdoc />
+    public async Task<VaultMoveIndexResult> ReassignAsync(VaultEntry entry, string previousSourcePath, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentException.ThrowIfNullOrWhiteSpace(previousSourcePath);
+
+        var previousPath = Path.GetFullPath(previousSourcePath);
+        var oldDocumentId = FilepathHasher.ComputeHash(previousPath);
+        var newDocumentId = entry.FilepathHash;
+        if (string.Equals(oldDocumentId, newDocumentId, StringComparison.Ordinal))
+            throw new ArgumentException(
+                $"'{previousPath}' and '{entry.SourcePath}' name the same vault entry; there are no index rows to re-key.",
+                nameof(previousSourcePath));
+
+        if (_vectorStore == null && _keywordSearchService == null)
+        {
+            LogNoVectorStoreSkipRemoval(_logger);
+            return new VaultMoveIndexResult(0, 0, null);
+        }
+
+        // Everything is read and checked before any leg is written.
+        var chunkIdMap = await BuildChunkIdMapAsync(oldDocumentId, newDocumentId, entry.SourcePath, ct);
+        if (chunkIdMap.Count == 0)
+            return new VaultMoveIndexResult(0, 0, null);
+
+        var updates = ProvenanceUpdates(newDocumentId, entry.SourcePath);
+        var inverseMap = chunkIdMap.ToDictionary(kv => kv.Value, kv => kv.Key, StringComparer.Ordinal);
+        var inverseUpdates = ProvenanceUpdates(oldDocumentId, previousPath);
+        var partition = GraphPartitionFor(null);
+
+        var vectorMoved = 0;
+        var keywordMoved = 0;
+        var vectorDone = false;
+        var keywordDone = false;
+        var graphStarted = false;
+        GraphReassignResult? graph = null;
+        try
+        {
+            if (_vectorStore != null)
+            {
+                vectorMoved = await _vectorStore.ReassignDocumentAsync(oldDocumentId, newDocumentId, chunkIdMap, updates, ct);
+                vectorDone = true;
+            }
+
+            if (_keywordSearchService != null)
+            {
+                keywordMoved = await _keywordSearchService.ReassignDocumentAsync(oldDocumentId, newDocumentId, chunkIdMap, updates, ct);
+                keywordDone = true;
+            }
+
+            if (_graphRAGService != null)
+            {
+                graphStarted = true;
+                graph = await _graphRAGService.ReassignChunksAsync(chunkIdMap, oldDocumentId, newDocumentId, partition, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Put the legs already moved back where they were, so the entry is findable under one id, not split across
+            // two. Best-effort: a failure here is logged and must not replace the error that caused it.
+            LogMoveRollingBack(_logger, entry.SourcePath, ex.GetType().Name);
+            // The graph call is a series of upserts, so a partial run is undone by mapping back whatever it reached.
+            if (graphStarted)
+                await TryUndoAsync(() => _graphRAGService!.ReassignChunksAsync(inverseMap, newDocumentId, oldDocumentId, partition, CancellationToken.None), entry);
+            if (keywordDone)
+                await TryUndoAsync(() => _keywordSearchService!.ReassignDocumentAsync(newDocumentId, oldDocumentId, inverseMap, inverseUpdates, CancellationToken.None), entry);
+            if (vectorDone)
+                await TryUndoAsync(() => _vectorStore!.ReassignDocumentAsync(newDocumentId, oldDocumentId, inverseMap, inverseUpdates, CancellationToken.None), entry);
+            throw;
+        }
+
+        LogReassigned(_logger, previousPath, entry.SourcePath, vectorMoved, keywordMoved);
+        return new VaultMoveIndexResult(vectorMoved, keywordMoved, graph);
+    }
+
+    private async Task TryUndoAsync(Func<Task> undo, VaultEntry entry)
+    {
+        try
+        {
+            await undo();
+        }
+        catch (Exception ex)
+        {
+            LogMoveRollbackFailed(_logger, ex, entry.SourcePath);
+        }
+    }
+
+    /// <summary>The provenance keys <see cref="ApplyChunkMetadata"/> writes, with the values a chunk at <paramref name="sourcePath"/> carries.</summary>
+    private static Dictionary<string, object?> ProvenanceUpdates(string documentId, string sourcePath) => new(StringComparer.Ordinal)
+    {
+        ["document_id"] = documentId,
+        ["source_path"] = sourcePath,
+        ["filepath_hash"] = documentId,
+        ["file_name"] = Path.GetFileName(sourcePath)
+    };
+
+    /// <summary>
+    /// Maps every chunk id the entry holds under <paramref name="oldDocumentId"/> to the id a memorize at the new path
+    /// would write (<see cref="ChunkIdentity"/>): the same passage and occurrence, or the same image and part, under
+    /// <paramref name="newDocumentId"/>. Each derived old id is checked against the stored one, so the map is exact or
+    /// the call throws.
+    /// </summary>
+    /// <remarks>
+    /// The identity is the chunker's raw output, and the stored content can differ from it: contextual enrichment
+    /// prepends a context, which is also kept in metadata and is stripped here; the RAG security pipeline can replace
+    /// the text outright, which cannot be undone, so such a chunk fails the check. Occurrence ordinals follow the stored
+    /// chunk order, the order the memorize assigned them in. The keyword index cannot return a chunk's content by id, so
+    /// its rows are mapped through the vector leg; an id only the keyword leg holds fails the check.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<string, string>> BuildChunkIdMapAsync(
+        string oldDocumentId,
+        string newDocumentId,
+        string sourcePathForMessages,
+        CancellationToken ct)
+    {
+        var chunks = _vectorStore == null
+            ? []
+            : (await _vectorStore.GetByDocumentIdAsync(oldDocumentId, ct)).OrderBy(c => c.ChunkIndex).ToList();
+        var keywordIds = _keywordSearchService == null
+            ? []
+            : await _keywordSearchService.GetChunkIdsByDocumentIdAsync(oldDocumentId, ct);
+
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        var unreproducible = new List<string>();
+        var textOccurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+        var imageParts = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var chunk in chunks)
+        {
+            if (string.Equals(MetadataText(chunk.Metadata, "chunk_kind"), ImageDescriptionChunkKind, StringComparison.Ordinal))
+            {
+                var imageId = MetadataText(chunk.Metadata, "image_id");
+                if (string.IsNullOrWhiteSpace(imageId))
+                {
+                    unreproducible.Add(chunk.Id);
+                    continue;
+                }
+
+                imageParts.TryGetValue(imageId, out var part);
+                imageParts[imageId] = part + 1;
+                if (!string.Equals(ChunkIdentity.ForImage(oldDocumentId, imageId, part), chunk.Id, StringComparison.Ordinal))
+                {
+                    unreproducible.Add(chunk.Id);
+                    continue;
+                }
+
+                map[chunk.Id] = ChunkIdentity.ForImage(newDocumentId, imageId, part);
+                continue;
+            }
+
+            var passage = RawPassage(chunk);
+            textOccurrences.TryGetValue(passage, out var occurrence);
+            textOccurrences[passage] = occurrence + 1;
+            if (!string.Equals(ChunkIdentity.ForText(oldDocumentId, passage, occurrence), chunk.Id, StringComparison.Ordinal))
+            {
+                unreproducible.Add(chunk.Id);
+                continue;
+            }
+
+            map[chunk.Id] = ChunkIdentity.ForText(newDocumentId, passage, occurrence);
+        }
+
+        var vectorIds = chunks.Select(c => c.Id).ToHashSet(StringComparer.Ordinal);
+        var keywordOnly = keywordIds.Where(id => !vectorIds.Contains(id)).ToList();
+
+        if (unreproducible.Count > 0 || keywordOnly.Count > 0)
+        {
+            var reasons = new List<string>();
+            if (unreproducible.Count > 0)
+                reasons.Add($"{unreproducible.Count} chunk(s) whose id does not follow from their content ({string.Join(", ", unreproducible.Take(5))}) - rewritten by the RAG security pipeline or indexed under older ids; remove and memorize the entry again");
+            if (keywordOnly.Count > 0)
+                reasons.Add($"{keywordOnly.Count} keyword-index row(s) with no vector row ({string.Join(", ", keywordOnly.Take(5))}); run RepairKeywordIndexAsync first");
+            throw new InvalidOperationException(
+                $"The index rows of '{sourcePathForMessages}' cannot be re-keyed: {string.Join("; ", reasons)}. Nothing was changed.");
+        }
+
+        return map;
+    }
+
+    /// <summary>The chunker output a stored text chunk was identified by: its content without the prepended enrichment context.</summary>
+    private static string RawPassage(DocumentChunk chunk)
+    {
+        var content = chunk.Content ?? string.Empty;
+        if (!string.Equals(MetadataText(chunk.Metadata, EnrichmentMetadataKey), "contextual", StringComparison.Ordinal))
+            return content;
+
+        var context = MetadataText(chunk.Metadata, ContextSummaryMetadataKey);
+        var prefix = context + "\n\n";
+        return !string.IsNullOrEmpty(context) && content.StartsWith(prefix, StringComparison.Ordinal)
+            ? content[prefix.Length..]
+            : content;
+    }
+
+    /// <summary>A metadata value as text, whether the store hands it back as a string or as JSON.</summary>
+    private static string? MetadataText(IReadOnlyDictionary<string, object>? metadata, string key)
+    {
+        if (metadata == null || !metadata.TryGetValue(key, out var value) || value == null)
+            return null;
+
+        return value switch
+        {
+            string s => s,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } json => json.GetString(),
+            _ => value.ToString()
+        };
+    }
+
     /// <summary>
     /// Bulk-deletes every vector tagged with the given <paramref name="vaultId"/> from the shared
     /// vector store in a single filtered delete. Returns the number of vectors removed (0 if no
@@ -2111,6 +2318,15 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Rebuilt keyword leg of {FilepathHash} from the vector leg: {Written} rows written, {Removed} stale rows removed")]
     private static partial void LogRepairedKeywordLeg(ILogger logger, string filepathHash, int written, int removed);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Re-keyed index rows of {PreviousPath} to {SourcePath}: {VectorChunks} vector and {KeywordChunks} keyword chunks moved, none re-embedded")]
+    private static partial void LogReassigned(ILogger logger, string previousPath, string sourcePath, int vectorChunks, int keywordChunks);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Re-keying the index rows of {SourcePath} failed ({ExceptionType}); moving the legs already re-keyed back")]
+    private static partial void LogMoveRollingBack(ILogger logger, string sourcePath, string exceptionType);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Moving a re-keyed leg of {SourcePath} back failed; its rows may be split between the old and the new document id")]
+    private static partial void LogMoveRollbackFailed(ILogger logger, Exception exception, string sourcePath);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Contextual enrichment failed for {SourcePath}; indexing {ChunkCount} chunks without context")]
     private static partial void LogContextualEnrichmentFailed(ILogger logger, string sourcePath, int chunkCount, Exception exception);
