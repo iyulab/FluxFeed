@@ -14,6 +14,9 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [0.38.0] - Unreleased
 
+### Changed
+- Re-pinned sibling package(s) `FluxGuard.Remote` 0.17.1 -> 0.18.0.
+
 ### Fixed
 - **A search no longer writes to the vector store or reads the vault document by document.** Earlier releases copied
   each chunk's document id into its metadata on the first scoped search of each document, so old chunks could match
