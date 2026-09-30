@@ -745,10 +745,9 @@ public sealed partial class VaultManager : IVault
         if (string.Equals(from, to, StringComparison.Ordinal))
             throw new ArgumentException($"The source and destination folders are both '{from}'.", nameof(destinationFolder));
 
-        // Up to a separator, so "docs" does not claim "docs2".
-        var prefix = from + Path.DirectorySeparatorChar;
+        var prefix = FolderPrefix(from);
         var entries = (await ListAsync(ct: ct))
-            .Where(e => e.SourcePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Where(e => IsUnderFolder(e.SourcePath, prefix))
             .OrderBy(e => e.SourcePath, StringComparer.Ordinal)
             .ToList();
 
@@ -1165,8 +1164,9 @@ public sealed partial class VaultManager : IVault
 
         if (removeTrackedFiles)
         {
+            var prefix = FolderPrefix(folder.Path);
             var entries = await ListAsync(ct: ct);
-            foreach (var entry in entries.Where(e => e.SourcePath.StartsWith(folder.Path, StringComparison.OrdinalIgnoreCase)))
+            foreach (var entry in entries.Where(e => IsUnderFolder(e.SourcePath, prefix)))
             {
                 await RemoveAsync(entry.SourcePath, ct);
             }
@@ -1336,7 +1336,7 @@ public sealed partial class VaultManager : IVault
     /// </summary>
     /// <remarks>
     /// Compares against the source's parent directory rather than doing a string prefix match on
-    /// the full path, so a folder named "C:\data\A" does not spuriously match a sibling "C:\data\AB".
+    /// the full path, so a folder named "A" does not spuriously match a sibling "AB".
     /// </remarks>
     private static bool IsWithinScannedFolder(string sourcePath, string folderFullPath, bool recursive)
     {
@@ -1349,8 +1349,27 @@ public sealed partial class VaultManager : IVault
 
         var normalizedFolder = folderFullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return sourceDirectory.Equals(normalizedFolder, StringComparison.OrdinalIgnoreCase) ||
-               sourceDirectory.StartsWith(normalizedFolder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+               IsUnderFolder(sourceDirectory, FolderPrefix(folderFullPath));
     }
+
+    /// <summary>
+    /// The full path of <paramref name="folder"/> ending in exactly one directory separator — the prefix every path
+    /// inside the folder starts with, and a sibling that merely shares its leading characters ("docs2" for "docs")
+    /// does not.
+    /// </summary>
+    private static string FolderPrefix(string folder)
+    {
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        // A root (a drive root, "/") keeps its separator when trimmed.
+        return Path.EndsInDirectorySeparator(full) ? full : full + Path.DirectorySeparatorChar;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> lies inside the folder whose <see cref="FolderPrefix"/> is
+    /// <paramref name="folderPrefix"/>, at any depth. Case-insensitive, like every other path comparison in the vault.
+    /// </summary>
+    private static bool IsUnderFolder(string path, string folderPrefix) =>
+        path.StartsWith(folderPrefix, StringComparison.OrdinalIgnoreCase);
 
     public async Task<ScanResult> ScanFolderAsync(Guid folderId, CancellationToken ct = default)
     {
@@ -1524,8 +1543,9 @@ public sealed partial class VaultManager : IVault
                     if (Directory.Exists(normalizedScope))
                     {
                         // Directory scope - match all files under this directory
+                        var scopePrefix = FolderPrefix(normalizedScope);
                         var matchingEntries = allEntries.Where(e =>
-                            e.SourcePath.StartsWith(normalizedScope + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                            IsUnderFolder(e.SourcePath, scopePrefix) ||
                             e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase));
                         filteredEntries.AddRange(matchingEntries);
                     }

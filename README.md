@@ -9,10 +9,11 @@
 
 ## Overview
 
-FluxFeed turns a folder of documents into an always-current search index. It watches the files,
-extracts and chunks them with [FileFlux](https://github.com/iyulab/FileFlux), and indexes the chunks
-into [FluxIndex](https://github.com/iyulab/FluxIndex) — then keeps the index in step as files change,
-move, or disappear.
+FluxFeed turns a folder of documents into a search index. It extracts and chunks the files with
+[FileFlux](https://github.com/iyulab/FileFlux), indexes the chunks into
+[FluxIndex](https://github.com/iyulab/FluxIndex), and brings the index back in step as files change, move, or
+disappear — when you run a sync, or when you route its folder-watcher events to the vault (see
+[Watching folders](#watching-folders)).
 
 FluxFeed owns ingestion only. Embedding, retrieval and ranking belong to FluxIndex, and the
 dependency is one-way: FluxFeed → FluxIndex.
@@ -25,7 +26,8 @@ document's extracted content, see its commit history, and edit it without touchi
 
 - **File-source vault** — per-file git-tracked directory (`refined.md`, `append-text.md`, `qa.md`)
 - **Change detection** — content hash for source changes, git status for vault edits
-- **Folder watching** — real-time `FileSystemWatcher` with debounce and glob include/exclude patterns
+- **Folder watching** — `FileSystemWatcher` events with debounce and glob include/exclude patterns; you decide what
+  each event does to the vault — see [Watching folders](#watching-folders)
 - **Background queue** — bounded concurrency, automatic retry, operator requeue, pause/resume, SQLite-persisted
 - **Multi-tenant** — isolated vaults via `IVaultFactory`, with single-call vector purge per tenant
 - **Extraction diagnostics** — a legitimate zero-chunk result (scanned PDF, blank page) says so
@@ -99,8 +101,10 @@ using (var scope = host.Services.CreateScope())
     var entry = await vault.MemorizeAsync("./docs/handbook.pdf", waitForCompletion: true);
     Console.WriteLine($"{entry.Stage} · {entry.ChunkCount} chunks");
 
-    // Watch a folder; new and changed files are queued automatically.
-    await vault.AddWatchedFolderAsync("./docs", autoMemorize: true);
+    // Register a folder: SyncAsync then queues its new and changed files.
+    // Watcher events are not acted on for you — see "Watching folders".
+    await vault.AddWatchedFolderAsync("./docs");
+    await vault.SyncAsync();
 
     // Search, optionally scoped to a path.
     var results = await vault.SearchAsync("vacation policy", VaultSearchOptions.ForFolder("./docs"));
@@ -298,7 +302,62 @@ foreach (var error in folder.Errors)
   recorded path changes and `VaultMoveResult.IndexRekeyed` is `false`.
 - The folder watcher raises `IFileWatcherService.FileRenamed`, but the vault does not subscribe to it: to follow
   renames in a watched folder, handle that event and call `MoveAsync(e.OldPath, e.NewPath)` (after the debounce your
-  application needs).
+  application needs) — see [Watching folders](#watching-folders).
+
+## Watching folders
+
+`AddWatchedFolderAsync(path)` does two things:
+
+1. **Registers the folder with that vault instance.** `SyncAsync` and `ScanFolderAsync(folderId)` visit registered
+   folders, queue a memorize for new and changed files, and report entries whose source is gone; `StatusAsync` lists
+   them.
+2. **Starts a watcher on it** (when `FileVaultOptions.EnableRealTimeWatch` is on, the default). The singleton
+   `IFileWatcherService` raises `FileCreated` / `FileModified` (debounced by `DebounceDelayMs`) and `FileDeleted` for
+   files that match the folder's patterns, and `FileRenamed` for every rename in the folder (not filtered by the
+   patterns).
+
+**Nothing in FluxFeed subscribes to those events.** A file created, edited, deleted or renamed in a watched folder
+does not reach the index until your code acts on the event, or until the next `SyncAsync`. The `autoMemorize`
+argument is only recorded on `WatchedFolder.AutoMemorize` for your own use; FluxFeed does not read it.
+
+Route the events to the vault yourself. The watcher is a singleton and outlives any scope, so resolve the vault per
+event:
+
+```csharp
+using Microsoft.Extensions.Logging;
+
+var watcher = host.Services.GetRequiredService<IFileWatcherService>();
+var scopes = host.Services.GetRequiredService<IServiceScopeFactory>();
+
+async Task WithVault(Func<IVault, Task> work)
+{
+    try
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        await work(scope.ServiceProvider.GetRequiredService<IVault>());
+    }
+    catch (Exception ex) { logger.LogError(ex, "Watcher event failed"); }  // event handlers must not throw
+}
+
+watcher.FileCreated  += (_, e) => _ = WithVault(v => v.MemorizeAsync(e.FilePath));
+watcher.FileModified += (_, e) => _ = WithVault(v => v.MemorizeAsync(e.FilePath));
+watcher.FileDeleted  += (_, e) => _ = WithVault(v => v.RemoveAsync(e.FilePath));
+watcher.FileRenamed  += (_, e) => _ = WithVault(v => v.MoveAsync(e.OldPath, e.NewPath));
+```
+
+- `MemorizeAsync` enqueues and returns when background processing is on; the queue serializes work on the same file.
+- `MoveAsync` records a move that already happened and runs at once. It throws `KeyNotFoundException` when the old
+  path is not tracked (an editor renaming its temp file over the original, a file outside the patterns) and
+  `InvalidOperationException` when the new path is already tracked or either entry has queued work — fall back to
+  `MemorizeAsync(e.NewPath)`, plus `RemoveAsync(e.OldPath)` when the old path was tracked.
+- A rename out of a watched folder arrives as `FileDeleted`, and into one as `FileCreated`.
+- The events carry `FolderId`. Under `IVaultFactory` every tenant shares the one watcher, so map the folder id to the
+  tenant whose vault registered it.
+- The folder registration lives in the vault instance that made it. A vault resolved from a scope loses it when the
+  scope ends while the watcher keeps running; register folders on a vault whose lifetime matches the watch, and use
+  `IFileWatcherService.StopWatchingAsync(folderId)` to stop a watch the registering vault no longer holds.
+- `RemoveWatchedFolderAsync(folderId, removeTrackedFiles: true)` removes the entries inside the folder at any depth;
+  a sibling that shares its leading characters (`docs2` for `docs`) is not inside it.
 
 ## File selection patterns
 
@@ -307,7 +366,7 @@ foreach (var error in folder.Errors)
 | Path | Patterns applied |
 |---|---|
 | `ScanFolderAsync` / `SyncAsync` | Yes — non-matching files are skipped before change detection |
-| Folder-watcher events | Yes — per-folder patterns override the defaults |
+| Folder-watcher events | Yes for created, modified and deleted files — per-folder patterns override the defaults; renames are raised unfiltered |
 | Explicit `MemorizeAsync` / `RefreshAsync` | No — an explicit call is an explicit intent; silently skipping it would hide a caller's mistake |
 
 Exclusion wins over inclusion, and an empty include list means "include everything".

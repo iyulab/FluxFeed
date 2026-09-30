@@ -12,6 +12,10 @@ public sealed class WatchedFolder
     public string Path { get; private set; }
     public string Name { get; private set; }
     public bool IsRecursive { get; private set; }
+    /// <summary>
+    /// The value given to <c>AddWatchedFolderAsync</c>, kept for the caller's own use. FluxFeed does not read it:
+    /// changed files are not memorized because of it.
+    /// </summary>
     public bool AutoMemorize { get; private set; }
     public string[] IncludePatterns { get; private set; }
     public string[] ExcludePatterns { get; private set; }

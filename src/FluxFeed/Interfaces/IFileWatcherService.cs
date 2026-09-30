@@ -3,9 +3,18 @@ using FluxFeed.Domain.Entities;
 namespace FluxFeed.Interfaces;
 
 /// <summary>
-/// Service for watching folders and detecting file changes.
-/// Provides event-based file change detection with debouncing.
+/// Watches folders and raises an event for each file created, modified, deleted or renamed in them.
+/// Created and modified events are debounced (<see cref="Options.FileVaultOptions.DebounceDelayMs"/>); deletes and
+/// renames are raised at once. Created, modified and deleted events are raised only for files that match the folder's
+/// include/exclude patterns; <see cref="FileRenamed"/> is raised for every rename.
 /// </summary>
+/// <remarks>
+/// The events are the whole contract: nothing in FluxFeed subscribes to them, so a change is not indexed, removed or
+/// moved in the vault until a subscriber calls <see cref="IVault.MemorizeAsync(string, CancellationToken)"/>,
+/// <see cref="IVault.RemoveAsync(string, CancellationToken)"/> or <see cref="IVault.MoveAsync"/>. The service is a
+/// singleton shared by every vault, including those from <see cref="IVaultFactory"/>; each event carries the
+/// <c>FolderId</c> of the watched folder it came from. Events are raised on thread-pool threads.
+/// </remarks>
 public interface IFileWatcherService : IDisposable
 {
     /// <summary>

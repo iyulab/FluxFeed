@@ -28,9 +28,21 @@ Releases before 0.28.0 predate this file — see the git history.
   other `IVault` implementations keep compiling.
 
 ### Changed
+- **The documentation no longer says a watched folder is indexed automatically.** It never was: `IFileWatcherService`
+  raises created, modified, deleted and renamed events, and nothing in FluxFeed subscribes to them — the `autoMemorize`
+  argument of `AddWatchedFolderAsync` is only recorded on `WatchedFolder.AutoMemorize`. The README quick start now
+  registers the folder and runs `SyncAsync`, and a new *Watching folders* section shows how to route the events to
+  `MemorizeAsync`, `RemoveAsync` and `MoveAsync`. The XML docs of `AddWatchedFolderAsync`, `IFileWatcherService` and
+  `WatchedFolder.AutoMemorize` say the same.
 - **Documentation comments describe behaviour only.** Comments and test descriptions no longer cite tracker ids,
   decision records or the applications a defect was found in; past CHANGELOG entries keep the change and drop the tool
   that made it.
+
+### Fixed
+- **`RemoveWatchedFolderAsync(folderId, removeTrackedFiles: true)` no longer removes entries from sibling folders.** It
+  matched a bare string prefix, so removing `docs` also removed the entries under `docs2/`. Entries now have to lie
+  inside the folder (up to a directory separator; a trailing separator on the watched path makes no difference) — the
+  check `MoveFolderAsync`, folder scans and directory search scopes already made, now shared by all four.
 
 ### Dependencies
 - Requires FluxIndex.Core 0.64.0 (`ReassignDocumentAsync` on the vector store and keyword index, `ReassignChunksAsync`

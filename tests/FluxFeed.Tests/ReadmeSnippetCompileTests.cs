@@ -53,6 +53,8 @@ public class ReadmeSnippetCompileTests
         ("logger", "Microsoft.Extensions.Logging.ILogger<FluxFeed.Services.VaultPipeline> logger = null!;"),
         ("configuration", "Microsoft.Extensions.Configuration.IConfiguration configuration = null!;"),
         ("factory", "IVaultFactory factory = null!;"),
+        // The Quick Start's host, which later blocks keep using.
+        ("host", "IHost host = null!;"),
         ("queue", "IVaultQueueService queue = null!;"),
         ("hash", "string hash = \"\";"),
         ("vaultBasePath", "string vaultBasePath = \"\";"),

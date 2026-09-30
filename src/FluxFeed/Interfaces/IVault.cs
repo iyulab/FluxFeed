@@ -340,8 +340,37 @@ public interface IVault
     // === Folder Watching ===
 
     /// <summary>
-    /// Adds a folder to watch for changes.
+    /// Registers a folder with this vault and, when <see cref="Options.FileVaultOptions.EnableRealTimeWatch"/> is on,
+    /// starts a file-system watcher on it.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Registration makes the folder part of <see cref="SyncAsync(CancellationToken)"/>, <see cref="ScanFolderAsync(Guid, CancellationToken)"/>
+    /// and <see cref="StatusAsync"/>. The watcher raises <see cref="IFileWatcherService"/> events for the folder's
+    /// files; <b>the vault does not act on them</b> — a created, changed, deleted or renamed file is not queued,
+    /// removed or moved until the caller does it: subscribe to <see cref="IFileWatcherService.FileCreated"/>,
+    /// <see cref="IFileWatcherService.FileModified"/>, <see cref="IFileWatcherService.FileDeleted"/> and
+    /// <see cref="IFileWatcherService.FileRenamed"/> and call <see cref="MemorizeAsync(string, CancellationToken)"/>,
+    /// <see cref="RemoveAsync(string, CancellationToken)"/> or <see cref="MoveAsync"/>, or call
+    /// <see cref="SyncAsync(CancellationToken)"/> periodically.
+    /// </para>
+    /// <para>
+    /// The registration belongs to this vault instance, while the watcher is shared (a singleton): when the vault
+    /// is resolved from a scope, the watcher keeps running after the scope ends but the folder can no longer be
+    /// paused, resumed or removed through a later vault.
+    /// </para>
+    /// </remarks>
+    /// <param name="folderPath">The folder; it must exist.</param>
+    /// <param name="name">Display name; defaults to the folder's name.</param>
+    /// <param name="isRecursive">Whether subfolders are watched and scanned too.</param>
+    /// <param name="autoMemorize">
+    /// Recorded on <see cref="WatchedFolder.AutoMemorize"/> for the caller's own use. FluxFeed does not read it:
+    /// setting it does not make changed files get memorized.
+    /// </param>
+    /// <param name="includePatterns">Glob patterns a file must match; defaults to <see cref="Options.FileVaultOptions.DefaultIncludePatterns"/>.</param>
+    /// <param name="excludePatterns">Glob patterns that exclude a file; defaults to <see cref="Options.FileVaultOptions.DefaultExcludePatterns"/>.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The registered folder, or the existing registration when the folder is already registered.</returns>
     Task<WatchedFolder> AddWatchedFolderAsync(
         string folderPath,
         string? name = null,
@@ -362,8 +391,14 @@ public interface IVault
     Task<IReadOnlyList<WatchedFolder>> GetAllWatchedFoldersAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Removes a watched folder.
+    /// Stops watching a folder and unregisters it.
     /// </summary>
+    /// <param name="folderId">The folder returned by <see cref="AddWatchedFolderAsync"/>.</param>
+    /// <param name="removeTrackedFiles">
+    /// Also removes every entry whose source file lies inside the folder, at any depth. A sibling folder that
+    /// shares the name's leading characters (<c>docs2</c> for <c>docs</c>) is not inside it.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
     Task RemoveWatchedFolderAsync(Guid folderId, bool removeTrackedFiles = false, CancellationToken ct = default);
 
     /// <summary>
