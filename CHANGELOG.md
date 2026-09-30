@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.39.2] - Unreleased
+## [0.39.2] - 2026-10-01
 
 ### Changed
 - Re-pinned sibling package(s) `FileFlux` 0.33.9 -> 0.33.10.
