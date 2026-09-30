@@ -16,6 +16,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ### Changed
 - Re-pinned sibling package(s) `FileFlux` 0.33.9 -> 0.33.10.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.65.1 -> 0.66.0, `FluxIndex.Storage.SQLite` 0.65.1 -> 0.66.0.
 
 ### Fixed
 - **A vault can be built in a container whose embedding service is FluxIndex's keyword-only placeholder**
