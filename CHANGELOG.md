@@ -37,6 +37,7 @@ Releases before 0.28.0 predate this file — see the git history.
 - **Documentation comments describe behaviour only.** Comments and test descriptions no longer cite tracker ids,
   decision records or the applications a defect was found in; past CHANGELOG entries keep the change and drop the tool
   that made it.
+- Re-pinned sibling package(s) `FileFlux` 0.33.7 -> 0.33.8, `FluxGuard.Remote` 0.18.0 -> 0.18.1.
 
 ### Fixed
 - **`RemoveWatchedFolderAsync(folderId, removeTrackedFiles: true)` no longer removes entries from sibling folders.** It
