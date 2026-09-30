@@ -14,6 +14,9 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [0.39.2] - Unreleased
 
+### Changed
+- Re-pinned sibling package(s) `FileFlux` 0.33.9 -> 0.33.10.
+
 ### Fixed
 - **A vault can be built in a container whose embedding service is FluxIndex's keyword-only placeholder**
   (`NoEmbeddingService`, what a FluxIndex context without an embedder registers since FluxIndex 0.65.0). Building one
