@@ -16,6 +16,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ### Changed
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.17.1 -> 0.18.0.
+- Re-pinned sibling package(s) `FileFlux` 0.33.6 -> 0.33.7.
 
 ### Fixed
 - **A search no longer writes to the vector store or reads the vault document by document.** Earlier releases copied
