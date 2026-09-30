@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.38.0] - Unreleased
+## [0.38.0] - 2026-09-30
 
 ### Changed
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.17.1 -> 0.18.0.
