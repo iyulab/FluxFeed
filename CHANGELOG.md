@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.39.0] - Unreleased
+## [0.39.0] - 2026-09-30
 
 ### Added
 - **A tracked file can be moved or renamed without being embedded again.** `IVault.MoveAsync(sourcePath,
