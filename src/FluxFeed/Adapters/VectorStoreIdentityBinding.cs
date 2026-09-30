@@ -1,3 +1,4 @@
+using FluxIndex.Core.Application.Services;
 using FluxIndex.Core.Application.Interfaces;
 
 namespace FluxFeed.Adapters;
@@ -17,10 +18,12 @@ internal static class VectorStoreIdentityBinding
     /// both are present. Binding is idempotent for the same identity; a store already bound to a
     /// different identity throws (<c>EmbeddingModelMismatchException</c>), which is the correct
     /// outcome — the consumer swapped embedders over an existing index — and is left to propagate.
+    /// A keyword-only embedding service (FluxIndex's <c>NoEmbeddingService</c>, what a FluxIndex context without an
+    /// embedder registers) has no vector space and nothing is bound.
     /// </summary>
     public static void EnsureBound(IVectorStore? vectorStore, IEmbeddingService? embeddingService)
     {
-        if (vectorStore is null || embeddingService is null)
+        if (vectorStore is null || embeddingService is null || NoEmbeddingService.IsKeywordOnly(embeddingService))
             return;
 
         vectorStore.BindIdentity(embeddingService.GetIdentity());

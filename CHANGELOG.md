@@ -12,6 +12,18 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.39.2] - Unreleased
+
+### Fixed
+- **A vault can be built in a container whose embedding service is FluxIndex's keyword-only placeholder**
+  (`NoEmbeddingService`, what a FluxIndex context without an embedder registers since FluxIndex 0.65.0). Building one
+  threw, because the pipeline bound the vector store to an identity the placeholder refuses to name. The vault now
+  behaves as it does with no embedding service: files are processed, vectors are not indexed, a search returns nothing.
+- `FluxIndexMemorizer` resolved in such a container says it needs an embedding service instead of failing on the
+  identity.
+
+---
+
 ## [0.39.1] - 2026-10-01
 
 ### Changed

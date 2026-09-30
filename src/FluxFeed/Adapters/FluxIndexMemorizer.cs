@@ -1,3 +1,4 @@
+using FluxIndex.Core.Application.Services;
 using FluxIndex.Core.Application.Interfaces;
 using FluxIndex.Core.Domain.Entities;
 using FluxFeed.Domain.Entities;
@@ -26,6 +27,12 @@ public sealed partial class FluxIndexMemorizer
     {
         _vectorStore = vectorStore ?? throw new ArgumentNullException(nameof(vectorStore));
         _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
+        if (NoEmbeddingService.IsKeywordOnly(embeddingService))
+        {
+            throw new InvalidOperationException(
+                "FluxIndexMemorizer stores embedded chunks and needs an embedding service, but the registered one is " +
+                "keyword-only (NoEmbeddingService). Register an embedding service, or memorize through IVault.");
+        }
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         VectorStoreIdentityBinding.EnsureBound(_vectorStore, _embeddingService);

@@ -1,3 +1,4 @@
+using FluxIndex.Core.Application.Services;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using FluxGuard.Remote.RAG;
@@ -169,7 +170,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
         _extractor = extractor;
         _chunker = chunker;
         _vectorStore = vectorStore;
-        _embeddingService = embeddingService;
+        // A keyword-only placeholder (FluxIndex's NoEmbeddingService — what a FluxIndex context without an embedder
+        // registers) is no embedding service: the vault behaves as it does with none, instead of failing here when the
+        // placeholder refuses to name an identity.
+        _embeddingService = NoEmbeddingService.IsKeywordOnly(embeddingService) ? null : embeddingService;
         // The store's physical layout may depend on the embedding identity; bind before the first
         // store access so consumers never have to call BindIdentity themselves.
         VectorStoreIdentityBinding.EnsureBound(_vectorStore, _embeddingService);
