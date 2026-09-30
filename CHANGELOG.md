@@ -27,6 +27,11 @@ Releases before 0.28.0 predate this file — see the git history.
   the move is made of. The two `IVault` members have a default implementation that throws `NotSupportedException`, so
   other `IVault` implementations keep compiling.
 
+### Changed
+- **Documentation comments describe behaviour only.** Comments and test descriptions no longer cite tracker ids,
+  decision records or the applications a defect was found in; past CHANGELOG entries keep the change and drop the tool
+  that made it.
+
 ### Dependencies
 - Requires FluxIndex.Core 0.64.0 (`ReassignDocumentAsync` on the vector store and keyword index, `ReassignChunksAsync`
   on the GraphRAG service).
@@ -59,8 +64,8 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.37.14] - 2026-09-30
 
 ### Changed
-- Re-pinned sibling package(s) `FluxGuard.Remote` 0.17.0 -> 0.17.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.62.0 -> 0.62.1, `FluxIndex.Storage.SQLite` 0.62.0 -> 0.62.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
+- Re-pinned sibling package(s) `FluxGuard.Remote` 0.17.0 -> 0.17.1.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.62.0 -> 0.62.1, `FluxIndex.Storage.SQLite` 0.62.0 -> 0.62.1.
 
 ### Fixed
 - **Every C# example in the README compiles against the current API, and a test keeps it that way.** Seven examples did
@@ -82,72 +87,72 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.37.13] - 2026-09-30
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.33.5 -> 0.33.6 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.61.6 -> 0.62.0, `FluxIndex.Storage.SQLite` 0.61.6 -> 0.62.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
+- Re-pinned sibling package(s) `FileFlux` 0.33.5 -> 0.33.6. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.61.6 -> 0.62.0, `FluxIndex.Storage.SQLite` 0.61.6 -> 0.62.0.
 
 ---
 
 ## [0.37.12] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.61.5 -> 0.61.6, `FluxIndex.Storage.SQLite` 0.61.5 -> 0.61.6 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.61.5 -> 0.61.6, `FluxIndex.Storage.SQLite` 0.61.5 -> 0.61.6. No source changes.
 
 ---
 
 ## [0.37.11] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.33.4 -> 0.33.5, `FluxIndex.Core` 0.61.4 -> 0.61.5, `FluxIndex.Storage.SQLite` 0.61.4 -> 0.61.5 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.33.4 -> 0.33.5, `FluxIndex.Core` 0.61.4 -> 0.61.5, `FluxIndex.Storage.SQLite` 0.61.4 -> 0.61.5. No source changes.
 
 ---
 
 ## [0.37.10] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.33.3 -> 0.33.4 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.61.3 -> 0.61.4, `FluxIndex.Storage.SQLite` 0.61.3 -> 0.61.4 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
+- Re-pinned sibling package(s) `FileFlux` 0.33.3 -> 0.33.4. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.61.3 -> 0.61.4, `FluxIndex.Storage.SQLite` 0.61.3 -> 0.61.4.
 
 ---
 
 ## [0.37.9] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.33.2 -> 0.33.3, `FluxIndex.Core` 0.61.2 -> 0.61.3, `FluxIndex.Storage.SQLite` 0.61.2 -> 0.61.3 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.33.2 -> 0.33.3, `FluxIndex.Core` 0.61.2 -> 0.61.3, `FluxIndex.Storage.SQLite` 0.61.2 -> 0.61.3. No source changes.
 
 ---
 
 ## [0.37.8] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.61.1 -> 0.61.2, `FluxIndex.Storage.SQLite` 0.61.1 -> 0.61.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.61.1 -> 0.61.2, `FluxIndex.Storage.SQLite` 0.61.1 -> 0.61.2. No source changes.
 
 ---
 
 ## [0.37.7] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.33.1 -> 0.33.2, `FluxIndex.Core` 0.61.0 -> 0.61.1, `FluxIndex.Storage.SQLite` 0.61.0 -> 0.61.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.33.1 -> 0.33.2, `FluxIndex.Core` 0.61.0 -> 0.61.1, `FluxIndex.Storage.SQLite` 0.61.0 -> 0.61.1. No source changes.
 
 ---
 
 ## [0.37.6] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.33.0 -> 0.33.1, `FluxIndex.Core` 0.60.1 -> 0.61.0, `FluxIndex.Storage.SQLite` 0.60.1 -> 0.61.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.33.0 -> 0.33.1, `FluxIndex.Core` 0.60.1 -> 0.61.0, `FluxIndex.Storage.SQLite` 0.60.1 -> 0.61.0. No source changes.
 
 ---
 
 ## [0.37.5] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.32.0 -> 0.33.0, `FluxIndex.Core` 0.60.0 -> 0.60.1, `FluxIndex.Storage.SQLite` 0.60.0 -> 0.60.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.32.0 -> 0.33.0, `FluxIndex.Core` 0.60.0 -> 0.60.1, `FluxIndex.Storage.SQLite` 0.60.0 -> 0.60.1. No source changes.
 
 ---
 
 ## [0.37.4] - 2026-09-29
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.59.5 -> 0.60.0, `FluxIndex.Storage.SQLite` 0.59.5 -> 0.60.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.59.5 -> 0.60.0, `FluxIndex.Storage.SQLite` 0.59.5 -> 0.60.0.
 
 ### Fixed
 - **The "GraphRAG is enabled but IGraphRAGService is not registered" error names only `AddFullGraphRAG()`.** It also suggested
@@ -168,14 +173,14 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.37.2] - 2026-09-28
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.13 -> 0.32.0, `FluxIndex.Core` 0.59.4 -> 0.59.5, `FluxIndex.Storage.SQLite` 0.59.4 -> 0.59.5 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.13 -> 0.32.0, `FluxIndex.Core` 0.59.4 -> 0.59.5, `FluxIndex.Storage.SQLite` 0.59.4 -> 0.59.5. No source changes.
 
 ---
 
 ## [0.37.1] - 2026-09-28
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.12 -> 0.31.13, `FluxIndex.Core` 0.59.3 -> 0.59.4, `FluxIndex.Storage.SQLite` 0.59.3 -> 0.59.4 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.12 -> 0.31.13, `FluxIndex.Core` 0.59.3 -> 0.59.4, `FluxIndex.Storage.SQLite` 0.59.3 -> 0.59.4. No source changes.
 
 ---
 
@@ -194,21 +199,21 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.36.3] - 2026-09-28
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.11 -> 0.31.12, `FluxIndex.Core` 0.59.2 -> 0.59.3, `FluxIndex.Storage.SQLite` 0.59.2 -> 0.59.3 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.11 -> 0.31.12, `FluxIndex.Core` 0.59.2 -> 0.59.3, `FluxIndex.Storage.SQLite` 0.59.2 -> 0.59.3. No source changes.
 
 ---
 
 ## [0.36.2] - 2026-09-28
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.10 -> 0.31.11, `FluxIndex.Core` 0.59.1 -> 0.59.2, `FluxIndex.Storage.SQLite` 0.59.1 -> 0.59.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.10 -> 0.31.11, `FluxIndex.Core` 0.59.1 -> 0.59.2, `FluxIndex.Storage.SQLite` 0.59.1 -> 0.59.2. No source changes.
 
 ---
 
 ## [0.36.1] - 2026-09-28
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.8 -> 0.31.10, `FluxIndex.Core` 0.59.0 -> 0.59.1, `FluxIndex.Storage.SQLite` 0.59.0 -> 0.59.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.8 -> 0.31.10, `FluxIndex.Core` 0.59.0 -> 0.59.1, `FluxIndex.Storage.SQLite` 0.59.0 -> 0.59.1. No source changes.
 
 ---
 
@@ -230,77 +235,77 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.35.11] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.57.1 -> 0.58.0, `FluxIndex.Storage.SQLite` 0.57.1 -> 0.58.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.57.1 -> 0.58.0, `FluxIndex.Storage.SQLite` 0.57.1 -> 0.58.0. No source changes.
 
 ---
 
 ## [0.35.10] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.7 -> 0.31.8, `FluxIndex.Core` 0.57.0 -> 0.57.1, `FluxIndex.Storage.SQLite` 0.57.0 -> 0.57.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.7 -> 0.31.8, `FluxIndex.Core` 0.57.0 -> 0.57.1, `FluxIndex.Storage.SQLite` 0.57.0 -> 0.57.1. No source changes.
 
 ---
 
 ## [0.35.9] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.56.0 -> 0.57.0, `FluxIndex.Storage.SQLite` 0.56.0 -> 0.57.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.56.0 -> 0.57.0, `FluxIndex.Storage.SQLite` 0.56.0 -> 0.57.0. No source changes.
 
 ---
 
 ## [0.35.8] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.55.4 -> 0.56.0, `FluxIndex.Storage.SQLite` 0.55.4 -> 0.56.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.55.4 -> 0.56.0, `FluxIndex.Storage.SQLite` 0.55.4 -> 0.56.0. No source changes.
 
 ---
 
 ## [0.35.7] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.6 -> 0.31.7, `FluxIndex.Core` 0.55.3 -> 0.55.4, `FluxIndex.Storage.SQLite` 0.55.3 -> 0.55.4 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.6 -> 0.31.7, `FluxIndex.Core` 0.55.3 -> 0.55.4, `FluxIndex.Storage.SQLite` 0.55.3 -> 0.55.4. No source changes.
 
 ---
 
 ## [0.35.6] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.5 -> 0.31.6, `FluxIndex.Core` 0.55.2 -> 0.55.3, `FluxIndex.Storage.SQLite` 0.55.2 -> 0.55.3 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.5 -> 0.31.6, `FluxIndex.Core` 0.55.2 -> 0.55.3, `FluxIndex.Storage.SQLite` 0.55.2 -> 0.55.3. No source changes.
 
 ---
 
 ## [0.35.5] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.4 -> 0.31.5, `FluxIndex.Core` 0.55.1 -> 0.55.2, `FluxIndex.Storage.SQLite` 0.55.1 -> 0.55.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.4 -> 0.31.5, `FluxIndex.Core` 0.55.1 -> 0.55.2, `FluxIndex.Storage.SQLite` 0.55.1 -> 0.55.2. No source changes.
 
 ---
 
 ## [0.35.4] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.3 -> 0.31.4, `FluxIndex.Core` 0.55.0 -> 0.55.1, `FluxIndex.Storage.SQLite` 0.55.0 -> 0.55.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.3 -> 0.31.4, `FluxIndex.Core` 0.55.0 -> 0.55.1, `FluxIndex.Storage.SQLite` 0.55.0 -> 0.55.1. No source changes.
 
 ---
 
 ## [0.35.3] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.54.1 -> 0.55.0, `FluxIndex.Storage.SQLite` 0.54.1 -> 0.55.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.54.1 -> 0.55.0, `FluxIndex.Storage.SQLite` 0.54.1 -> 0.55.0. No source changes.
 
 ---
 
 ## [0.35.2] - 2026-09-27
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.1 -> 0.31.3, `FluxIndex.Core` 0.53.1 -> 0.54.1, `FluxIndex.Storage.SQLite` 0.53.1 -> 0.54.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.1 -> 0.31.3, `FluxIndex.Core` 0.53.1 -> 0.54.1, `FluxIndex.Storage.SQLite` 0.53.1 -> 0.54.1. No source changes.
 
 ---
 
 ## [0.35.1] - 2026-09-26
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.31.0 -> 0.31.1, `FluxIndex.Core` 0.53.0 -> 0.53.1, `FluxIndex.Storage.SQLite` 0.53.0 -> 0.53.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.31.0 -> 0.31.1, `FluxIndex.Core` 0.53.0 -> 0.53.1, `FluxIndex.Storage.SQLite` 0.53.0 -> 0.53.1. No source changes.
 
 ---
 
@@ -314,44 +319,44 @@ Releases before 0.28.0 predate this file — see the git history.
 - `IVaultStorageService` gains `StoreContentSpansAsync` / `GetContentSpansAsync`; a custom storage implementation adds them.
 - The FileFlux extractor stores the refined text (rule-based, then LLM when a refiner is registered) instead of the text of one whole-document chunk, and the FileFlux chunker hands FileFlux the stored text directly (`IDocumentProcessorFactory.Create(RawContent)`, FileFlux 0.31.0) instead of writing it to a temporary `.txt` file. The chunker no longer runs LLM refinement a second time on text that was already refined at extraction.
 - Re-pinned sibling package(s) `FileFlux` 0.30.0 -> 0.31.0.
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.52.3 -> 0.53.0, `FluxIndex.Storage.SQLite` 0.52.3 -> 0.53.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.52.3 -> 0.53.0, `FluxIndex.Storage.SQLite` 0.52.3 -> 0.53.0.
 
 ---
 
 ## [0.34.5]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.29.2 -> 0.30.0, `FluxIndex.Core` 0.52.1 -> 0.52.2, `FluxIndex.Storage.SQLite` 0.52.1 -> 0.52.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.52.2 -> 0.52.3, `FluxIndex.Storage.SQLite` 0.52.2 -> 0.52.3 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
+- Re-pinned sibling package(s) `FileFlux` 0.29.2 -> 0.30.0, `FluxIndex.Core` 0.52.1 -> 0.52.2, `FluxIndex.Storage.SQLite` 0.52.1 -> 0.52.2. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.52.2 -> 0.52.3, `FluxIndex.Storage.SQLite` 0.52.2 -> 0.52.3.
 
 ---
 
 ## [0.34.4]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.29.1 -> 0.29.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.52.0 -> 0.52.1, `FluxIndex.Storage.SQLite` 0.52.0 -> 0.52.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`.
+- Re-pinned sibling package(s) `FileFlux` 0.29.1 -> 0.29.2. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.52.0 -> 0.52.1, `FluxIndex.Storage.SQLite` 0.52.0 -> 0.52.1.
 
 ---
 
 ## [0.34.3]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.29.0 -> 0.29.1, `FluxIndex.Core` 0.51.4 -> 0.52.0, `FluxIndex.Storage.SQLite` 0.51.4 -> 0.52.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.29.0 -> 0.29.1, `FluxIndex.Core` 0.51.4 -> 0.52.0, `FluxIndex.Storage.SQLite` 0.51.4 -> 0.52.0. No source changes.
 
 ---
 
 ## [0.34.2]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.28.2 -> 0.29.0, `FluxIndex.Core` 0.51.3 -> 0.51.4, `FluxIndex.Storage.SQLite` 0.51.3 -> 0.51.4 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.28.2 -> 0.29.0, `FluxIndex.Core` 0.51.3 -> 0.51.4, `FluxIndex.Storage.SQLite` 0.51.3 -> 0.51.4. No source changes.
 
 ---
 
 ## [0.34.1]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.28.1 -> 0.28.2, `FluxIndex.Core` 0.51.2 -> 0.51.3, `FluxIndex.Storage.SQLite` 0.51.2 -> 0.51.3 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.28.1 -> 0.28.2, `FluxIndex.Core` 0.51.2 -> 0.51.3, `FluxIndex.Storage.SQLite` 0.51.2 -> 0.51.3. No source changes.
 
 ---
 
@@ -371,126 +376,126 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.33.19]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.28.0 -> 0.28.1, `FluxIndex.Core` 0.51.1 -> 0.51.2, `FluxIndex.Storage.SQLite` 0.51.1 -> 0.51.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.28.0 -> 0.28.1, `FluxIndex.Core` 0.51.1 -> 0.51.2, `FluxIndex.Storage.SQLite` 0.51.1 -> 0.51.2. No source changes.
 
 ---
 
 ## [0.33.18]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.51.0 -> 0.51.1, `FluxIndex.Storage.SQLite` 0.51.0 -> 0.51.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.51.0 -> 0.51.1, `FluxIndex.Storage.SQLite` 0.51.0 -> 0.51.1. No source changes.
 
 ---
 
 ## [0.33.17]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.27.1 -> 0.28.0, `FluxIndex.Core` 0.50.6 -> 0.51.0, `FluxIndex.Storage.SQLite` 0.50.6 -> 0.51.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.27.1 -> 0.28.0, `FluxIndex.Core` 0.50.6 -> 0.51.0, `FluxIndex.Storage.SQLite` 0.50.6 -> 0.51.0. No source changes.
 
 ---
 
 ## [0.33.16]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.27.0 -> 0.27.1, `FluxIndex.Core` 0.50.5 -> 0.50.6, `FluxIndex.Storage.SQLite` 0.50.5 -> 0.50.6 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.27.0 -> 0.27.1, `FluxIndex.Core` 0.50.5 -> 0.50.6, `FluxIndex.Storage.SQLite` 0.50.5 -> 0.50.6. No source changes.
 
 ---
 
 ## [0.33.15]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.26.1 -> 0.27.0, `FluxIndex.Core` 0.50.4 -> 0.50.5, `FluxIndex.Storage.SQLite` 0.50.4 -> 0.50.5 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.26.1 -> 0.27.0, `FluxIndex.Core` 0.50.4 -> 0.50.5, `FluxIndex.Storage.SQLite` 0.50.4 -> 0.50.5. No source changes.
 
 ---
 
 ## [0.33.14]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.26.0 -> 0.26.1, `FluxIndex.Core` 0.50.2 -> 0.50.4, `FluxIndex.Storage.SQLite` 0.50.2 -> 0.50.4 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.26.0 -> 0.26.1, `FluxIndex.Core` 0.50.2 -> 0.50.4, `FluxIndex.Storage.SQLite` 0.50.2 -> 0.50.4. No source changes.
 
 ---
 
 ## [0.33.13]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.25.1 -> 0.26.0, `FluxIndex.Core` 0.50.1 -> 0.50.2, `FluxIndex.Storage.SQLite` 0.50.1 -> 0.50.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.25.1 -> 0.26.0, `FluxIndex.Core` 0.50.1 -> 0.50.2, `FluxIndex.Storage.SQLite` 0.50.1 -> 0.50.2. No source changes.
 
 ---
 
 ## [0.33.12]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.25.0 -> 0.25.1, `FluxIndex.Core` 0.49.0 -> 0.50.1, `FluxIndex.Storage.SQLite` 0.49.0 -> 0.50.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.25.0 -> 0.25.1, `FluxIndex.Core` 0.49.0 -> 0.50.1, `FluxIndex.Storage.SQLite` 0.49.0 -> 0.50.1. No source changes.
 
 ---
 
 ## [0.33.11]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.24.1 -> 0.25.0, `FluxIndex.Core` 0.48.1 -> 0.49.0, `FluxIndex.Storage.SQLite` 0.48.1 -> 0.49.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.24.1 -> 0.25.0, `FluxIndex.Core` 0.48.1 -> 0.49.0, `FluxIndex.Storage.SQLite` 0.48.1 -> 0.49.0. No source changes.
 
 ---
 
 ## [0.33.10]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.20 -> 0.24.1, `FluxIndex.Core` 0.48.0 -> 0.48.1, `FluxIndex.Storage.SQLite` 0.48.0 -> 0.48.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.20 -> 0.24.1, `FluxIndex.Core` 0.48.0 -> 0.48.1, `FluxIndex.Storage.SQLite` 0.48.0 -> 0.48.1. No source changes.
 
 ---
 
 ## [0.33.9]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.47.0 -> 0.48.0, `FluxIndex.Storage.SQLite` 0.47.0 -> 0.48.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.47.0 -> 0.48.0, `FluxIndex.Storage.SQLite` 0.47.0 -> 0.48.0. No source changes.
 
 ---
 
 ## [0.33.8]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.19 -> 0.23.20, `FluxIndex.Core` 0.46.4 -> 0.47.0, `FluxIndex.Storage.SQLite` 0.46.4 -> 0.47.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.19 -> 0.23.20, `FluxIndex.Core` 0.46.4 -> 0.47.0, `FluxIndex.Storage.SQLite` 0.46.4 -> 0.47.0. No source changes.
 
 ---
 
 ## [0.33.7]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.18 -> 0.23.19, `FluxIndex.Core` 0.46.3 -> 0.46.4, `FluxIndex.Storage.SQLite` 0.46.3 -> 0.46.4 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.18 -> 0.23.19, `FluxIndex.Core` 0.46.3 -> 0.46.4, `FluxIndex.Storage.SQLite` 0.46.3 -> 0.46.4. No source changes.
 
 ---
 
 ## [0.33.6]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxGuard.Remote` 0.16.0 -> 0.17.0, `FluxIndex.Core` 0.46.2 -> 0.46.3, `FluxIndex.Storage.SQLite` 0.46.2 -> 0.46.3 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxGuard.Remote` 0.16.0 -> 0.17.0, `FluxIndex.Core` 0.46.2 -> 0.46.3, `FluxIndex.Storage.SQLite` 0.46.2 -> 0.46.3. No source changes.
 
 ---
 
 ## [0.33.5]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.46.1 -> 0.46.2, `FluxIndex.Storage.SQLite` 0.46.1 -> 0.46.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.46.1 -> 0.46.2, `FluxIndex.Storage.SQLite` 0.46.1 -> 0.46.2. No source changes.
 
 ---
 
 ## [0.33.4]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxGuard.Remote` 0.15.1 -> 0.16.0, `FluxIndex.Core` 0.46.0 -> 0.46.1, `FluxIndex.Storage.SQLite` 0.46.0 -> 0.46.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxGuard.Remote` 0.15.1 -> 0.16.0, `FluxIndex.Core` 0.46.0 -> 0.46.1, `FluxIndex.Storage.SQLite` 0.46.0 -> 0.46.1. No source changes.
 
 ---
 
 ## [0.33.3]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.45.0 -> 0.46.0, `FluxIndex.Storage.SQLite` 0.45.0 -> 0.46.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.45.0 -> 0.46.0, `FluxIndex.Storage.SQLite` 0.45.0 -> 0.46.0. No source changes.
 
 ---
 
 ## [0.33.2]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.7 -> 0.45.0, `FluxIndex.Storage.SQLite` 0.44.7 -> 0.45.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.7 -> 0.45.0, `FluxIndex.Storage.SQLite` 0.44.7 -> 0.45.0. No source changes.
 - README: how to register the keyword index on the SQLite stack (`AddSQLiteKeywordSearch`, FluxIndex 0.45.0).
   FluxIndex 0.45.0 also makes every hybrid leg fetch at least as many candidates as the fused list returns, for any
   caller of `HybridSearchService`.
@@ -519,14 +524,14 @@ Releases before 0.28.0 predate this file — see the git history.
 - Correction to the 0.32.0 note below: the keyword-index leg does not fuse by relative score at 0.7 / 0.3. It
   fuses by weighted reciprocal rank with weights chosen from the query's length — see "Hybrid" in the README.
   Hybrid scores were rank-sized before 0.32.0 as well; only the weights changed.
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.6 -> 0.44.7, `FluxIndex.Storage.SQLite` 0.44.6 -> 0.44.7 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.6 -> 0.44.7, `FluxIndex.Storage.SQLite` 0.44.6 -> 0.44.7. No source changes.
 
 ---
 
 ## [0.33.0]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.5 -> 0.44.6, `FluxIndex.Storage.SQLite` 0.44.5 -> 0.44.6 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.44.5 -> 0.44.6, `FluxIndex.Storage.SQLite` 0.44.5 -> 0.44.6. No source changes.
 
 ### Fixed
 - **`FileVaultOptions.MaxFileSizeMB` is enforced.** It was declared (default 100 MB, documented as "larger files will be
@@ -565,28 +570,28 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.31.4]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.17 -> 0.23.18, `FluxIndex.Core` 0.44.4 -> 0.44.5, `FluxIndex.Storage.SQLite` 0.44.4 -> 0.44.5 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.17 -> 0.23.18, `FluxIndex.Core` 0.44.4 -> 0.44.5, `FluxIndex.Storage.SQLite` 0.44.4 -> 0.44.5. No source changes.
 
 ---
 
 ## [0.31.3]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.16 -> 0.23.17, `FluxIndex.Core` 0.44.2 -> 0.44.4, `FluxIndex.Storage.SQLite` 0.44.2 -> 0.44.4 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.16 -> 0.23.17, `FluxIndex.Core` 0.44.2 -> 0.44.4, `FluxIndex.Storage.SQLite` 0.44.2 -> 0.44.4. No source changes.
 
 ---
 
 ## [0.31.2]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.15 -> 0.23.16, `FluxIndex.Core` 0.44.0 -> 0.44.2, `FluxIndex.Storage.SQLite` 0.44.0 -> 0.44.2 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.15 -> 0.23.16, `FluxIndex.Core` 0.44.0 -> 0.44.2, `FluxIndex.Storage.SQLite` 0.44.0 -> 0.44.2. No source changes.
 
 ---
 
 ## [0.31.1]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.14 -> 0.23.15, `FluxGuard.Remote` 0.15.0 -> 0.15.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.14 -> 0.23.15, `FluxGuard.Remote` 0.15.0 -> 0.15.1. No source changes.
 
 ---
 
@@ -602,7 +607,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ### Changed
 - Microsoft.Extensions.* / Microsoft.Data.Sqlite / EF Core pins raised to 10.0.12 (September 2026 .NET servicing).
-- Re-pinned sibling package(s) `FileFlux` 0.23.12 -> 0.23.14, `FluxIndex.Core` 0.43.0 -> 0.43.1, `FluxIndex.Storage.SQLite` 0.43.0 -> 0.43.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.12 -> 0.23.14, `FluxIndex.Core` 0.43.0 -> 0.43.1, `FluxIndex.Storage.SQLite` 0.43.0 -> 0.43.1. No source changes.
 
 ---
 
@@ -622,7 +627,7 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.30.1]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.11 -> 0.23.12, `FluxGuard.Remote` 0.14.2 -> 0.15.0, `FluxIndex.Core` 0.42.0 -> 0.43.0, `FluxIndex.Storage.SQLite` 0.42.0 -> 0.43.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.11 -> 0.23.12, `FluxGuard.Remote` 0.14.2 -> 0.15.0, `FluxIndex.Core` 0.42.0 -> 0.43.0, `FluxIndex.Storage.SQLite` 0.42.0 -> 0.43.0. No source changes.
 
 ---
 
@@ -655,21 +660,21 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.29.5]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.10 -> 0.23.11, `FluxGuard.Remote` 0.14.1 -> 0.14.2, `FluxIndex.Core` 0.41.1 -> 0.42.0, `FluxIndex.Storage.SQLite` 0.41.1 -> 0.42.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.10 -> 0.23.11, `FluxGuard.Remote` 0.14.1 -> 0.14.2, `FluxIndex.Core` 0.41.1 -> 0.42.0, `FluxIndex.Storage.SQLite` 0.41.1 -> 0.42.0. No source changes.
 
 ---
 
 ## [0.29.4]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.9 -> 0.23.10 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.9 -> 0.23.10. No source changes.
 
 ---
 
 ## [0.29.3]
 
 ### Changed
-- Re-pinned sibling package(s) `FileFlux` 0.23.8 -> 0.23.9, `FluxIndex.Core` 0.41.0 -> 0.41.1, `FluxIndex.Storage.SQLite` 0.41.0 -> 0.41.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FileFlux` 0.23.8 -> 0.23.9, `FluxIndex.Core` 0.41.0 -> 0.41.1, `FluxIndex.Storage.SQLite` 0.41.0 -> 0.41.1. No source changes.
 - Raised `Microsoft.Extensions.*` package references to 10.0.12 (latest servicing release). The re-pinned sibling releases declare `Microsoft.Extensions.*` floors above the previous references.
 
 ---
@@ -677,14 +682,14 @@ Releases before 0.28.0 predate this file — see the git history.
 ## [0.29.2]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.40.1 -> 0.41.0, `FluxIndex.Storage.SQLite` 0.40.1 -> 0.41.0 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.40.1 -> 0.41.0, `FluxIndex.Storage.SQLite` 0.40.1 -> 0.41.0. No source changes.
 
 ---
 
 ## [0.29.1]
 
 ### Changed
-- Re-pinned sibling package(s) `FluxIndex.Core` 0.40.0 -> 0.40.1, `FluxIndex.Storage.SQLite` 0.40.0 -> 0.40.1 — re-consumption of already-consumed iyulab packages via `check-pin-drift.ps1 -Fix`. No source changes.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.40.0 -> 0.40.1, `FluxIndex.Storage.SQLite` 0.40.0 -> 0.40.1. No source changes.
 
 ---
 

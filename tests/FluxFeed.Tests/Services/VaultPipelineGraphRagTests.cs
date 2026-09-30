@@ -16,8 +16,7 @@ namespace FluxFeed.Tests.Services;
 /// <summary>
 /// Verifies that the FileVault memorize path wires GraphRAG with semantics equivalent to the
 /// SDK direct-index path (Indexer.IndexAsync): null = auto-when-registered, true = force,
-/// false = off. Regression guard for upstream issue
-/// ISSUE-FluxIndex-20260619-filevault-indexingoptions-exposure.
+/// false = off.
 /// </summary>
 public sealed class VaultPipelineGraphRagTests : IDisposable
 {

@@ -310,7 +310,7 @@ public sealed class VaultFactoryTests : IDisposable
     [Fact]
     public async Task GetOrCreate_ThreadsHybridSearchService_UsedForHybridSearchStrategy()
     {
-        // Regression guard for cycle-235's finding: hybridSearch used to be hardcoded to null in
+        // Regression guard: hybridSearch used to be hardcoded to null in
         // VaultFactory's constructor call, so a tenant-scoped vault could never reach this path no
         // matter what was registered in DI.
         var hybrid = Substitute.For<IHybridSearchService>();

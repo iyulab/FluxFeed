@@ -145,7 +145,7 @@ public class GitServiceTests : IDisposable
         result.Should().BeNull();
     }
 
-    // FluxFeed docket #177: DiffAsync compares the working tree against the index/HEAD, so a caller
+    // DiffAsync compares the working tree against the index/HEAD, so a caller
     // that auto-commits after every write (as VaultManager's Memorize/RefreshAsync does) sees an
     // empty diff almost every time -- the working tree is already clean by the time it checks.
     // DiffLastChangeAsync answers the actually-useful question ("what did the last commit change")

@@ -13,14 +13,13 @@ namespace FluxFeed.Tests.Extensions;
 /// Regression guard for the defect where FluxFeed's FileVault entry points re-registered FileFlux
 /// unconditionally (default Scoped), silently overriding a consumer's prior AddFileFlux(Singleton)
 /// and reintroducing a captive-dependency error.
-/// Issue: ISSUE-FluxFeed-20260707-194622-addfilevault-filefluxlifetime-override (AIMS 2nd-consumer report).
 /// </summary>
 public class FileFluxLifetimePreservationTests
 {
     private sealed class ReaderFactoryConsumer
     {
         // A Singleton service that captures the scoped/singleton IDocumentReaderFactory —
-        // mirrors FileFlux's own FluxDocumentProcessor capture that AIMS hit.
+        // mirrors FileFlux's own FluxDocumentProcessor capture.
         public ReaderFactoryConsumer(IDocumentReaderFactory factory) => Factory = factory;
 
         public IDocumentReaderFactory Factory { get; }
@@ -82,7 +81,7 @@ public class FileFluxLifetimePreservationTests
     [Fact]
     public void AddFileVaultWithFileFlux_WhenFileFluxPreRegisteredSingleton_SingletonConsumerIsScopeValid()
     {
-        // Faithful reproduction of the AIMS captive: a Singleton that consumes IDocumentReaderFactory
+        // The captive dependency: a Singleton that consumes IDocumentReaderFactory
         // throws under ValidateOnBuild when FluxFeed downgrades the factory to Scoped. With the guard
         // the consumer's Singleton lifetime is preserved and the graph is scope-valid.
         var services = new ServiceCollection();

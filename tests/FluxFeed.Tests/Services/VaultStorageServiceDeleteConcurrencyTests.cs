@@ -13,7 +13,7 @@ namespace FluxFeed.Tests.Services;
 /// <summary>
 /// Regression tests for the FileVault removal Phase-2 deletion race.
 ///
-/// Bug (reported by Filer, 2026-06-10): a background remove job's
+/// Bug: a background remove job's
 /// <see cref="VaultStorageService.DeleteEntryStorageAsync"/> failed with
 /// "The process cannot access the file 'meta.json' because it is being used by another process."
 /// whenever a concurrent <c>ListAsync</c> enumeration was reading meta.json — leaving the entry
@@ -68,8 +68,8 @@ public class VaultStorageServiceDeleteConcurrencyTests : IDisposable
     public async Task DeleteEntryStorageAsync_SucceedsWhileConcurrentMetadataReadsAreInFlight()
     {
         // Arrange: an entry on disk, and a hammer task that mimics ListAsync continuously
-        // re-reading meta.json (VaultEntry.LoadByHash) — the exact polling pattern Filer's
-        // Vault view uses. Without FileShare.Delete on the read path this collides with the delete.
+        // re-reading meta.json (VaultEntry.LoadByHash) — the polling pattern of a UI that lists the
+        // vault while it changes. Without FileShare.Delete on the read path this collides with the delete.
         var entry = CreateEntryWithMetadata("concurrent-read.txt");
 
         using var stop = new CancellationTokenSource();

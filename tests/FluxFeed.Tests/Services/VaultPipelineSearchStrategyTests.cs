@@ -11,7 +11,7 @@ using Xunit;
 namespace FluxFeed.Tests.Services;
 
 /// <summary>
-/// Strategy routing in <see cref="VaultPipeline.SearchAsync"/> (ISSUE-161). Verifies that a hybrid
+/// Strategy routing in <see cref="VaultPipeline.SearchAsync"/>. Verifies that a hybrid
 /// request is routed to <see cref="IHybridSearchService"/> and a keyword request to
 /// <see cref="IKeywordSearchService"/> when each is available, and that both otherwise degrade to
 /// vector while reporting the executed strategy truthfully (no silent mismatch).
@@ -106,7 +106,7 @@ public class VaultPipelineSearchStrategyTests
         response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("keep");
     }
 
-    // ISSUE-161 (pure-keyword search): routed through IKeywordSearchService directly, never through
+    // Pure-keyword search: routed through IKeywordSearchService directly, never through
     // IHybridSearchService with VectorWeight=0 (that path still burns an embedding call + vector
     // search it then discards — the "degenerate weighted hybrid" this strategy value exists to avoid).
 
@@ -163,7 +163,7 @@ public class VaultPipelineSearchStrategyTests
         response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("keep");
     }
 
-    // ISSUE-161 follow-up (hybrid-route-bypasses-populated-fts): store-native hybrid preference.
+    // Store-native hybrid preference: a hybrid route must not bypass a populated full-text index.
 
     private VaultPipeline CreatePipelineWithStore(IVectorStore store, IHybridSearchService? hybrid)
     {
@@ -301,7 +301,7 @@ public class VaultPipelineSearchStrategyTests
         CreatePipeline(hybrid: null).HybridKeywordLeg.Should().Be(HybridKeywordLeg.None);
     }
 
-    // FluxFeed docket #172 (VectorSearchAsync/HybridSearchAsync/KeywordSearchAsync never pushed a
+    // Scope push-down (VectorSearchAsync/HybridSearchAsync/KeywordSearchAsync never pushed a
     // filter into the underlying store, so a document-id scope was only ever applied as a client-side
     // Where() over an unscoped candidate window — silent-empty in any vault where unrelated content
     // outnumbers the scoped folder's own competitive matches). These assert the filter argument
@@ -372,7 +372,7 @@ public class VaultPipelineSearchStrategyTests
     [Fact]
     public async Task SearchAsync_HybridRequest_Scoped_NativeHybrid_PushesScopeIntoNativeFusion()
     {
-        // FluxFeed docket #214: the native path used to be taken only for unscoped requests, so a
+        // The native path used to be taken only for unscoped requests, so a
         // consumer whose every search carries a PathScope never got hybrid at all — every default
         // search silently ran as Vector. The scope now goes into the native call as a metadata
         // filter (INativeHybridSearch gained the parameter in FluxIndex.Core 0.32.0) and the response

@@ -922,7 +922,7 @@ public class VaultManagerTests : IDisposable
 
     #endregion
 
-    #region SearchAsync strategy carrier (ISSUE-161)
+    #region SearchAsync strategy carrier
 
     [Fact]
     public async Task SearchAsync_HybridRequest_WhenPipelineExecutesHybrid_SurfacesHybrid()
@@ -965,7 +965,7 @@ public class VaultManagerTests : IDisposable
 
     #endregion
 
-    #region SearchAsync cancellation propagation (ISSUE-163)
+    #region SearchAsync cancellation propagation
 
     [Fact]
     public async Task SearchAsync_WhenPipelineThrowsOCE_AndCallerTokenCancelled_PropagatesCancellation()
@@ -1203,7 +1203,7 @@ public class VaultManagerTests : IDisposable
 
     #endregion
 
-    #region Status, change detection and index audit are separate questions (docket #288)
+    #region Status, change detection and index audit are separate questions
 
     [Fact]
     public async Task StatusAsync_RunsNoChangeDetection_NoGitProcessAndNoRecordWrite()

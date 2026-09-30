@@ -322,7 +322,7 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
     [Fact]
     public async Task MemorizeAsync_ImageFailsPastTheCeiling_StopsBeingOfferedToTheEnricher()
     {
-        // AIMS's own complaint: an image that will never succeed (unsupported format, corrupt data)
+        // An image that will never succeed (unsupported format, corrupt data)
         // must not cost the enricher's backing resource a call on every single scan forever.
         var entry = CreateEntry("figures.pdf");
         var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000")] };

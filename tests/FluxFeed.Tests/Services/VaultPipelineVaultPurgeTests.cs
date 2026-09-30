@@ -16,7 +16,7 @@ namespace FluxFeed.Tests.Services;
 /// <summary>
 /// Verifies the shared-store tenant purge primitive: memorized chunks carry a vault_id tag so a
 /// multi-tenant consumer can bulk-purge one vault's vectors via a single filtered delete
-/// (D-C stage i — replaces AIMS's forked per-entry delete loop).
+/// instead of deleting entry by entry.
 /// </summary>
 public sealed class VaultPipelineVaultPurgeTests : IDisposable
 {
@@ -104,7 +104,7 @@ public sealed class VaultPipelineVaultPurgeTests : IDisposable
             Arg.Any<CancellationToken>());
     }
 
-    // FluxFeed docket #172: search scoping (VaultPipeline.SearchAsync's documentIds parameter) works
+    // Search scoping (VaultPipeline.SearchAsync's documentIds parameter) works
     // by pushing a document_id metadata filter into the underlying store/service query. That filter
     // only matches anything if the stored chunk actually carries a document_id metadata entry — same
     // requirement the vault_id tag above satisfies for tenant purge.

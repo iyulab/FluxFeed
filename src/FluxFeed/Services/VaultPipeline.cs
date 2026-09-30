@@ -1222,7 +1222,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // Generate query embedding
         var queryEmbedding = await _embeddingService!.GenerateEmbeddingAsync(query, ct);
 
-        // Push the document-id scope into the query itself (FluxFeed docket #172) — without this,
+        // Push the document-id scope into the query itself — without this,
         // a scoped search over a shared index returns whatever survives filtering the global top N,
         // so scoped chunks that lose the unscoped ranking race get zero results even when they match
         // the query perfectly well. The client-side Where() below stays as a correctness backstop for

@@ -16,7 +16,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace FluxFeed.Tests.Services;
 
 /// <summary>
-/// Opt-in contextual enrichment at the chunk stage (BD-20260908-05) through FluxIndex.Core's
+/// Opt-in contextual enrichment at the chunk stage through FluxIndex.Core's
 /// <see cref="IContextualEnrichmentService"/> port. The port is a substitute — what is under test is the pipeline's
 /// wiring: the double gate (service + option), the text that reaches the store and the embedder, the metadata, and
 /// the degrade path. Real storage on a temp directory, mocked git/vector/embedding — the same harness shape as

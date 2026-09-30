@@ -54,7 +54,7 @@ public class VaultQueueObservabilityTests : IDisposable
     private VaultQueueService CreateService() =>
         new(NullLogger<VaultQueueService>.Instance, MsOptions.Create(_options));
 
-    // ---------------------------------------------------------------- #231 liveness
+    // ---------------------------------------------------------------- liveness
 
     [Fact]
     public async Task LastAttemptedAt_MovesForAFailingWorker_WhileLastSucceededAtStaysNull()
@@ -107,7 +107,7 @@ public class VaultQueueObservabilityTests : IDisposable
         stats.CompletedCount.Should().Be(1);
     }
 
-    // ---------------------------------------------------------------- #232 listing
+    // ---------------------------------------------------------------- listing
 
     [Fact]
     public async Task GetJobsAsync_NewestFirst_ReturnsTheMostRecentlyQueued()

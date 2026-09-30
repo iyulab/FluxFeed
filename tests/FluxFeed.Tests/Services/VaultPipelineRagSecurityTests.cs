@@ -15,7 +15,7 @@ using MsOptions = Microsoft.Extensions.Options.Options;
 namespace FluxFeed.Tests.Services;
 
 /// <summary>
-/// Docket BD-20260827-01 (FluxGuard.Remote RAG security pipeline, opt-in, ingestion-time half).
+/// The FluxGuard.Remote RAG security pipeline (opt-in, ingestion-time half).
 /// Uses the real <see cref="IndirectInjectionDetector"/> (not a mock) so the guard's actual
 /// regex-based detection is what's under test. Real <see cref="VaultStorageService"/> +
 /// <see cref="ContentHasher"/> against a temp directory (VaultEntry.SaveMetadata writes to disk
