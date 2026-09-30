@@ -12,13 +12,14 @@ using Xunit;
 namespace FluxFeed.Tests.Services;
 
 /// <summary>
-/// Chunks written before the "document_id" metadata tag existed must stay searchable.
+/// Chunks written without a "document_id" metadata copy must stay searchable.
 /// <para>
 /// <see cref="VaultPipeline"/> pushes a <c>{"document_id": …}</c> filter into the vector store on
 /// every search that names a document set — and the caller names one on *every* search, the whole
-/// vault when no scope is given. Chunks stored before that tag was written carry no such key, so a
-/// filter built unconditionally matches none of them: not a scoped-search bug but a whole-vault
-/// outage, silent because nothing logs or throws.
+/// vault when no scope is given. Chunks stored before the pipeline wrote a metadata copy of their
+/// document id carry no such key. The store resolves the key to the chunk's own document id, so
+/// they match; were it read as a metadata key, the filter would match none of them — not a
+/// scoped-search bug but a whole-vault outage, silent because nothing logs or throws.
 /// </para>
 /// <para>
 /// These tests exercise the real filter semantics by deriving the store double from
@@ -105,174 +106,26 @@ public class VaultPipelineLegacyChunkScopeTests
     }
 
     /// <summary>
-    /// The backfill must not cost a re-embed: it carries no embedding, so the store leaves the
-    /// stored vector alone. Asserted two ways — the chunk handed to <c>UpdateAsync</c> has none,
-    /// and the row is still findable by similarity afterwards (a nulled vector would drop it).
+    /// A search is read-only. The scope is resolved by the store from each chunk's own document id,
+    /// so nothing has to be written onto old chunks first and no document has to be read one by one —
+    /// an earlier release migrated a metadata copy of the id on every scoped search, per document.
     /// </summary>
     [Fact]
-    public async Task SearchAsync_BackfillingLegacyChunks_PreservesStoredEmbedding()
+    public async Task SearchAsync_OverLegacyChunks_NeitherWritesNorReadsPerDocument()
     {
+        var ct = TestContext.Current.CancellationToken;
         var store = new RecordingVectorStore();
-        await StoreLegacyChunkAsync(store, "doc-a", "chunk-a", "alpha content", TestContext.Current.CancellationToken);
+        await StoreLegacyChunkAsync(store, "doc-a", "a1", "alpha", ct);
+        await StoreLegacyChunkAsync(store, "doc-b", "b1", "alpha", ct);
         var pipeline = CreatePipeline(store);
 
-        await pipeline.SearchAsync(
-            "alpha", documentIds: ["doc-a"], topK: 10, minScore: 0f,
-            strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
+        var response = await pipeline.SearchAsync(
+            "alpha", documentIds: ["doc-a", "doc-b"], topK: 10, minScore: 0f,
+            strategy: VaultSearchStrategy.Vector, ct: ct);
 
-        store.UpdatedChunks.Should().NotBeEmpty("the legacy chunk needs its tag written");
-        store.UpdatedChunks.Should().OnlyContain(c => c.Embedding == null,
-            "a backfill that carries an embedding would rewrite the vector it should preserve");
-        store.Vectors["chunk-a"].Should().NotBeNull();
-
-        var second = await pipeline.SearchAsync(
-            "alpha", documentIds: ["doc-a"], topK: 10, minScore: 0f,
-            strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
-        second.Results.Should().ContainSingle();
-    }
-
-    /// <summary>
-    /// A vault whose chunks already carry the tag must not be rewritten — the backfill is a
-    /// migration, not a per-search write.
-    /// </summary>
-    [Fact]
-    public async Task SearchAsync_TaggedChunks_AreNotRewritten()
-    {
-        var store = new RecordingVectorStore();
-        await store.StoreAsync(new DocumentChunk
-        {
-            Id = "chunk-a",
-            DocumentId = "doc-a",
-            ChunkIndex = 0,
-            Content = "alpha content",
-            Embedding = [1f, 0f, 0f, 0f],
-            Metadata = new Dictionary<string, object> { ["document_id"] = "doc-a" }
-        }, TestContext.Current.CancellationToken);
-        var pipeline = CreatePipeline(store);
-
-        await pipeline.SearchAsync(
-            "alpha", documentIds: ["doc-a"], topK: 10, minScore: 0f,
-            strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
-
-        store.UpdatedChunks.Should().BeEmpty();
-    }
-
-    /// <summary>
-    /// The scan is a one-time migration per document, not a per-search cost: a second search must
-    /// not re-enumerate documents the first one already settled.
-    /// </summary>
-    [Fact]
-    public async Task SearchAsync_RepeatedSearches_ScanEachDocumentOnce()
-    {
-        var store = new RecordingVectorStore();
-        await StoreLegacyChunkAsync(store, "doc-a", "chunk-a", "alpha content", TestContext.Current.CancellationToken);
-        var pipeline = CreatePipeline(store);
-
-        for (var i = 0; i < 3; i++)
-        {
-            await pipeline.SearchAsync(
-                "alpha", documentIds: ["doc-a"], topK: 10, minScore: 0f,
-                strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
-        }
-
-        store.GetByDocumentIdCalls.Should().Be(1);
-    }
-
-    /// <summary>
-    /// A store that refuses the write must not leave the document recorded as migrated.
-    ///
-    /// <para>
-    /// This is the FluxFeed half of a defect that shipped in three releases: the backfill called
-    /// <c>UpdateAsync</c> and discarded its answer, so a store that wrote nothing looked identical
-    /// to one that succeeded. The store side is fixed separately; what is guarded here is that this
-    /// pipeline now reads the answer — a document whose chunks did not persist stays unsettled, so
-    /// a later search retries it instead of serving those chunks as permanently unreachable.
-    /// </para>
-    /// </summary>
-    [Fact]
-    public async Task SearchAsync_WhenTheStoreRefusesTheBackfillWrite_RetriesOnTheNextSearch()
-    {
-        var store = new RefusingUpdateVectorStore();
-        await StoreLegacyChunkAsync(store, "doc-a", "chunk-a", "alpha content", TestContext.Current.CancellationToken);
-        var pipeline = CreatePipeline(store);
-
-        await pipeline.SearchAsync(
-            "alpha", documentIds: ["doc-a"], topK: 10, minScore: 0f,
-            strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
-        var afterFirst = store.UpdateAttempts;
-
-        await pipeline.SearchAsync(
-            "alpha", documentIds: ["doc-a"], topK: 10, minScore: 0f,
-            strategy: VaultSearchStrategy.Vector, ct: TestContext.Current.CancellationToken);
-
-        afterFirst.Should().BeGreaterThan(0, "the first search should have attempted the migration");
-        store.UpdateAttempts.Should().BeGreaterThan(afterFirst,
-            "a refused write must not mark the document settled, so the next search retries it");
-    }
-
-    /// <summary>
-    /// Same double as <see cref="RecordingVectorStore"/> except that updates are refused. Reporting
-    /// <c>false</c> is the contract a store is required to honour when it writes no row.
-    /// </summary>
-    private sealed class RefusingUpdateVectorStore : VectorStoreBase
-    {
-        private readonly Dictionary<string, DocumentChunk> _chunks = [];
-
-        public int UpdateAttempts { get; private set; }
-
-        protected override Task<string> StoreCoreAsync(DocumentChunk chunk, CancellationToken cancellationToken)
-        {
-            _chunks[chunk.Id] = chunk;
-            return Task.FromResult(chunk.Id);
-        }
-
-        protected override Task<DocumentChunk?> GetCoreAsync(string id, CancellationToken cancellationToken)
-            => Task.FromResult(_chunks.TryGetValue(id, out var chunk) ? chunk : null);
-
-        protected override Task<IEnumerable<VectorSearchResult>> SearchCoreAsync(
-            float[] queryEmbedding, int topK, Dictionary<string, object>? filters, CancellationToken cancellationToken)
-            => Task.FromResult<IEnumerable<VectorSearchResult>>([]);
-
-        protected override Task<bool> UpdateCoreAsync(DocumentChunk chunk, CancellationToken cancellationToken)
-        {
-            UpdateAttempts++;
-            return Task.FromResult(false);
-        }
-
-        protected override Task<IEnumerable<DocumentChunk>> GetByDocumentIdCoreAsync(
-            string documentId, CancellationToken cancellationToken)
-        {
-            // Project fresh objects, as the shipped stores do. Handing back the stored instances
-            // would let a caller's in-place mutation "persist" without any write, which is the
-            // exact illusion these tests exist to rule out.
-            IEnumerable<DocumentChunk> found = _chunks.Values
-                .Where(c => c.DocumentId == documentId)
-                .Select(c => new DocumentChunk
-                {
-                    Id = c.Id,
-                    DocumentId = c.DocumentId,
-                    ChunkIndex = c.ChunkIndex,
-                    Content = c.Content,
-                    Metadata = c.Metadata != null ? new Dictionary<string, object>(c.Metadata) : null
-                })
-                .ToList();
-            return Task.FromResult(found);
-        }
-
-        protected override Task<bool> DeleteCoreAsync(string id, CancellationToken cancellationToken)
-            => Task.FromResult(_chunks.Remove(id));
-
-        protected override Task<bool> DeleteByDocumentIdCoreAsync(string documentId, CancellationToken cancellationToken)
-            => Task.FromResult(true);
-
-        protected override Task<int> CountCoreAsync(CancellationToken cancellationToken)
-            => Task.FromResult(_chunks.Count);
-
-        protected override Task ClearCoreAsync(CancellationToken cancellationToken)
-        {
-            _chunks.Clear();
-            return Task.CompletedTask;
-        }
+        response.Results.Should().HaveCount(2);
+        store.UpdatedChunks.Should().BeEmpty("a search must not rewrite stored chunks");
+        store.GetByDocumentIdCalls.Should().Be(0, "a search must not read the vault document by document");
     }
 
     /// <summary>

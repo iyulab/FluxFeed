@@ -116,15 +116,6 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private readonly IContextualEnrichmentService? _contextualEnrichment;
 
     /// <summary>
-    /// Documents whose chunks have already been examined for the "document_id" scope tag by
-    /// <see cref="BackfillDocumentScopeTagsAsync"/>. Keeps the one-time migration from re-reading
-    /// every document on every search; a document that failed to migrate is forgotten again so the
-    /// next search retries it. A singleton under the library's registration, because this pipeline
-    /// is scoped and a field of its own would last one request.
-    /// </summary>
-    private readonly VaultScopeTagBackfillState _scopeTagBackfill;
-
-    /// <summary>
     /// Value of the <c>chunk_kind</c> metadata tag on a chunk that holds an image description
     /// rather than document text.
     /// </summary>
@@ -168,10 +159,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IVaultImageEnricher? imageEnricher = null,
         IRAGSecurityPipeline? ragSecurityPipeline = null,
         IContextualEnrichmentService? contextualEnrichment = null,
-        ILoggerFactory? loggerFactory = null,
-        VaultScopeTagBackfillState? scopeTagBackfillState = null)
+        ILoggerFactory? loggerFactory = null)
     {
-        _scopeTagBackfill = scopeTagBackfillState ?? new VaultScopeTagBackfillState();
         _git = git ?? throw new ArgumentNullException(nameof(git));
         _hasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
         _storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -933,6 +922,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IReadOnlyDictionary<string, object>? extraMetadata = null)
     {
         chunk.Metadata ??= new Dictionary<string, object>();
+        // Provenance only: scope filters resolve FilterKeys.DocumentId to chunk.DocumentId in every store.
         chunk.Metadata["document_id"] = chunk.DocumentId;
         chunk.Metadata["source_path"] = entry.SourcePath;
         chunk.Metadata["filepath_hash"] = entry.FilepathHash;
@@ -948,113 +938,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
     }
 
     /// <summary>
-    /// Builds the metadata filter that scopes a search to <paramref name="docIdSet"/>, matching
-    /// ANY of its elements (the same collection-value semantics <see cref="ApplyChunkMetadata"/>'s
-    /// "document_id" tag is written under). Null when no scope was requested.
+    /// Builds the filter that scopes a search to <paramref name="docIdSet"/>, matching ANY of its
+    /// elements. The key is <see cref="FilterKeys.DocumentId"/>, which every store and keyword index
+    /// resolves to the chunk's own document id — so a chunk is in scope whether or not its metadata
+    /// carries a copy. Null when no scope was requested.
     /// </summary>
     private static Dictionary<string, object>? BuildDocScopeFilter(HashSet<string>? docIdSet)
-        => docIdSet == null ? null : new Dictionary<string, object> { ["document_id"] = docIdSet };
-
-    /// <summary>
-    /// Writes the "document_id" tag onto chunks that predate it, so that the scope filter built by
-    /// <see cref="BuildDocScopeFilter"/> can match them.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The tag is written at index time by <see cref="ApplyChunkMetadata"/>, but chunks stored
-    /// before it existed carry only their provenance tags. The filter is built for every search
-    /// that names a document set — and the caller names one on every search, the whole vault when
-    /// no scope was requested — so without this those chunks match nothing: every search over an
-    /// existing store returns no results at all, silently, until each document is re-indexed.
-    /// </para>
-    /// <para>
-    /// No re-embedding is involved. The value being written is already on the chunk as
-    /// <see cref="DocumentChunk.DocumentId"/> — the store's own key, which
-    /// <see cref="IVectorStore.GetByDocumentIdAsync"/> queries — so this copies a value the store
-    /// already holds into the metadata the filter reads. The chunks handed to
-    /// <see cref="IVectorStore.UpdateAsync"/> deliberately carry no embedding, which is what leaves
-    /// the stored vector untouched.
-    /// </para>
-    /// <para>
-    /// Each document is examined at most once per process (<see cref="VaultScopeTagBackfillState"/>),
-    /// and a document whose chunks already carry the tag is skipped without any write, so a store
-    /// written entirely by a current release pays one read per document and nothing after that.
-    /// </para>
-    /// </remarks>
-    private async Task BackfillDocumentScopeTagsAsync(HashSet<string>? docIdSet, CancellationToken ct)
-    {
-        if (docIdSet == null || _vectorStore == null)
-            return;
-
-        var migratedDocuments = 0;
-        var migratedChunks = 0;
-        var failedDocuments = 0;
-
-        foreach (var documentId in docIdSet)
-        {
-            if (!_scopeTagBackfill.TryBegin(documentId))
-                continue;
-
-            try
-            {
-                var chunks = (await _vectorStore.GetByDocumentIdAsync(documentId, ct)).ToList();
-                if (chunks.Count == 0)
-                    continue;
-
-                var untagged = chunks.Where(c => !HasDocumentScopeTag(c)).ToList();
-                if (untagged.Count == 0)
-                    continue;
-
-                var written = 0;
-                foreach (var chunk in untagged)
-                {
-                    var metadata = chunk.Metadata != null
-                        ? new Dictionary<string, object>(chunk.Metadata)
-                        : [];
-                    metadata["document_id"] = chunk.DocumentId;
-                    chunk.Metadata = metadata;
-                    // Embedding is left null on purpose — see the remarks above.
-                    chunk.Embedding = null;
-                    if (await _vectorStore.UpdateAsync(chunk, ct))
-                        written++;
-                }
-
-                if (written < untagged.Count)
-                {
-                    // The store accepted the writes and reported that it did not perform them.
-                    // Discarding that answer is how a store-side no-op became invisible here for
-                    // three releases: every search re-ran the same migration, reported success,
-                    // and the scoped search kept returning nothing.
-                    _scopeTagBackfill.Forget(documentId);
-                    failedDocuments++;
-                    LogBackfillDocumentScopeTagsNotPersisted(_logger, written, untagged.Count, documentId);
-                    continue;
-                }
-
-                migratedDocuments++;
-                migratedChunks += written;
-            }
-            catch (Exception ex)
-            {
-                // A document that could not be migrated must not take the search down with it, but
-                // it must also not be remembered as settled — drop it from the checked set so the
-                // next search tries again instead of silently serving that document's chunks as
-                // unreachable forever.
-                _scopeTagBackfill.Forget(documentId);
-                failedDocuments++;
-                LogBackfillDocumentScopeTagsFailed(_logger, ex, documentId);
-            }
-        }
-
-        // One line per migration pass rather than one per document: a first search over a large
-        // vault otherwise buries everything else in the log, and the per-document detail is not
-        // actionable when the pass succeeds.
-        if (migratedDocuments > 0 || failedDocuments > 0)
-            LogBackfilledDocumentScopeTags(_logger, migratedChunks, migratedDocuments, failedDocuments);
-    }
-
-    private static bool HasDocumentScopeTag(DocumentChunk chunk)
-        => chunk.Metadata != null && chunk.Metadata.ContainsKey("document_id");
+        => docIdSet == null ? null : new Dictionary<string, object> { [FilterKeys.DocumentId] = docIdSet };
 
     public async Task<VaultPipelineSearchResponse> SearchAsync(
         string query,
@@ -1071,8 +961,6 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
 
         var docIdSet = documentIds?.ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        await BackfillDocumentScopeTagsAsync(docIdSet, ct);
 
         if (strategy == VaultSearchStrategy.Hybrid)
         {
@@ -2167,15 +2055,6 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "No vector store configured, skipping removal")]
     private static partial void LogNoVectorStoreSkipRemoval(ILogger logger);
-    [LoggerMessage(Level = LogLevel.Information, Message = "Backfilled document scope tag on {ChunkCount} chunks across {DocumentCount} documents predating it ({FailedCount} documents could not be migrated)")]
-    private static partial void LogBackfilledDocumentScopeTags(ILogger logger, int chunkCount, int documentCount, int failedCount);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Vector store persisted only {Written} of {Expected} document scope tags for document {DocumentId} while reporting no error; its chunks stay unreachable by a scoped search")]
-    private static partial void LogBackfillDocumentScopeTagsNotPersisted(ILogger logger, int written, int expected, string documentId);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to backfill document scope tag for document {DocumentId}; its chunks stay unreachable by a scoped search until this succeeds")]
-    private static partial void LogBackfillDocumentScopeTagsFailed(ILogger logger, Exception exception, string documentId);
-
     [LoggerMessage(Level = LogLevel.Information, Message = "Removed chunks for document {DocumentId}")]
     private static partial void LogRemovedChunks(ILogger logger, string documentId);
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to roll back the partial index for {SourcePath}; both the previous and the partial generation may be present")]

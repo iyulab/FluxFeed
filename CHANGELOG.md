@@ -12,6 +12,25 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.38.0] - Unreleased
+
+### Fixed
+- **A search no longer writes to the vector store or reads the vault document by document.** Earlier releases copied
+  each chunk's document id into its metadata on the first scoped search of each document, so old chunks could match
+  the scope filter. FluxIndex 0.63.0 resolves the `document_id` scope to the chunk's own document id in every vector
+  store and keyword index, so the migration is gone. The copy it made never reached the keyword index, which is why a
+  hybrid or keyword search could still miss chunks indexed before the copy existed; those chunks are now in scope with
+  no re-index.
+
+### Removed
+- **Breaking: `VaultScopeTagBackfillState` and the `scopeTagBackfillState` parameter of the `VaultPipeline`
+  constructor.** Migration: drop the argument; `AddFileVault` no longer registers the type.
+
+### Dependencies
+- `FluxIndex.Core` and `FluxIndex.Storage.SQLite` 0.62.1 -> 0.63.0 (required: the scope resolution above).
+
+---
+
 ## [0.37.14] - 2026-09-30
 
 ### Changed
