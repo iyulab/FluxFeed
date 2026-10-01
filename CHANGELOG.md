@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.40.0] - Unreleased
+## [0.40.0] - 2026-10-01
 
 ### Added
 - **A folder watched with `autoMemorize: true` now keeps the vault in step by itself.** Created and saved files are
