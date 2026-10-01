@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.41.0] - Unreleased
+## [0.41.0] - 2026-10-01
 
 ### Changed
 - **A keyword-index repair no longer stops at the first entry that fails.** `RepairKeywordIndexAsync` (every overload)
