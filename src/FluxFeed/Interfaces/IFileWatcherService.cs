@@ -9,8 +9,9 @@ namespace FluxFeed.Interfaces;
 /// include/exclude patterns; <see cref="FileRenamed"/> is raised for every rename.
 /// </summary>
 /// <remarks>
-/// The events are the whole contract: nothing in FluxFeed subscribes to them, so a change is not indexed, removed or
-/// moved in the vault until a subscriber calls <see cref="IVault.MemorizeAsync(string, CancellationToken)"/>,
+/// For a folder added with <c>autoMemorize: true</c> the vault subscribes and applies the changes itself
+/// (<see cref="IVault.AddWatchedFolderAsync"/>); for any other folder the events are the whole contract, and a change
+/// reaches the vault only when a subscriber calls <see cref="IVault.MemorizeAsync(string, CancellationToken)"/>,
 /// <see cref="IVault.RemoveAsync(string, CancellationToken)"/> or <see cref="IVault.MoveAsync"/>. The service is a
 /// singleton shared by every vault, including those from <see cref="IVaultFactory"/>; each event carries the
 /// <c>FolderId</c> of the watched folder it came from. Events are raised on thread-pool threads.

@@ -148,4 +148,7 @@ public sealed class VaultContext
     /// without a container.
     /// </summary>
     public IServiceScope? Scope { get; init; }
+
+    /// <summary>The tenant's watched folders; disposed with the tenant.</summary>
+    internal Services.WatchedFolderSync? WatchedFolders { get; init; }
 }

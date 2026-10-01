@@ -27,7 +27,7 @@ public sealed partial class VaultManager : IVault
     private readonly FileVaultOptions _options;
     private readonly IReranker? _reranker;
 
-    private readonly ConcurrentDictionary<Guid, WatchedFolder> _watchedFolders = new();
+    private readonly WatchedFolderSync _watchedFolders;
     private DateTimeOffset? _lastSyncTime;
 
     public string VaultBasePath { get; }
@@ -41,7 +41,8 @@ public sealed partial class VaultManager : IVault
         IVaultStorageService storage,
         ILogger<VaultManager> logger,
         IOptions<FileVaultOptions> options,
-        IReranker? reranker = null)
+        IReranker? reranker = null,
+        WatchedFolderSync? watchedFolders = null)
     {
         _hasher = hasher ?? throw new ArgumentNullException(nameof(hasher));
         _git = git ?? throw new ArgumentNullException(nameof(git));
@@ -53,6 +54,9 @@ public sealed partial class VaultManager : IVault
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _reranker = reranker;
         _patternMatcher = new PatternMatcher();
+        // From DI or IVaultFactory: the set shared by every instance of this vault, which applies changes of folders
+        // added with autoMemorize. Constructed by hand: a set of this instance's own that applies nothing.
+        _watchedFolders = watchedFolders ?? WatchedFolderSync.Detached(_fileWatcher);
 
         VaultBasePath = _options.VaultBasePath ?? _options.VaultDirectoryName;
     }
@@ -267,7 +271,7 @@ public sealed partial class VaultManager : IVault
         var orphansSeenInFolderScan = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // Scan all watched folders
-        var folders = _watchedFolders.Values.ToList();
+        var folders = _watchedFolders.Folders.ToList();
         foreach (var folder in folders)
         {
             if (folder.Status != WatcherStatus.Active)
@@ -925,7 +929,7 @@ public sealed partial class VaultManager : IVault
         }
 
         var queueStatus = await GetQueueStatusAsync(ct);
-        var folders = _watchedFolders.Values.ToList();
+        var folders = _watchedFolders.Folders.ToList();
 
         return new VaultStatus
         {
@@ -1116,7 +1120,7 @@ public sealed partial class VaultManager : IVault
             throw new DirectoryNotFoundException($"Folder not found: {fullPath}");
 
         // Check if already watching
-        var existing = _watchedFolders.Values.FirstOrDefault(f =>
+        var existing = _watchedFolders.Folders.FirstOrDefault(f =>
             f.Path.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
@@ -1134,7 +1138,7 @@ public sealed partial class VaultManager : IVault
             includePatterns ?? _options.DefaultIncludePatterns.ToArray(),
             excludePatterns ?? _options.DefaultExcludePatterns.ToArray());
 
-        _watchedFolders[folder.Id] = folder;
+        _watchedFolders.GetOrAdd(folder);
 
         // Start watching (EnableRealTimeWatch off: the folder is registered for scans and sync, not watched)
         if (_options.EnableRealTimeWatch)
@@ -1146,13 +1150,13 @@ public sealed partial class VaultManager : IVault
 
     public Task<WatchedFolder?> GetWatchedFolderAsync(Guid folderId, CancellationToken ct = default)
     {
-        _watchedFolders.TryGetValue(folderId, out var folder);
+        _watchedFolders.TryGet(folderId, out var folder);
         return Task.FromResult(folder);
     }
 
     public Task<IReadOnlyList<WatchedFolder>> GetAllWatchedFoldersAsync(CancellationToken ct = default)
     {
-        return Task.FromResult<IReadOnlyList<WatchedFolder>>(_watchedFolders.Values.ToList());
+        return Task.FromResult<IReadOnlyList<WatchedFolder>>(_watchedFolders.Folders.ToList());
     }
 
     public async Task RemoveWatchedFolderAsync(Guid folderId, bool removeTrackedFiles = false, CancellationToken ct = default)
@@ -1177,7 +1181,7 @@ public sealed partial class VaultManager : IVault
 
     public async Task PauseWatchingAsync(Guid folderId, CancellationToken ct = default)
     {
-        if (!_watchedFolders.TryGetValue(folderId, out var folder))
+        if (!_watchedFolders.TryGet(folderId, out var folder))
             throw new KeyNotFoundException($"Watched folder not found: {folderId}");
 
         folder.Pause();
@@ -1187,7 +1191,7 @@ public sealed partial class VaultManager : IVault
 
     public async Task ResumeWatchingAsync(Guid folderId, CancellationToken ct = default)
     {
-        if (!_watchedFolders.TryGetValue(folderId, out var folder))
+        if (!_watchedFolders.TryGet(folderId, out var folder))
             throw new KeyNotFoundException($"Watched folder not found: {folderId}");
 
         folder.Resume();
@@ -1205,7 +1209,7 @@ public sealed partial class VaultManager : IVault
             throw new DirectoryNotFoundException($"Folder not found: {fullPath}");
 
         // Get watch options for this folder
-        var folder = _watchedFolders.Values.FirstOrDefault(f =>
+        var folder = _watchedFolders.Folders.FirstOrDefault(f =>
             f.Path.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
 
         IEnumerable<string> includePatterns = folder != null
@@ -1373,7 +1377,7 @@ public sealed partial class VaultManager : IVault
 
     public async Task<ScanResult> ScanFolderAsync(Guid folderId, CancellationToken ct = default)
     {
-        if (!_watchedFolders.TryGetValue(folderId, out var folder))
+        if (!_watchedFolders.TryGet(folderId, out var folder))
             throw new KeyNotFoundException($"Watched folder not found: {folderId}");
 
         return await ScanFolderAsync(folder.Path, ct);

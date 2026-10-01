@@ -12,6 +12,22 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.40.0] - Unreleased
+
+### Added
+- **A folder watched with `autoMemorize: true` now keeps the vault in step by itself.** Created and saved files are
+  memorized (debounced — one save, one memorize), deleted files removed, renamed files moved with `MoveAsync` and
+  renamed folders with `MoveFolderAsync` (nothing extracted or embedded again); a rename to a name the folder's patterns
+  reject removes the entry. Changes apply in order on a background loop; a failure is logged and the next change still
+  applies. Before, `autoMemorize` was recorded and never read, and nothing subscribed to the watcher's events.
+  If you subscribed to `IFileWatcherService` yourself for a folder you add with `autoMemorize: true`, drop those handlers
+  (the work would run twice); folders added without it behave as before.
+
+### Fixed
+- **Watched folders belong to the vault, not to the scope they were added from.** Every scope of the container's
+  `IVault` now sees, pauses, resumes and removes the same folders (before, a later scope saw none, and a folder's watcher
+  could no longer be stopped through the vault). Each `IVaultFactory` tenant keeps its own folders.
+
 ## [0.39.5] - 2026-10-01
 
 ### Changed

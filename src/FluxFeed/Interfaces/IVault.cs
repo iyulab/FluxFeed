@@ -346,26 +346,24 @@ public interface IVault
     /// <remarks>
     /// <para>
     /// Registration makes the folder part of <see cref="SyncAsync(CancellationToken)"/>, <see cref="ScanFolderAsync(Guid, CancellationToken)"/>
-    /// and <see cref="StatusAsync"/>. The watcher raises <see cref="IFileWatcherService"/> events for the folder's
-    /// files; <b>the vault does not act on them</b> — a created, changed, deleted or renamed file is not queued,
-    /// removed or moved until the caller does it: subscribe to <see cref="IFileWatcherService.FileCreated"/>,
-    /// <see cref="IFileWatcherService.FileModified"/>, <see cref="IFileWatcherService.FileDeleted"/> and
-    /// <see cref="IFileWatcherService.FileRenamed"/> and call <see cref="MemorizeAsync(string, CancellationToken)"/>,
-    /// <see cref="RemoveAsync(string, CancellationToken)"/> or <see cref="MoveAsync"/>, or call
-    /// <see cref="SyncAsync(CancellationToken)"/> periodically.
+    /// and <see cref="StatusAsync"/>, and starts the shared <see cref="IFileWatcherService"/> on it. With
+    /// <paramref name="autoMemorize"/> the vault follows the folder by itself: a created or changed file is memorized,
+    /// a deleted one removed, a renamed file or folder moved (<see cref="MoveAsync"/> / <see cref="MoveFolderAsync"/>,
+    /// nothing embedded again). Without it the watcher only raises its events, for the caller to act on.
     /// </para>
     /// <para>
-    /// The registration belongs to this vault instance, while the watcher is shared (a singleton): when the vault
-    /// is resolved from a scope, the watcher keeps running after the scope ends but the folder can no longer be
-    /// paused, resumed or removed through a later vault.
+    /// The folder belongs to the vault, not to the scope it was added from: every scoped instance of the container's
+    /// vault, and every call on a tenant vault from <see cref="IVaultFactory"/>, sees the same folders. Folders are not
+    /// persisted across restarts. A <c>VaultManager</c> constructed by hand keeps its folders to itself and applies no
+    /// changes.
     /// </para>
     /// </remarks>
     /// <param name="folderPath">The folder; it must exist.</param>
     /// <param name="name">Display name; defaults to the folder's name.</param>
     /// <param name="isRecursive">Whether subfolders are watched and scanned too.</param>
     /// <param name="autoMemorize">
-    /// Recorded on <see cref="WatchedFolder.AutoMemorize"/> for the caller's own use. FluxFeed does not read it:
-    /// setting it does not make changed files get memorized.
+    /// Whether the vault applies the folder's changes by itself (see remarks). Recorded on
+    /// <see cref="WatchedFolder.AutoMemorize"/>.
     /// </param>
     /// <param name="includePatterns">Glob patterns a file must match; defaults to <see cref="Options.FileVaultOptions.DefaultIncludePatterns"/>.</param>
     /// <param name="excludePatterns">Glob patterns that exclude a file; defaults to <see cref="Options.FileVaultOptions.DefaultExcludePatterns"/>.</param>

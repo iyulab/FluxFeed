@@ -218,6 +218,12 @@ public sealed partial class VaultFactory : IVaultFactory
         // Create VaultManager with mixed shared/tenant-specific services
         // Same rule as the pipeline: optional services (the reranker) come from the tenant's scope.
         var managerLogger = _loggerFactory.CreateLogger<VaultManager>();
+        // The tenant's watched folders, applied to this tenant's vault (which lives as long as the tenant does).
+        VaultManager? tenantVault = null;
+        var watchedFolders = new WatchedFolderSync(
+            _sharedFileWatcher,
+            _ => ValueTask.FromResult(new VaultLease(tenantVault!, owner: null)),
+            _loggerFactory.CreateLogger<WatchedFolderSync>());
         var vault = ActivatorUtilities.CreateInstance<VaultManager>(
             scoped,
             _sharedHasher,
@@ -227,7 +233,9 @@ public sealed partial class VaultFactory : IVaultFactory
             _sharedFileWatcher,
             storage,
             managerLogger,
-            optionsWrapper);
+            optionsWrapper,
+            watchedFolders);
+        tenantVault = vault;
 
         // A tenant queue is consumed by its own worker; the hosted VaultBackgroundService only
         // consumes the container queue. Without this, background-mode tenant jobs sat Queued forever.
@@ -253,7 +261,8 @@ public sealed partial class VaultFactory : IVaultFactory
             Pipeline = pipeline,
             Options = tenantOptions,
             Worker = worker,
-            Scope = scope
+            Scope = scope,
+            WatchedFolders = watchedFolders
         };
     }
 
@@ -308,6 +317,9 @@ public sealed partial class VaultFactory : IVaultFactory
 
     private static async Task DisposeContextAsync(VaultContext context)
     {
+        // Stop applying folder changes before the vault's services go away.
+        context.WatchedFolders?.Dispose();
+
         // Stop the tenant's worker first (waits for in-flight jobs), then close the queue it consumed.
         if (context.Worker is { } worker)
         {

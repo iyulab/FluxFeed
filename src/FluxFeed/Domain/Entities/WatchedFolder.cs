@@ -13,8 +13,10 @@ public sealed class WatchedFolder
     public string Name { get; private set; }
     public bool IsRecursive { get; private set; }
     /// <summary>
-    /// The value given to <c>AddWatchedFolderAsync</c>, kept for the caller's own use. FluxFeed does not read it:
-    /// changed files are not memorized because of it.
+    /// Whether the vault follows this folder by itself: when true (and the folder is active), files created, changed,
+    /// deleted or renamed in it are memorized, removed or moved in the vault as the watcher reports them. Applies to
+    /// vaults from <c>AddFileVault</c> and <c>IVaultFactory</c>; a <c>VaultManager</c> constructed by hand only raises
+    /// the watcher's events.
     /// </summary>
     public bool AutoMemorize { get; private set; }
     public string[] IncludePatterns { get; private set; }

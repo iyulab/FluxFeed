@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Linq;
 using FileFlux;
 using FileFlux.Core;
@@ -51,6 +52,17 @@ public static class ServiceCollectionExtensions
         // Register pipeline and vault as Scoped (they may depend on scoped services like IVectorStore)
         services.TryAddScoped<IVaultPipeline, VaultPipeline>();
         services.TryAddScoped<IVault, VaultManager>();
+
+        // The watched folders belong to the vault, not to one scope: every scoped IVault shares this set, and it applies
+        // the changes of folders added with autoMemorize through a fresh scope per change.
+        services.TryAddSingleton(sp => new WatchedFolderSync(
+            sp.GetRequiredService<IFileWatcherService>(),
+            _ =>
+            {
+                var scope = sp.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+                return ValueTask.FromResult(new VaultLease(scope.ServiceProvider.GetRequiredService<IVault>(), scope));
+            },
+            sp.GetService<ILoggerFactory>()?.CreateLogger<WatchedFolderSync>()));
 
         // Background service is always registered.
         // EnableBackgroundProcessing option controls runtime behavior (idle no-op when false).
