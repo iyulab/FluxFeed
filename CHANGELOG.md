@@ -12,6 +12,22 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.41.0] - Unreleased
+
+### Changed
+- **A keyword-index repair no longer stops at the first entry that fails.** `RepairKeywordIndexAsync` (every overload)
+  rewrites every other entry, then throws `KeywordIndexRepairException` with the counts of the run (`Result`) and the
+  entries that were not rewritten (`Failures`: source path, document id, error). Before, a timeout on one entry of a large
+  vault ended the run there, leaving the rest written the old way and no record of where it stopped. A failed entry keeps
+  its previous keyword rows. Cancellation still stops the run at once.
+
+### Added
+- **`IVault.RepairKeywordIndexAsync(filePaths, scope)`** rewrites the keyword rows of the named entries only — for
+  retrying `KeywordIndexRepairException.Failures`. An untracked path is refused (`KeyNotFoundException`) before anything
+  is written. Default interface implementation throws `NotSupportedException`; `VaultManager` implements it.
+
+---
+
 ## [0.40.1] - 2026-10-01
 
 ### Changed

@@ -269,6 +269,7 @@ public interface IVault
     /// pause the queue while it runs.
     /// </summary>
     /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    /// <exception cref="Domain.Exceptions.KeywordIndexRepairException">Some entries failed; the others were rewritten and the exception names the failed ones.</exception>
     Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(CancellationToken ct = default);
 
     /// <summary>
@@ -282,7 +283,24 @@ public interface IVault
     /// everything. Pause the queue while it runs.
     /// </remarks>
     /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    /// <exception cref="Domain.Exceptions.KeywordIndexRepairException">Some entries failed; the others were rewritten and the exception names the failed ones.</exception>
     Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(KeywordIndexRepairScope scope, CancellationToken ct = default);
+
+    /// <summary>
+    /// Rebuilds the keyword-index rows of the entries tracked under <paramref name="filePaths"/>, as
+    /// <see cref="RepairKeywordIndexAsync(KeywordIndexRepairScope, CancellationToken)"/> does for the whole vault. For
+    /// retrying the entries a <see cref="Domain.Exceptions.KeywordIndexRepairException"/> named in its
+    /// <see cref="Domain.Exceptions.KeywordIndexRepairException.Failures"/>.
+    /// </summary>
+    /// <remarks>The default implementation throws <see cref="NotSupportedException"/>; <c>VaultManager</c> implements it.</remarks>
+    /// <param name="filePaths">Source paths of tracked entries.</param>
+    /// <param name="scope">Which of those entries to rewrite.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="KeyNotFoundException">A path is not tracked by this vault — nothing is rewritten.</exception>
+    /// <exception cref="Domain.Exceptions.KeywordIndexRepairException">Some entries failed; the others were rewritten.</exception>
+    /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<string> filePaths, KeywordIndexRepairScope scope, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not support RepairKeywordIndexAsync for a list of paths.");
 
     /// <summary>
     /// Gets the diff between the working tree and HEAD for a vault entry's vault/ directory — i.e.

@@ -308,6 +308,28 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
     }
 
     [Fact]
+    public async Task RepairKeywordIndex_ByPath_RewritesThoseEntries_AndRefusesAnUntrackedPathBeforeWriting()
+    {
+        await using var provider = BuildStack(withKeywordIndex: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+
+        var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+
+        var result = await vault.RepairKeywordIndexAsync([_file], KeywordIndexRepairScope.All, TestContext.Current.CancellationToken);
+
+        result.EntriesChecked.Should().Be(1);
+        result.EntriesRepaired.Should().Be(1);
+        result.KeywordRowsWritten.Should().Be(entry.ChunkCount);
+
+        var untracked = Path.Combine(_root, "never-memorized.md");
+        var refuse = () => vault.RepairKeywordIndexAsync([_file, untracked], KeywordIndexRepairScope.All, TestContext.Current.CancellationToken);
+        (await refuse.Should().ThrowAsync<KeyNotFoundException>()).WithMessage("*never-memorized.md*");
+    }
+
+    [Fact]
     public async Task RepairKeywordIndex_WithoutAKeywordIndex_SaysSoInsteadOfReportingNothingToRepair()
     {
         await using var provider = BuildStack();

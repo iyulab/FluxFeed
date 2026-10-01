@@ -8,6 +8,7 @@ using FluxIndex.Core.Domain.Entities;
 using FluxFeed.Adapters;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
+using FluxFeed.Domain.Exceptions;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using Microsoft.Extensions.Logging;
@@ -1682,45 +1683,68 @@ public sealed partial class VaultPipeline : IVaultPipeline
         var repaired = 0;
         var written = 0;
         var removed = 0;
+        var failures = new List<KeywordIndexRepairFailure>();
 
         foreach (var entry in entries)
         {
             ct.ThrowIfCancellationRequested();
 
-            var vectorIds = await _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
-            var keywordIds = await _keywordSearchService.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
-            var vectorIdSet = vectorIds.ToHashSet(StringComparer.Ordinal);
-            // Legs that agree are only "nothing to do" when the question is drift. After an analyzer or
-            // field-set change every row is present under the right id and every one is written the old
-            // way - the id comparison cannot see that, so All rewrites them regardless.
-            if (scope == KeywordIndexRepairScope.Mismatched && vectorIdSet.SetEquals(keywordIds))
+            // One entry's failure does not stop the others: a rebuild of a large vault is long, and stopping
+            // partway leaves the rest written the old way with no record of where it stopped. Each entry is
+            // write-then-remove, so a failed one keeps its previous rows and can be retried alone.
+            try
             {
-                continue;
+                var outcome = await RepairKeywordLegAsync(entry, scope, ct);
+                if (outcome is { } done)
+                {
+                    repaired++;
+                    written += done.Written;
+                    removed += done.Removed;
+                }
             }
-
-            // Write before removing, as a re-index swap does: the entry keeps answering keyword searches
-            // throughout, and a failure partway leaves the previous rows rather than none. The vector store
-            // returns each chunk with its metadata, so the keyword fields the current configuration reads
-            // (title, file name, ...) are rebuilt along with the body.
-            var chunks = (await _vectorStore.GetByDocumentIdAsync(entry.FilepathHash, ct)).ToList();
-            if (chunks.Count > 0)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
-                await _keywordSearchService.IndexChunksAsync(chunks, ct);
+                failures.Add(new KeywordIndexRepairFailure(entry.SourcePath, entry.FilepathHash, ex));
+                LogKeywordLegRepairFailed(_logger, ex, entry.FilepathHash);
             }
-
-            var stale = keywordIds.Where(id => !vectorIdSet.Contains(id)).ToList();
-            if (stale.Count > 0)
-            {
-                await _keywordSearchService.DeleteChunksAsync(stale, ct);
-            }
-
-            repaired++;
-            written += chunks.Count;
-            removed += stale.Count;
-            LogRepairedKeywordLeg(_logger, entry.FilepathHash, chunks.Count, stale.Count);
         }
 
-        return new KeywordIndexRepairResult(entries.Count, repaired, written, removed);
+        var result = new KeywordIndexRepairResult(entries.Count, repaired, written, removed);
+        return failures.Count == 0 ? result : throw new KeywordIndexRepairException(result, failures);
+    }
+
+    /// <summary>Rewrites one entry's keyword leg; <c>null</c> when <paramref name="scope"/> leaves it alone.</summary>
+    private async Task<(int Written, int Removed)?> RepairKeywordLegAsync(VaultEntry entry, KeywordIndexRepairScope scope, CancellationToken ct)
+    {
+        var vectorIds = await _vectorStore!.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
+        var keywordIds = await _keywordSearchService!.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, ct);
+        var vectorIdSet = vectorIds.ToHashSet(StringComparer.Ordinal);
+        // Legs that agree are only "nothing to do" when the question is drift. After an analyzer or
+        // field-set change every row is present under the right id and every one is written the old
+        // way - the id comparison cannot see that, so All rewrites them regardless.
+        if (scope == KeywordIndexRepairScope.Mismatched && vectorIdSet.SetEquals(keywordIds))
+        {
+            return null;
+        }
+
+        // Write before removing, as a re-index swap does: the entry keeps answering keyword searches
+        // throughout, and a failure partway leaves the previous rows rather than none. The vector store
+        // returns each chunk with its metadata, so the keyword fields the current configuration reads
+        // (title, file name, ...) are rebuilt along with the body.
+        var chunks = (await _vectorStore!.GetByDocumentIdAsync(entry.FilepathHash, ct)).ToList();
+        if (chunks.Count > 0)
+        {
+            await _keywordSearchService!.IndexChunksAsync(chunks, ct);
+        }
+
+        var stale = keywordIds.Where(id => !vectorIdSet.Contains(id)).ToList();
+        if (stale.Count > 0)
+        {
+            await _keywordSearchService!.DeleteChunksAsync(stale, ct);
+        }
+
+        LogRepairedKeywordLeg(_logger, entry.FilepathHash, chunks.Count, stale.Count);
+        return (chunks.Count, stale.Count);
     }
 
     /// <summary>
@@ -2322,6 +2346,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Rebuilt keyword leg of {FilepathHash} from the vector leg: {Written} rows written, {Removed} stale rows removed")]
     private static partial void LogRepairedKeywordLeg(ILogger logger, string filepathHash, int written, int removed);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Keyword leg of {FilepathHash} was not rewritten; the repair continues with the other entries")]
+    private static partial void LogKeywordLegRepairFailed(ILogger logger, Exception exception, string filepathHash);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Re-keyed index rows of {PreviousPath} to {SourcePath}: {VectorChunks} vector and {KeywordChunks} keyword chunks moved, none re-embedded")]
     private static partial void LogReassigned(ILogger logger, string previousPath, string sourcePath, int vectorChunks, int keywordChunks);

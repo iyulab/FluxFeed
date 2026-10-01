@@ -61,6 +61,10 @@ public interface IVaultPipeline
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    /// <exception cref="Domain.Exceptions.KeywordIndexRepairException">
+    /// One or more entries failed. The repair does not stop at a failure: every other entry was rewritten, and the
+    /// exception carries the counts and the failed entries (each keeps its previous keyword rows).
+    /// </exception>
     Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, CancellationToken ct = default);
 
     /// <summary>
@@ -78,6 +82,10 @@ public interface IVaultPipeline
     /// Pause the queue first.
     /// </remarks>
     /// <exception cref="InvalidOperationException">No keyword index or no vector store is registered.</exception>
+    /// <exception cref="Domain.Exceptions.KeywordIndexRepairException">
+    /// One or more entries failed. The repair does not stop at a failure: every other entry was rewritten, and the
+    /// exception carries the counts and the failed entries (each keeps its previous keyword rows).
+    /// </exception>
     Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<VaultEntry> entries, KeywordIndexRepairScope scope, CancellationToken ct = default);
 
     /// <summary>

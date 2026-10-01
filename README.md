@@ -428,6 +428,24 @@ var rebuilt = await vault.RepairKeywordIndexAsync(KeywordIndexRepairScope.All); 
 await vault.ResumeQueueAsync();
 ```
 
+A repair does not stop at an entry that fails (a timeout on a large index, say): every other entry is rewritten, and
+the run ends with a `KeywordIndexRepairException` that carries the counts (`Result`) and the entries that were not
+rewritten (`Failures` — source path and error). A failed entry keeps its previous keyword rows. Retry just those:
+
+```csharp
+using FluxFeed.Domain.Exceptions;
+
+try
+{
+    await vault.RepairKeywordIndexAsync(KeywordIndexRepairScope.All);
+}
+catch (KeywordIndexRepairException ex)
+{
+    var paths = ex.Failures.Select(f => f.SourcePath).ToList();
+    await vault.RepairKeywordIndexAsync(paths, KeywordIndexRepairScope.All);
+}
+```
+
 ```csharp
 using Microsoft.Extensions.Logging;
 

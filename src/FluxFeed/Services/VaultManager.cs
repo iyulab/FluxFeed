@@ -896,6 +896,29 @@ public sealed partial class VaultManager : IVault
         return await _pipeline.RepairKeywordIndexAsync(searchable, scope, ct);
     }
 
+    public async Task<KeywordIndexRepairResult> RepairKeywordIndexAsync(IReadOnlyList<string> filePaths, KeywordIndexRepairScope scope, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filePaths);
+
+        var entries = new List<VaultEntry>(filePaths.Count);
+        var unknown = new List<string>();
+        foreach (var path in filePaths)
+        {
+            if (await GetAsync(path, ct) is { } entry)
+                entries.Add(entry);
+            else
+                unknown.Add(path);
+        }
+
+        if (unknown.Count > 0)
+        {
+            throw new KeyNotFoundException(
+                $"{unknown.Count} path(s) are not tracked by this vault, so nothing was rewritten: {string.Join(", ", unknown.Take(5))}");
+        }
+
+        return await _pipeline.RepairKeywordIndexAsync(entries, scope, ct);
+    }
+
     public async Task<VaultStatus> StatusAsync(CancellationToken ct = default)
     {
         var all = await ListAsync(ct: ct);
