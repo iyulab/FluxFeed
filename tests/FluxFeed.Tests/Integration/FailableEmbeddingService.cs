@@ -35,6 +35,15 @@ internal sealed class FailableEmbeddingService : IEmbeddingService
         return _inner.GenerateEmbeddingAsync(text, ct);
     }
 
+    /// <summary>Search queries embedded in the query role, in order.</summary>
+    public List<string> QueryTexts { get; } = [];
+
+    public Task<float[]> GenerateQueryEmbeddingAsync(string query, CancellationToken ct = default)
+    {
+        QueryTexts.Add(query);
+        return ((IEmbeddingService)_inner).GenerateQueryEmbeddingAsync(query, ct);
+    }
+
     public Task<IEnumerable<float[]>> GenerateEmbeddingsBatchAsync(IEnumerable<string> texts, CancellationToken ct = default)
     {
         var list = texts.ToList();

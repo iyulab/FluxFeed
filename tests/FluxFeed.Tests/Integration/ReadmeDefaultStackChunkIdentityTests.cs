@@ -330,6 +330,24 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
     }
 
     [Fact]
+    public async Task Search_EmbedsTheQueryInTheQueryRole()
+    {
+        await using var provider = BuildStack(withKeywordIndex: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+
+        var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+        var storedBefore = _embedder.EmbeddedTexts;
+
+        await vault.SearchAsync("zephyr", ct: TestContext.Current.CancellationToken);
+
+        _embedder.QueryTexts.Should().Equal(["zephyr"], "an asymmetric embedder applies its query convention only when the query arrives in the query role");
+        _embedder.EmbeddedTexts.Should().Be(storedBefore, "the query is not embedded as stored text");
+    }
+
+    [Fact]
     public async Task RepairKeywordIndex_WithoutAKeywordIndex_SaysSoInsteadOfReportingNothingToRepair()
     {
         await using var provider = BuildStack();

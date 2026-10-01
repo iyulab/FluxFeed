@@ -40,7 +40,7 @@ public class VaultPipelineLegacyChunkScopeTests
 
     private VaultPipeline CreatePipeline(IVectorStore store)
     {
-        _embedding.GenerateEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+        _embedding.GenerateQueryEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(QueryVector);
 
         return new VaultPipeline(

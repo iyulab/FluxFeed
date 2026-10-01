@@ -27,6 +27,8 @@
   </PropertyGroup>
   <ItemGroup Condition="($(MSBuildProjectDirectory.Contains('\src\')) OR $(MSBuildProjectDirectory.Contains('/src/'))) AND Exists('$(MSBuildThisFileDirectory)README.md')">
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+    <!-- MIT asks that the copyright and permission notice travel with every copy: ship the text, not only the SPDX id -->
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="\" Visible="false" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
   </ItemGroup>
   <PropertyGroup Condition="Exists('$(MSBuildThisFileDirectory)../../local-packages')">
     <RestoreAdditionalProjectSources>$(RestoreAdditionalProjectSources);$(MSBuildThisFileDirectory)../../local-packages</RestoreAdditionalProjectSources>

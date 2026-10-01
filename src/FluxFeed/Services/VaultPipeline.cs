@@ -1225,7 +1225,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         CancellationToken ct)
     {
         // Generate query embedding
-        var queryEmbedding = await _embeddingService!.GenerateEmbeddingAsync(query, ct);
+        var queryEmbedding = await _embeddingService!.GenerateQueryEmbeddingAsync(query, ct);
 
         // Push the document-id scope into the query itself — without this,
         // a scoped search over a shared index returns whatever survives filtering the global top N,
@@ -1331,7 +1331,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // it takes the embedding plus the raw text query. The document-id scope goes in as a
         // filter so both legs are scoped before fusion; the client-side projection below stays as
         // the same correctness backstop the vector path keeps. Over-fetch to survive it.
-        var queryEmbedding = await _embeddingService!.GenerateEmbeddingAsync(query, ct);
+        var queryEmbedding = await _embeddingService!.GenerateQueryEmbeddingAsync(query, ct);
         var nativeResults = await nativeHybrid.HybridSearchAsync(
             queryEmbedding, query, topK * 2, minScore, vectorWeight: null, BuildDocScopeFilter(docIdSet), ct);
         return ProjectHybrid(nativeResults, docIdSet, topK);

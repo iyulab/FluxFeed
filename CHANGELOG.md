@@ -26,6 +26,15 @@ Releases before 0.28.0 predate this file — see the git history.
   retrying `KeywordIndexRepairException.Failures`. An untracked path is refused (`KeyNotFoundException`) before anything
   is written. Default interface implementation throws `NotSupportedException`; `VaultManager` implements it.
 
+### Changed (search)
+- **Vault search embeds its query in the query role** (`IEmbeddingService.GenerateQueryEmbeddingAsync`, FluxIndex 0.68.0),
+  so an asymmetric embedding model registered for the vault applies its query convention. A symmetric model behaves as
+  before. A test double that stubs only `GenerateEmbeddingAsync` must stub `GenerateQueryEmbeddingAsync` for searches.
+- **Every package now carries the `LICENSE` text**, not only the MIT expression.
+
+### Dependencies
+- `FluxIndex.Core` / `FluxIndex.Storage.SQLite` 0.67.2 -> 0.68.0.
+
 ---
 
 ## [0.40.1] - 2026-10-01
