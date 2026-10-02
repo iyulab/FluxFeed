@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.42.0] - Unreleased
+## [0.42.0] - 2026-10-02
 
 ### Fixed
 - **Image-description chunks carry the page the image is on.** A text chunk from a PDF says where it sits with
