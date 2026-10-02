@@ -634,15 +634,23 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             for (var part = 0; part < parts.Count; part++)
             {
-                chunks.Add(new VaultChunk(
-                    ChunkIdentity.ForImage(entry.FilepathHash, image.Id, part),
-                    parts[part],
-                    new Dictionary<string, object>
-                    {
-                        ["chunk_kind"] = ImageDescriptionChunkKind,
-                        ["image_id"] = image.Id,
-                        ["image_file"] = image.FileName
-                    }));
+                var metadata = new Dictionary<string, object>
+                {
+                    ["chunk_kind"] = ImageDescriptionChunkKind,
+                    ["image_id"] = image.Id,
+                    ["image_file"] = image.FileName
+                };
+
+                // The same page keys a text chunk carries, so a citation or a page-scoped evaluation reads an image
+                // the way it reads the text around it.
+                if (image.PageNumber is { } page)
+                {
+                    metadata[PageNumberMetadataKey] = page;
+                    metadata[StartPageMetadataKey] = page;
+                    metadata[EndPageMetadataKey] = page;
+                }
+
+                chunks.Add(new VaultChunk(ChunkIdentity.ForImage(entry.FilepathHash, image.Id, part), parts[part], metadata));
             }
         }
 

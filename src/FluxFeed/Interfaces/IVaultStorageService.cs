@@ -216,6 +216,11 @@ public sealed class ImageArtifact
     /// </summary>
     public string? AltText { get; init; }
 
+    /// <summary>
+    /// The page the image is drawn on (1-based), when the source document has pages and its reader reports it (PDF).
+    /// </summary>
+    public int? PageNumber { get; init; }
+
     public int Width { get; init; }
     public int Height { get; init; }
 }
@@ -242,6 +247,12 @@ public sealed class VaultImage
 
     /// <summary>Alt text carried by the source document, when the reader reported one.</summary>
     public string? AltText { get; init; }
+
+    /// <summary>
+    /// The page the image is drawn on (1-based), when the source document has pages and its reader reported it (PDF).
+    /// Null in a manifest written before it was recorded - a re-memorize records it.
+    /// </summary>
+    public int? PageNumber { get; init; }
 
     /// <summary>True once a description has been persisted for this image.</summary>
     public bool IsDescribed => !string.IsNullOrWhiteSpace(Description);

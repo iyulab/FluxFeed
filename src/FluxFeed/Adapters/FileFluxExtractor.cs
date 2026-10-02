@@ -65,7 +65,8 @@ public sealed partial class FileFluxExtractor : IExtractor
                         // as a format the bytes may not actually be.
                         ContentType = img.MimeType ?? "application/octet-stream",
                         // Alt text / caption when the format carries one (HTML alt, Office alt text).
-                        AltText = string.IsNullOrWhiteSpace(img.Caption) ? null : img.Caption
+                        AltText = string.IsNullOrWhiteSpace(img.Caption) ? null : img.Caption,
+                        PageNumber = img.PageNumber
                     });
                 }
             }

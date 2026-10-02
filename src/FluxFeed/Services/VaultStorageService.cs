@@ -191,6 +191,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 ContentType = image.ContentType,
                 Description = carriedDescription,
                 AltText = image.AltText,
+                PageNumber = image.PageNumber,
                 Width = image.Width,
                 Height = image.Height,
                 Size = image.Data.Length,
@@ -232,6 +233,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                     ContentType = item.ContentType,
                     Description = item.Description,
                     AltText = item.AltText,
+                    PageNumber = item.PageNumber,
                     Width = item.Width,
                     Height = item.Height
                 });
@@ -257,6 +259,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 ContentType = item.ContentType,
                 Description = item.Description,
                 AltText = item.AltText,
+                PageNumber = item.PageNumber,
                 LastEnrichmentFailure = item.LastEnrichmentFailure
             })
             .ToList();
@@ -589,6 +592,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         // Settable: enrichment fills this in per image, long after the manifest was written.
         public string? Description { get; set; }
         public string? AltText { get; init; }
+        public int? PageNumber { get; init; }
         public int Width { get; init; }
         public int Height { get; init; }
         public long Size { get; init; }

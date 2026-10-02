@@ -12,6 +12,23 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.42.0] - Unreleased
+
+### Fixed
+- **Image-description chunks carry the page the image is on.** A text chunk from a PDF says where it sits with
+  `pageNumber` / `ff_start_page` / `ff_end_page`; an image-description chunk had none of them, so every image read as
+  "page unknown" in a citation or a page-scoped evaluation. It now carries the same three keys (start = end) when the
+  page is known. An entry memorized before this release gains them on its next memorize — the image's description is
+  carried forward, so the enricher is not called again; a refresh does not re-extract and leaves them absent.
+
+### Added
+- `ImageArtifact.PageNumber` and `VaultImage.PageNumber` (recorded in the image manifest).
+
+### Dependencies
+- FileFlux 0.33.12 → 0.34.0 (`ImageInfo.PageNumber`).
+
+---
+
 ## [0.41.3] - 2026-10-01
 
 ### Changed

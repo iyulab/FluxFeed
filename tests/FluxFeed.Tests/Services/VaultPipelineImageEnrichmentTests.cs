@@ -143,12 +143,13 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         return VaultEntry.Create(path, _vaultDir);
     }
 
-    private static ImageArtifact Image(string id, string? altText = null) => new()
+    private static ImageArtifact Image(string id, string? altText = null, int? page = null) => new()
     {
         Id = id,
         Data = [1, 2, 3, 4],
         ContentType = "image/png",
-        AltText = altText
+        AltText = altText,
+        PageNumber = page
     };
 
     // === Tests ===
@@ -176,6 +177,70 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         chunk.Metadata["image_file"].Should().Be("img_000.png");
         // Standard provenance still applies.
         chunk.Metadata["file_name"].Should().Be("figures.pdf");
+    }
+
+    // The capturing store appends every write (a re-memorize stores the same chunk id again), so the newest write is
+    // the image's current chunk.
+    private DocumentChunk ImageChunk(string imageId) =>
+        _capture.Chunks.Last(c => c.Metadata != null && Equals(c.Metadata.GetValueOrDefault("image_id"), imageId));
+
+    [Fact]
+    public async Task MemorizeAsync_ImageWithAPage_ChunkCarriesThePageKeysTextChunksUse()
+    {
+        // A text chunk says where it sits with pageNumber / ff_start_page / ff_end_page; an image chunk from the same
+        // page must say the same, or every image reads as "page unknown" in a citation or a page-scoped evaluation.
+        var entry = CreateEntry("figures.pdf");
+        var pipeline = CreatePipeline(
+            new ExtractionResult
+            {
+                Content = string.Empty,
+                Images = [Image("page7_Im1", page: 7), Image("img_x")],
+            },
+            new RecordingEnricher(r => $"Figure {r.Image.Id}."));
+
+        await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        var paged = ImageChunk("page7_Im1").Metadata!;
+        paged[VaultPipeline.PageNumberMetadataKey].Should().Be(7);
+        paged[VaultPipeline.StartPageMetadataKey].Should().Be(7);
+        paged[VaultPipeline.EndPageMetadataKey].Should().Be(7);
+        ImageChunk("img_x").Metadata.Should().NotContainKey(VaultPipeline.PageNumberMetadataKey, "no page is reported, none is invented");
+        (await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken))
+            .Single(i => i.Id == "page7_Im1").PageNumber.Should().Be(7);
+    }
+
+    [Fact]
+    public async Task ReMemorize_AfterAnUpgrade_GainsThePage_WithoutDescribingTheImageAgain()
+    {
+        // An entry memorized before pages were recorded: re-extraction records the page and the description is
+        // carried forward (the image bytes are unchanged), so the enricher - a vision model - is not called again.
+        var entry = CreateEntry("figures.pdf");
+        var enricher = new RecordingEnricher(_ => "A chart.");
+        await CreatePipeline(new ExtractionResult { Content = "Body.", Images = [Image("page3_Im1")] }, enricher)
+            .MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+        ImageChunk("page3_Im1").Metadata.Should().NotContainKey(VaultPipeline.PageNumberMetadataKey);
+
+        await CreatePipeline(new ExtractionResult { Content = "Body.", Images = [Image("page3_Im1", page: 3)] }, enricher)
+            .MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        ImageChunk("page3_Im1").Metadata![VaultPipeline.PageNumberMetadataKey].Should().Be(3);
+        enricher.Calls.Should().ContainSingle("the second memorize carried the description forward");
+    }
+
+    [Fact]
+    public async Task Refresh_DoesNotReExtract_SoAnOldManifestStaysWithoutPages()
+    {
+        // The page comes from extraction. Refresh re-chunks what the vault already holds, so an entry memorized before
+        // pages were recorded needs a memorize, not a refresh, to gain them.
+        var entry = CreateEntry("figures.pdf");
+        var enricher = new RecordingEnricher(_ => "A chart.");
+        await CreatePipeline(new ExtractionResult { Content = "Body.", Images = [Image("page3_Im1")] }, enricher)
+            .MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        await CreatePipeline(new ExtractionResult { Content = "Body.", Images = [Image("page3_Im1", page: 3)] }, enricher)
+            .RefreshAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        ImageChunk("page3_Im1").Metadata.Should().NotContainKey(VaultPipeline.PageNumberMetadataKey);
     }
 
     [Fact]
