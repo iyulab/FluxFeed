@@ -60,6 +60,8 @@ public class VaultPipelineExtractionDiagnosticsTests : IDisposable
     {
         public Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default)
             => Task.FromResult(result);
+
+        public FluxFeed.Domain.ValueObjects.ExtractionIdentity? Identity => null;
     }
 
     private string CreateSourceFile(string name, string content = "binary-ish")

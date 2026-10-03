@@ -1,6 +1,7 @@
 using System.Globalization;
 using FileFlux;
 using FileFlux.Core;
+using FluxFeed.Domain.ValueObjects;
 using FluxFeed.Interfaces;
 using FluxFeed.Services;
 using Microsoft.Extensions.Logging;
@@ -23,6 +24,14 @@ public sealed partial class FileFluxExtractor : IExtractor
         _processorFactory = processorFactory ?? throw new ArgumentNullException(nameof(processorFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <summary>
+    /// <c>FileFlux</c> at the version of the FileFlux package this process loaded — the readers that made the
+    /// extraction. Build metadata after <c>+</c> is not part of it.
+    /// </summary>
+    public ExtractionIdentity Identity { get; } = ExtractionIdentity.FromAssembly("FileFlux", typeof(IDocumentProcessorFactory).Assembly);
+
+    ExtractionIdentity? IExtractor.Identity => Identity;
 
     public async Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default)
     {

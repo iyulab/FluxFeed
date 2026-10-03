@@ -60,6 +60,8 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
     {
         public Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default)
             => Task.FromResult(result);
+
+        public FluxFeed.Domain.ValueObjects.ExtractionIdentity? Identity => null;
     }
 
     /// <summary>Records every call so idempotence and retry can be asserted per image.</summary>

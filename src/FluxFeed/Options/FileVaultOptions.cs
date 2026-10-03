@@ -132,6 +132,21 @@ public sealed class FileVaultOptions
     public ContextualEnrichmentDefaults ContextualEnrichment { get; set; } = new();
 
     /// <summary>
+    /// Whether an entry whose source is unchanged is re-extracted because the current extractor is newer than the one
+    /// that made its extraction (<see cref="FluxFeed.Domain.Entities.VaultEntry.ExtractedBy"/>). (Default:
+    /// <see cref="ReextractionPolicy.Never"/> — re-extraction re-runs OCR and image description.)
+    /// </summary>
+    /// <remarks>
+    /// When set, a refresh (<c>RefreshAsync</c>, a queued refresh job) of an outdated entry re-extracts — as
+    /// <c>MemorizeAsync</c> does — unless the entry's vault has uncommitted edits, and change detection
+    /// (<c>DetectChangesAsync</c>, <c>SyncAsync</c>) recommends Memorize for it. Re-extraction rewrites
+    /// <c>refined.md</c> as a source change would. Entries extracted before identities were recorded count as
+    /// outdated. <c>VaultStatus.OutdatedExtractionCount</c> counts them under this policy. To re-extract one file
+    /// regardless of policy, call <c>MemorizeAsync</c> for it.
+    /// </remarks>
+    public ReextractionPolicy Reextraction { get; set; } = ReextractionPolicy.Never;
+
+    /// <summary>
     /// Consecutive failures an <c>IVaultImageEnricher</c> may accumulate for one image before the
     /// pipeline stops offering that image to it. The failure count is persisted in the image
     /// manifest, so it survives a process restart — unlike an in-memory counter, an image that has

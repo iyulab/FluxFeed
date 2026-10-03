@@ -9,6 +9,7 @@ using FluxFeed.Adapters;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
 using FluxFeed.Domain.Exceptions;
+using FluxFeed.Domain.ValueObjects;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using Microsoft.Extensions.Logging;
@@ -344,8 +345,41 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
     }
 
+    /// <summary>
+    /// FluxFeed's revision of what it derives from an extraction (the content spans file, the image manifest's
+    /// fields). Raise it when that changes, so entries extracted before the change read as outdated
+    /// (<see cref="ExtractionIdentity.PipelineRevision"/>). 1: spans + image page numbers (0.42.0).
+    /// </summary>
+    internal const int ExtractionPipelineRevision = 1;
+
+    /// <inheritdoc/>
+    public ExtractionIdentity? CurrentExtractionIdentity =>
+        (_extractor is null ? FallbackExtractionIdentity : _extractor.Identity) is { } identity
+            ? identity with { PipelineRevision = ExtractionPipelineRevision }
+            : null;
+
+    /// <summary>The identity of the built-in plain-text read used when no extractor is registered.</summary>
+    private static readonly ExtractionIdentity FallbackExtractionIdentity =
+        ExtractionIdentity.FromAssembly("FluxFeed.PlainText", typeof(VaultPipeline).Assembly);
+
     public async Task<MemorizeResult> RefreshAsync(VaultEntry entry, MemorizeOptions? options = null, CancellationToken ct = default)
     {
+        // FileVaultOptions.Reextraction: an extraction an older extractor made is redone here — the refresh a
+        // consumer already schedules is where a newer extractor's output reaches an unchanged source. Not when the
+        // vault has uncommitted edits: re-extraction rewrites refined.md, and a refresh exists to index those edits.
+        if (CurrentExtractionIdentity is { } current
+            && current.IsOutdatedBy(entry.ExtractedBy, _options.Reextraction)
+            && File.Exists(entry.SourcePath))
+        {
+            if ((await _git.StatusAsync(entry.VaultPath, ct)).ModifiedFiles.Count == 0)
+            {
+                LogReextractingOutdated(_logger, entry.SourcePath, entry.ExtractedBy?.ToString() ?? "unrecorded", current.ToString());
+                return await MemorizeAsync(entry, options ?? new MemorizeOptions { CommitMessage = $"re-extract: {current}" }, ct);
+            }
+
+            LogOutdatedKeptForVaultEdits(_logger, entry.SourcePath);
+        }
+
         var sw = Stopwatch.StartNew();
         options ??= new MemorizeOptions();
 
@@ -418,10 +452,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
             extractionWarnings = result.Warnings;
             extractionSpans = result.Spans;
 
-            // Store images if any - identity and alt text come from the extractor as-is.
-            if (result.Images?.Count > 0)
+            // Identity and alt text come from the extractor as-is. Stored even when there are none: the manifest
+            // describes this extraction, and a re-extraction that finds no images must not keep the previous ones.
+            if (result.Images?.Count > 0 || File.Exists(entry.ImagesManifestPath))
             {
-                await _storage.StoreImagesAsync(entry, result.Images, ct);
+                await _storage.StoreImagesAsync(entry, result.Images ?? [], ct);
             }
         }
         else
@@ -440,7 +475,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // Update entry to Extracted stage, carrying the extractor's structured diagnostics so a
         // legitimate 0-chunk outcome (scanned/blank document) is explainable downstream instead of
         // looking like a silent success.
-        entry.MarkExtracted(contentHash, extractionHints, extractionWarnings);
+        entry.MarkExtracted(contentHash, extractionHints, extractionWarnings, CurrentExtractionIdentity);
         entry.SaveMetadata();
 
         LogExtracted(_logger, extractedContent.Length, entry.ExtractedMdPath);
@@ -2295,6 +2330,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
     private static partial void LogRefined(ILogger logger, int length, string path);
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refined content of {SourcePath} no longer matches the text its source locations were recorded for (refined.md was edited); its chunks are indexed without page or time locations until it is re-extracted")]
     private static partial void LogContentSpansStale(ILogger logger, string sourcePath);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Re-extracting {SourcePath} on refresh: its extraction was made by {RecordedExtractor}, the current extractor is {CurrentExtractor}")]
+    private static partial void LogReextractingOutdated(ILogger logger, string sourcePath, string recordedExtractor, string currentExtractor);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Extraction of {SourcePath} is outdated but its vault has uncommitted edits; refreshing without re-extracting")]
+    private static partial void LogOutdatedKeptForVaultEdits(ILogger logger, string sourcePath);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "No vector store configured, skipping removal")]
     private static partial void LogNoVectorStoreSkipRemoval(ILogger logger);
@@ -2391,6 +2430,14 @@ internal sealed record VaultChunk(string Id, string Content, IReadOnlyDictionary
 public interface IExtractor
 {
     Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default);
+
+    /// <summary>
+    /// Which extractor this is and at what version — recorded on every entry it extracts
+    /// (<see cref="VaultEntry.ExtractedBy"/>), so a refresh can tell an extraction made by an older version apart
+    /// (<see cref="Options.FileVaultOptions.Reextraction"/>). Null when the extractor cannot say; its entries are then
+    /// never judged outdated.
+    /// </summary>
+    ExtractionIdentity? Identity { get; }
 }
 
 /// <summary>

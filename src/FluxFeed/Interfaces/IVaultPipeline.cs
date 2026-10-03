@@ -1,5 +1,6 @@
 using FluxIndex.Core.Application.Interfaces;
 using FluxFeed.Domain.Entities;
+using FluxFeed.Domain.ValueObjects;
 
 namespace FluxFeed.Interfaces;
 
@@ -15,6 +16,13 @@ public interface IVaultPipeline
     /// backends in sync for hybrid retrieval.
     /// </summary>
     bool SupportsKeywordIndex { get; }
+
+    /// <summary>
+    /// What an extraction made now would be recorded as (<see cref="VaultEntry.ExtractedBy"/>): the registered
+    /// extractor's identity — or the built-in plain-text read's — with FluxFeed's pipeline revision. Null when the
+    /// registered extractor reports no identity.
+    /// </summary>
+    ExtractionIdentity? CurrentExtractionIdentity { get; }
 
     /// <summary>
     /// Which keyword index the <see cref="VaultSearchStrategy.Hybrid"/> strategy fuses with the vector leg. When a

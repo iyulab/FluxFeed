@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using FluxFeed.Domain.Entities;
+using FluxFeed.Domain.ValueObjects;
 using FluxFeed.Domain.Enums;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
@@ -1068,6 +1069,81 @@ public class VaultManagerTests : IDisposable
 
         // Assert
         change.RecommendedAction.Should().Be(ChangeAction.Refresh);
+    }
+
+    private VaultManager CreateVaultWithReextraction(ReextractionPolicy policy) =>
+        new(
+            _contentHasher,
+            _gitServiceMock,
+            _pipelineMock,
+            _queueServiceMock,
+            _fileWatcherMock,
+            _storageMock,
+            NullLogger<VaultManager>.Instance,
+            MsOptions.Create(new FileVaultOptions { VaultBasePath = _vaultDir, Reextraction = policy }));
+
+    private VaultEntry CreateEntryExtractedBy(string filePath, ExtractionIdentity? extractedBy)
+    {
+        var entry = CreateEntryWithMetadataAtStage(filePath, ProcessingStage.Memorized);
+        var hash = _contentHasher.ComputeHashAsync(Path.GetFullPath(filePath), default).GetAwaiter().GetResult();
+        entry.MarkExtracted(hash, extractedBy: extractedBy);
+        entry.MarkMemorized(1);
+        entry.SaveMetadata();
+        WriteRefinedContent(entry);
+        return entry;
+    }
+
+    private static readonly ExtractionIdentity CurrentFileFlux = new("FileFlux", "0.36.2") { PipelineRevision = 1 };
+
+    [Theory]
+    [InlineData(ReextractionPolicy.WhenExtractorMinorChanges, "0.35.4", ChangeAction.Memorize)]
+    [InlineData(ReextractionPolicy.WhenExtractorMinorChanges, "0.36.1", ChangeAction.None)]
+    [InlineData(ReextractionPolicy.WhenExtractorChanges, "0.36.1", ChangeAction.Memorize)]
+    [InlineData(ReextractionPolicy.Never, "0.30.0", ChangeAction.None)]
+    public async Task DetectChangesAsync_UnchangedSourceExtractedByAnOlderExtractor_FollowsThePolicy(
+        ReextractionPolicy policy, string recordedVersion, ChangeAction expected)
+    {
+        var filePath = CreateTestFile("manual.pdf", "body");
+        CreateEntryExtractedBy(filePath, new ExtractionIdentity("FileFlux", recordedVersion) { PipelineRevision = 1 });
+        GivenModifiedVaultFiles();
+        _pipelineMock.CurrentExtractionIdentity.Returns(CurrentFileFlux);
+
+        var change = await CreateVaultWithReextraction(policy).DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
+
+        change.RecommendedAction.Should().Be(expected);
+        change.ExtractionOutdated.Should().Be(expected == ChangeAction.Memorize);
+        change.SourceChanged.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DetectChangesAsync_OutdatedExtractionWithVaultEdits_RefreshesTheEdits_InsteadOfReextracting()
+    {
+        var filePath = CreateTestFile("edited.pdf", "body");
+        CreateEntryExtractedBy(filePath, extractedBy: null);
+        GivenModifiedVaultFiles("refined.md");
+        _pipelineMock.CurrentExtractionIdentity.Returns(CurrentFileFlux);
+
+        var change = await CreateVaultWithReextraction(ReextractionPolicy.WhenExtractorChanges)
+            .DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
+
+        change.ExtractionOutdated.Should().BeTrue();
+        change.RecommendedAction.Should().Be(ChangeAction.Refresh, "a re-extraction would overwrite the uncommitted edit");
+    }
+
+    [Fact]
+    public async Task StatusAsync_CountsOutdatedExtractions_EvenWithThePolicyOff()
+    {
+        CreateEntryExtractedBy(CreateTestFile("legacy.pdf", "a"), extractedBy: null);
+        CreateEntryExtractedBy(CreateTestFile("older.pdf", "b"), new ExtractionIdentity("FileFlux", "0.36.1") { PipelineRevision = 1 });
+        CreateEntryExtractedBy(CreateTestFile("current.pdf", "c"), CurrentFileFlux);
+        _pipelineMock.CurrentExtractionIdentity.Returns(CurrentFileFlux);
+
+        var off = await CreateVaultWithReextraction(ReextractionPolicy.Never).StatusAsync(TestContext.Current.CancellationToken);
+        var minor = await CreateVaultWithReextraction(ReextractionPolicy.WhenExtractorMinorChanges).StatusAsync(TestContext.Current.CancellationToken);
+
+        off.CurrentExtraction.Should().Be(CurrentFileFlux);
+        off.OutdatedExtractionCount.Should().Be(2, "with the policy off, any difference counts so the number can be read before deciding");
+        minor.OutdatedExtractionCount.Should().Be(1, "a patch release does not re-extract under the minor policy; the unrecorded entry does");
     }
 
     [Fact]

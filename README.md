@@ -189,6 +189,28 @@ missing — the integrity check sets it, and re-memorizing restores search.
 
 `MemorizeAsync` runs the whole pipeline (re-extracting the source). `RefreshAsync` re-indexes the
 refined content without re-extracting — use it after hand-editing `append-text.md` or `qa.md`.
+
+### When the extractor gets better — re-extraction
+
+Each extraction records which extractor made it (`entry.ExtractedBy`, e.g. `FileFlux 0.36.2` with FluxFeed's pipeline
+revision). An unchanged source is never re-extracted by default, because re-extraction re-runs OCR and image
+description. To let an upgrade reach existing documents, opt in:
+
+```csharp
+using FluxFeed.Options;   // ReextractionPolicy
+
+services.AddFileVaultWithFluxIndex(o => o.Reextraction = ReextractionPolicy.WhenExtractorMinorChanges);
+
+var status = await vault.StatusAsync();
+// status.CurrentExtraction       — what an extraction made now would record
+// status.OutdatedExtractionCount — entries the policy would re-extract (with the policy off: any difference)
+```
+
+With the policy on, `RefreshAsync` (and a queued refresh) of an outdated entry re-extracts it, and `DetectChangesAsync` /
+`SyncAsync` recommend Memorize for it — except when its vault has uncommitted edits, which are refreshed instead of
+overwritten. `WhenExtractorMinorChanges` ignores patch releases; `WhenExtractorChanges` does not. Entries extracted
+before identities were recorded count as outdated. To re-extract one file regardless of the policy, call
+`MemorizeAsync` for it.
 With background processing on, both only enqueue a job and return the entry as it was; pass
 `waitForCompletion: true` (`MemorizeAsync(path, waitForCompletion: true)`,
 `RefreshAsync(path, waitForCompletion: true)`) to get the re-indexed entry — and its new commit — back.

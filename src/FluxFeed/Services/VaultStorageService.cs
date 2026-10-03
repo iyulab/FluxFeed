@@ -205,6 +205,18 @@ public sealed partial class VaultStorageService : IVaultStorageService
         var manifestJson = JsonSerializer.Serialize(manifest, JsonOptions);
         await AtomicFile.WriteAllTextAsync(entry.ImagesManifestPath, manifestJson, entry.EntryPath, ct);
 
+        // The manifest is the extraction's image set. A file a previous extraction stored that this one did not
+        // produce is no longer the document's: left in place it would outlive every re-extraction unseen.
+        var kept = new HashSet<string>(manifest.Select(m => m.FileName), StringComparer.OrdinalIgnoreCase)
+        {
+            Path.GetFileName(entry.ImagesManifestPath),
+        };
+        foreach (var stale in Directory.EnumerateFiles(entry.ImagesPath).Where(f => !kept.Contains(Path.GetFileName(f))))
+        {
+            try { File.Delete(stale); }
+            catch (IOException) { /* a file in use stays; the manifest no longer names it */ }
+        }
+
         LogStoredImages(_logger, index, entry.Id);
     }
 

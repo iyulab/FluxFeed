@@ -12,6 +12,28 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.43.0] - Unreleased
+
+### Added
+- **An extractor upgrade can reach documents whose source never changes: `FileVaultOptions.Reextraction`.** Every
+  extraction now records which extractor made it (`VaultEntry.ExtractedBy` — e.g. `FileFlux 0.36.2`, plus FluxFeed's
+  pipeline revision). With `Reextraction = WhenExtractorMinorChanges` (or `WhenExtractorChanges`, patch releases
+  included), a refresh of an entry an older extractor made re-extracts it, and change detection/sync recommends
+  Memorize for it — except over uncommitted vault edits, which are refreshed as before. Entries extracted before this
+  release have no record and count as outdated. Default `Never`: nothing re-extracts unless you opt in.
+- **`VaultStatus.CurrentExtraction` / `OutdatedExtractionCount`**: how many entries an opt-in would re-extract, read
+  before deciding. `ChangeDetectionResult.ExtractionOutdated` per file. `ExtractionIdentity.IsOutdatedBy` for your own
+  comparison. To re-extract one file regardless of policy, call `MemorizeAsync` (it always re-extracts).
+- **Breaking (custom extractors only):** `IExtractor` gains `ExtractionIdentity? Identity { get; }`. Return `null` if
+  your extractor cannot say; its entries are then never judged outdated.
+
+### Fixed
+- **A re-extraction that finds fewer images no longer keeps the previous extraction's.** The image manifest was
+  rewritten only when the new extraction had images, and image files the new extraction did not produce stayed on
+  disk. The manifest now always describes the latest extraction, and files it does not name are removed.
+
+---
+
 ## [0.42.8] - 2026-10-04
 
 ### Changed

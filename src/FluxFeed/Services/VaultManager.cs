@@ -3,6 +3,7 @@ using System.Diagnostics;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
 using FluxFeed.Domain.Exceptions;
+using FluxFeed.Domain.ValueObjects;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using FluxIndex.Core.Application.Interfaces;
@@ -443,8 +444,12 @@ public sealed partial class VaultManager : IVault
             }
         }
 
+        // An extraction an older extractor made (FileVaultOptions.Reextraction; never under the default policy).
+        var extractionOutdated = entryExists && entry!.Stage != ProcessingStage.Source
+            && ExtractionIdentity.IsOutdated(entry.ExtractedBy, _pipeline.CurrentExtractionIdentity, _options.Reextraction);
+
         // Determine recommended action
-        var action = DetermineAction(entryExists, sourceExists, sourceChanged, vaultChanged,
+        var action = DetermineAction(entryExists, sourceExists, sourceChanged, vaultChanged, extractionOutdated,
             canRefresh: entry?.RefinedExists ?? false);
 
         // Update entry's SyncStatus based on detection results
@@ -499,6 +504,7 @@ public sealed partial class VaultManager : IVault
             EntryExists = entryExists,
             SourceChanged = sourceChanged,
             VaultChanged = vaultChanged,
+            ExtractionOutdated = extractionOutdated,
             SourceExists = sourceExists,
             RecommendedAction = action,
             ModifiedVaultFiles = modifiedVaultFiles,
@@ -522,13 +528,17 @@ public sealed partial class VaultManager : IVault
     /// <param name="sourceExists">Whether the source file is present on disk.</param>
     /// <param name="sourceChanged">Whether the source file's content differs from what the entry was built from.</param>
     /// <param name="vaultChanged">Whether the entry's vault-side content changed since it was last indexed.</param>
+    /// <param name="extractionOutdated">
+    /// Whether a newer extractor would make a different extraction (<c>FileVaultOptions.Reextraction</c>). Acted on only
+    /// when nothing else changed: a vault edit is refreshed, not overwritten by a re-extraction.
+    /// </param>
     /// <param name="canRefresh">
     /// Whether a refresh could actually succeed for this entry (refined content present). Recommending
     /// a refresh that the pipeline is guaranteed to reject produces work that can never complete, and
     /// each failed attempt overwrites the entry's error with the rejection instead of its real cause.
     /// </param>
     private static ChangeAction DetermineAction(
-        bool entryExists, bool sourceExists, bool sourceChanged, bool vaultChanged, bool canRefresh)
+        bool entryExists, bool sourceExists, bool sourceChanged, bool vaultChanged, bool extractionOutdated, bool canRefresh)
     {
         if (!sourceExists)
             return entryExists ? ChangeAction.Remove : ChangeAction.None;
@@ -543,6 +553,9 @@ public sealed partial class VaultManager : IVault
             // Memorize is what the rejection message itself prescribes ("Run memorize first"), and it
             // re-extracts, so an entry that failed or produced no content can recover on its own.
             return canRefresh ? ChangeAction.Refresh : ChangeAction.Memorize;
+
+        if (extractionOutdated)
+            return ChangeAction.Memorize;
 
         return ChangeAction.None;
     }
@@ -932,6 +945,11 @@ public sealed partial class VaultManager : IVault
         var staleCount = 0;
         var errorStageCount = 0;
         var orphanedCount = 0;
+        var outdatedExtractionCount = 0;
+        var currentExtraction = _pipeline.CurrentExtractionIdentity;
+        var countPolicy = _options.Reextraction == ReextractionPolicy.Never
+            ? ReextractionPolicy.WhenExtractorChanges
+            : _options.Reextraction;
 
         foreach (var entry in entries)
         {
@@ -949,6 +967,12 @@ public sealed partial class VaultManager : IVault
             {
                 orphanedCount++;
             }
+
+            if (entry.Stage != ProcessingStage.Source
+                && ExtractionIdentity.IsOutdated(entry.ExtractedBy, currentExtraction, countPolicy))
+            {
+                outdatedExtractionCount++;
+            }
         }
 
         var queueStatus = await GetQueueStatusAsync(ct);
@@ -963,6 +987,8 @@ public sealed partial class VaultManager : IVault
             MemorizedCount = memorizedCount,
             StaleCount = staleCount,
             ErrorStageCount = errorStageCount,
+            CurrentExtraction = currentExtraction,
+            OutdatedExtractionCount = outdatedExtractionCount,
             InSyncCount = all.Count(e => e.SyncStatus == SyncStatus.InSync),
             SourceModifiedCount = all.Count(e => e.SyncStatus == SyncStatus.SourceModified),
             VaultModifiedCount = all.Count(e => e.SyncStatus == SyncStatus.VaultModified),

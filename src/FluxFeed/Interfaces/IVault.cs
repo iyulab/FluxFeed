@@ -1,5 +1,7 @@
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
+using FluxFeed.Domain.ValueObjects;
+using FluxFeed.Options;
 
 using SyncStatus = FluxFeed.Domain.Enums.SyncStatus;
 
@@ -526,6 +528,13 @@ public sealed class ChangeDetectionResult
     public bool VaultChanged { get; init; }
 
     /// <summary>
+    /// Whether the entry's extraction was made by an extractor older than the current one, under
+    /// <c>FileVaultOptions.Reextraction</c> (always false when that is <see cref="ReextractionPolicy.Never"/>). An
+    /// outdated entry with an unchanged source and an unmodified vault is recommended for Memorize.
+    /// </summary>
+    public bool ExtractionOutdated { get; init; }
+
+    /// <summary>
     /// Whether the source file exists on disk.
     /// </summary>
     public bool SourceExists { get; init; }
@@ -636,6 +645,20 @@ public sealed class VaultStatus
     public int MemorizedCount { get; init; }
     public int StaleCount { get; init; }
     public int ErrorStageCount { get; init; }
+
+    /// <summary>
+    /// What an extraction made now would be recorded as — the registered extractor and FluxFeed's pipeline revision.
+    /// Null when the extractor reports no identity.
+    /// </summary>
+    public ExtractionIdentity? CurrentExtraction { get; init; }
+
+    /// <summary>
+    /// Entries whose extraction is older than <see cref="CurrentExtraction"/> under <c>FileVaultOptions.Reextraction</c>
+    /// — what turning it on, or a sync under it, would re-extract. With the policy at
+    /// <see cref="ReextractionPolicy.Never"/> this counts at <see cref="ReextractionPolicy.WhenExtractorChanges"/>, so the
+    /// number can be read before deciding. Entries extracted before identities were recorded are included.
+    /// </summary>
+    public int OutdatedExtractionCount { get; init; }
 
     // SyncStatus counts
     public int InSyncCount { get; init; }

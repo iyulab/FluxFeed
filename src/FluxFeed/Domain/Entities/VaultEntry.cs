@@ -154,6 +154,15 @@ public sealed class VaultEntry
     public IReadOnlyList<string>? ExtractionWarnings { get; private set; }
 
     /// <summary>
+    /// Which extractor made this entry's extraction artifacts (<c>extracted.md</c>, the content spans, the image
+    /// manifest), and FluxFeed's pipeline revision at the time. Null for an entry extracted before identities were
+    /// recorded, or by an extractor that reports none. Replaced on every extraction; a refresh that does not
+    /// re-extract keeps it. Compare with the vault's current extractor through
+    /// <see cref="ExtractionIdentity.IsOutdatedBy"/> (or read <c>VaultStatus.OutdatedExtractionCount</c>).
+    /// </summary>
+    public ExtractionIdentity? ExtractedBy { get; private set; }
+
+    /// <summary>
     /// Current synchronization status with source file and vector store.
     /// </summary>
     public SyncStatus SyncStatus { get; private set; }
@@ -246,6 +255,7 @@ public sealed class VaultEntry
                 EmbeddedIdentity = meta.EmbeddedIdentity,
                 ExtractionHints = meta.ExtractionHints is { Count: > 0 } ? meta.ExtractionHints : null,
                 ExtractionWarnings = meta.ExtractionWarnings is { Count: > 0 } ? meta.ExtractionWarnings : null,
+                ExtractedBy = meta.ExtractedBy,
                 SyncStatus = meta.SyncStatus,
                 LastSyncCheckAt = meta.LastSyncCheckAt,
                 RemovalPhase = meta.RemovalPhase
@@ -313,11 +323,14 @@ public sealed class VaultEntry
     /// <em>latest</em> extraction, never a stale one.
     /// </param>
     /// <param name="extractionWarnings">Extractor warnings (see <see cref="ExtractionWarnings"/>).</param>
+    /// <param name="extractedBy">Which extractor made this extraction (see <see cref="ExtractedBy"/>); null when unknown.</param>
     public void MarkExtracted(
         ContentHash contentHash,
         IReadOnlyDictionary<string, string>? extractionHints = null,
-        IReadOnlyList<string>? extractionWarnings = null)
+        IReadOnlyList<string>? extractionWarnings = null,
+        ExtractionIdentity? extractedBy = null)
     {
+        ExtractedBy = extractedBy;
         Stage = ProcessingStage.Extracted;
         SourceContentHash = contentHash;
         LastProcessedAt = DateTimeOffset.UtcNow;
@@ -422,6 +435,7 @@ public sealed class VaultEntry
         // Diagnostics describe a completed extraction; nothing has been extracted at Source stage.
         ExtractionHints = null;
         ExtractionWarnings = null;
+        ExtractedBy = null;
     }
 
     /// <summary>
@@ -542,6 +556,7 @@ public sealed class VaultEntry
             EmbeddedIdentity = EmbeddedIdentity,
             ExtractionHints = ExtractionHints?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             ExtractionWarnings = ExtractionWarnings?.ToList(),
+            ExtractedBy = ExtractedBy,
             SyncStatus = SyncStatus,
             LastSyncCheckAt = LastSyncCheckAt,
             RemovalPhase = RemovalPhase
@@ -648,6 +663,7 @@ public sealed class VaultEntry
         // Extraction diagnostics (opaque pass-through from the extractor).
         public Dictionary<string, string>? ExtractionHints { get; set; }
         public List<string>? ExtractionWarnings { get; set; }
+        public ExtractionIdentity? ExtractedBy { get; set; }
 
         // SyncStatus fields
         public SyncStatus SyncStatus { get; set; }
