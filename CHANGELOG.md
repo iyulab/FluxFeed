@@ -16,6 +16,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ### Changed
 - Re-pinned sibling package(s) `FileFlux` 0.36.2 -> 0.37.0.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.73.3 -> 0.73.4, `FluxIndex.Storage.SQLite` 0.73.3 -> 0.73.4.
 
 ### Added
 - **An extractor upgrade can reach documents whose source never changes: `FileVaultOptions.Reextraction`.** Every
