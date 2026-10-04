@@ -11,7 +11,7 @@ namespace FluxFeed.Tests;
 /// </summary>
 public class OptionsReachabilityRosterTests
 {
-    private static readonly Assembly[] Libraries = [Assembly.Load("FluxFeed")];
+    internal static readonly Assembly[] Libraries = [Assembly.Load("FluxFeed")];
 
     /// <summary>Options accepted as unread today, each with the reason. Shrink this list; never grow it silently.</summary>
     private static readonly Dictionary<string, string[]> KnownUnread = new()
