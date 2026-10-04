@@ -14,6 +14,9 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [0.43.0] - Unreleased
 
+### Changed
+- Re-pinned sibling package(s) `FileFlux` 0.36.2 -> 0.37.0.
+
 ### Added
 - **An extractor upgrade can reach documents whose source never changes: `FileVaultOptions.Reextraction`.** Every
   extraction now records which extractor made it (`VaultEntry.ExtractedBy` — e.g. `FileFlux 0.36.2`, plus FluxFeed's
