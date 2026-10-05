@@ -498,7 +498,9 @@ public interface IVault
     /// <param name="query">Search query text.</param>
     /// <param name="options">Search options including path scope.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Search results.</returns>
+    /// <returns>Search results. An empty result means nothing matched; a search that could not run throws.</returns>
+    /// <exception cref="InvalidOperationException">The options ask for something the vault cannot honour (for example a reranker that is not registered).</exception>
+    /// <remarks>Failures of the index or the embedding service propagate as the exception they raised.</remarks>
     Task<VaultSearchResult> SearchAsync(string query, VaultSearchOptions? options = null, CancellationToken ct = default);
 }
 
@@ -1112,16 +1114,6 @@ public sealed class VaultSearchResult
     public TimeSpan Duration { get; init; }
 
     /// <summary>
-    /// Whether the search was successful.
-    /// </summary>
-    public bool IsSuccess { get; init; } = true;
-
-    /// <summary>
-    /// Error message if search failed.
-    /// </summary>
-    public string? ErrorMessage { get; init; }
-
-    /// <summary>
     /// The strategy the caller requested (echo of <see cref="VaultSearchOptions.SearchStrategy"/>).
     /// </summary>
     public VaultSearchStrategy RequestedStrategy { get; init; } = VaultSearchStrategy.Vector;
@@ -1142,17 +1134,5 @@ public sealed class VaultSearchResult
         Query = query,
         Items = [],
         TotalCount = 0
-    };
-
-    /// <summary>
-    /// Creates an error result.
-    /// </summary>
-    public static VaultSearchResult Error(string query, string error) => new()
-    {
-        Query = query,
-        Items = [],
-        TotalCount = 0,
-        IsSuccess = false,
-        ErrorMessage = error
     };
 }

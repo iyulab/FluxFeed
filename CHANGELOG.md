@@ -12,6 +12,18 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.44.0] - Unreleased
+
+### Changed
+- **`IVault.SearchAsync` throws when the search cannot run.** Before, every failure of the index, the embedding service or
+  the pipeline was caught and returned as a result with `IsSuccess = false` and an `ErrorMessage`, which a caller that
+  only read `Items` saw as "nothing matched". Now the exception the pipeline raised reaches the caller. An empty result
+  means only that nothing matched.
+  **Breaking**: `VaultSearchResult.IsSuccess`, `VaultSearchResult.ErrorMessage` and `VaultSearchResult.Error(...)` are
+  removed. Replace `if (!result.IsSuccess)` with a `try`/`catch` around the call.
+
+---
+
 ## [0.43.10] - 2026-10-06
 
 ### Changed

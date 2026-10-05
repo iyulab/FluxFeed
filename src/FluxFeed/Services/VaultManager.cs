@@ -1565,137 +1565,123 @@ public sealed partial class VaultManager : IVault
             ? Math.Max(options.TopK, options.RerankCandidateCount ?? options.TopK * 3)
             : options.TopK;
 
-        try
+        // Every entry whose rows are in the index - not only Stage == Memorized. An entry whose
+        // re-index failed (or is still running) keeps its previous generation, and must keep
+        // answering; scoping by stage hid exactly those documents.
+        var allEntries = (await ListAsync(null, ct)).Where(e => e.IsSearchable).ToList();
+        var entriesDict = allEntries.ToDictionary(e => e.FilepathHash, e => e);
+
+        // Filter entries by path scope
+        IReadOnlyList<VaultEntry> targetEntries;
+        var searchedPaths = new List<string>();
+
+        if (options.PathScope.Count == 0)
         {
-            // Every entry whose rows are in the index - not only Stage == Memorized. An entry whose
-            // re-index failed (or is still running) keeps its previous generation, and must keep
-            // answering; scoping by stage hid exactly those documents.
-            var allEntries = (await ListAsync(null, ct)).Where(e => e.IsSearchable).ToList();
-            var entriesDict = allEntries.ToDictionary(e => e.FilepathHash, e => e);
+            // Search all
+            targetEntries = allEntries;
+            searchedPaths.Add("*");
+        }
+        else
+        {
+            var filteredEntries = new List<VaultEntry>();
 
-            // Filter entries by path scope
-            IReadOnlyList<VaultEntry> targetEntries;
-            var searchedPaths = new List<string>();
-
-            if (options.PathScope.Count == 0)
+            foreach (var scope in options.PathScope)
             {
-                // Search all
-                targetEntries = allEntries;
-                searchedPaths.Add("*");
-            }
-            else
-            {
-                var filteredEntries = new List<VaultEntry>();
+                var normalizedScope = Path.GetFullPath(scope.TrimEnd('/', '\\'));
+                searchedPaths.Add(normalizedScope);
 
-                foreach (var scope in options.PathScope)
+                // Check if scope is a directory or file
+                if (Directory.Exists(normalizedScope))
                 {
-                    var normalizedScope = Path.GetFullPath(scope.TrimEnd('/', '\\'));
-                    searchedPaths.Add(normalizedScope);
-
-                    // Check if scope is a directory or file
-                    if (Directory.Exists(normalizedScope))
+                    // Directory scope - match all files under this directory
+                    var scopePrefix = FolderPrefix(normalizedScope);
+                    var matchingEntries = allEntries.Where(e =>
+                        IsUnderFolder(e.SourcePath, scopePrefix) ||
+                        e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase));
+                    filteredEntries.AddRange(matchingEntries);
+                }
+                else if (File.Exists(normalizedScope))
+                {
+                    // File scope - match exact file
+                    var matchingEntry = allEntries.FirstOrDefault(e =>
+                        e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase));
+                    if (matchingEntry != null)
                     {
-                        // Directory scope - match all files under this directory
-                        var scopePrefix = FolderPrefix(normalizedScope);
-                        var matchingEntries = allEntries.Where(e =>
-                            IsUnderFolder(e.SourcePath, scopePrefix) ||
-                            e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase));
-                        filteredEntries.AddRange(matchingEntries);
-                    }
-                    else if (File.Exists(normalizedScope))
-                    {
-                        // File scope - match exact file
-                        var matchingEntry = allEntries.FirstOrDefault(e =>
-                            e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase));
-                        if (matchingEntry != null)
-                        {
-                            filteredEntries.Add(matchingEntry);
-                        }
-                    }
-                    else
-                    {
-                        // Path doesn't exist - try to match as prefix pattern
-                        var matchingEntries = allEntries.Where(e =>
-                            e.SourcePath.StartsWith(normalizedScope, StringComparison.OrdinalIgnoreCase));
-                        filteredEntries.AddRange(matchingEntries);
+                        filteredEntries.Add(matchingEntry);
                     }
                 }
-
-                targetEntries = filteredEntries.Distinct().ToList();
+                else
+                {
+                    // Path doesn't exist - try to match as prefix pattern
+                    var matchingEntries = allEntries.Where(e =>
+                        e.SourcePath.StartsWith(normalizedScope, StringComparison.OrdinalIgnoreCase));
+                    filteredEntries.AddRange(matchingEntries);
+                }
             }
 
-            if (targetEntries.Count == 0)
-            {
-                sw.Stop();
-                return new VaultSearchResult
-                {
-                    Query = query,
-                    Items = [],
-                    TotalCount = 0,
-                    SearchedPaths = searchedPaths,
-                    DocumentsSearched = 0,
-                    Duration = sw.Elapsed,
-                    RequestedStrategy = options.SearchStrategy,
-                    ExecutedStrategy = options.SearchStrategy
-                };
-            }
+            targetEntries = filteredEntries.Distinct().ToList();
+        }
 
-            // Get document IDs to filter search
-            var documentIds = targetEntries.Select(e => e.FilepathHash).ToList();
-
-            // Execute pipeline search with the requested strategy
-            var pipelineResponse = await _pipeline.SearchAsync(
-                query, documentIds, fetchCount, options.MinScore, options.SearchStrategy, ct);
-
-            var ranked = options.UseReranker
-                ? await RerankAsync(query, pipelineResponse.Results, options.TopK, ct)
-                : pipelineResponse.Results.Select(r => (Result: r, Score: r.Score, RetrievalScore: (float?)null)).ToList();
-
-            // Map to VaultSearchResultItem
-            var items = ranked.Select(x =>
-            {
-                var r = x.Result;
-                entriesDict.TryGetValue(r.DocumentId, out var entry);
-                return new VaultSearchResultItem
-                {
-                    Entry = entry!,
-                    SourcePath = entry?.SourcePath ?? r.DocumentId,
-                    FileName = entry?.FileName ?? Path.GetFileName(r.DocumentId),
-                    ChunkIndex = r.ChunkIndex,
-                    Content = options.IncludeContent ? r.Content : null,
-                    Score = x.Score,
-                    RetrievalScore = x.RetrievalScore,
-                    Metadata = options.IncludeMetadata ? r.Metadata : null
-                };
-            }).ToList();
-
+        if (targetEntries.Count == 0)
+        {
             sw.Stop();
-
-            LogSearchCompleted(_logger, query, targetEntries.Count, items.Count, sw.ElapsedMilliseconds);
-
             return new VaultSearchResult
             {
                 Query = query,
-                Items = items,
-                TotalCount = items.Count,
+                Items = [],
+                TotalCount = 0,
                 SearchedPaths = searchedPaths,
-                DocumentsSearched = targetEntries.Count,
+                DocumentsSearched = 0,
                 Duration = sw.Elapsed,
                 RequestedStrategy = options.SearchStrategy,
-                ExecutedStrategy = pipelineResponse.ExecutedStrategy
+                ExecutedStrategy = options.SearchStrategy
             };
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+
+        // Get document IDs to filter search
+        var documentIds = targetEntries.Select(e => e.FilepathHash).ToList();
+
+        // Execute pipeline search with the requested strategy
+        var pipelineResponse = await _pipeline.SearchAsync(
+            query, documentIds, fetchCount, options.MinScore, options.SearchStrategy, ct);
+
+        var ranked = options.UseReranker
+            ? await RerankAsync(query, pipelineResponse.Results, options.TopK, ct)
+            : pipelineResponse.Results.Select(r => (Result: r, Score: r.Score, RetrievalScore: (float?)null)).ToList();
+
+        // Map to VaultSearchResultItem
+        var items = ranked.Select(x =>
         {
-            sw.Stop();
-            throw;
-        }
-        catch (Exception ex)
+            var r = x.Result;
+            entriesDict.TryGetValue(r.DocumentId, out var entry);
+            return new VaultSearchResultItem
+            {
+                Entry = entry!,
+                SourcePath = entry?.SourcePath ?? r.DocumentId,
+                FileName = entry?.FileName ?? Path.GetFileName(r.DocumentId),
+                ChunkIndex = r.ChunkIndex,
+                Content = options.IncludeContent ? r.Content : null,
+                Score = x.Score,
+                RetrievalScore = x.RetrievalScore,
+                Metadata = options.IncludeMetadata ? r.Metadata : null
+            };
+        }).ToList();
+
+        sw.Stop();
+
+        LogSearchCompleted(_logger, query, targetEntries.Count, items.Count, sw.ElapsedMilliseconds);
+
+        return new VaultSearchResult
         {
-            sw.Stop();
-            LogSearchFailed(_logger, ex, query);
-            return VaultSearchResult.Error(query, ex.Message);
-        }
+            Query = query,
+            Items = items,
+            TotalCount = items.Count,
+            SearchedPaths = searchedPaths,
+            DocumentsSearched = targetEntries.Count,
+            Duration = sw.Elapsed,
+            RequestedStrategy = options.SearchStrategy,
+            ExecutedStrategy = pipelineResponse.ExecutedStrategy
+        };
     }
 
     /// <summary>
@@ -1827,8 +1813,6 @@ public sealed partial class VaultManager : IVault
     [LoggerMessage(Level = LogLevel.Warning, Message = "Folder move: {SourcePath} was not moved to {DestinationPath}")]
     private static partial void LogFolderEntryMoveFailed(ILogger logger, Exception exception, string sourcePath, string destinationPath);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Search failed for query: {Query}")]
-    private static partial void LogSearchFailed(ILogger logger, Exception exception, string query);
 
     #endregion
 }

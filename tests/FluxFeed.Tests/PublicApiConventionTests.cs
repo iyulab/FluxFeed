@@ -15,6 +15,8 @@ namespace FluxFeed.Tests;
 /// </remarks>
 public class PublicApiConventionTests
 {
+    // Disposal follows IAsyncDisposable.DisposeAsync, which takes no token: tearing a vault down is not a
+    // cancellable operation (a half-disposed vault would leak its worker and its store handles).
     private static readonly string[] KnownUncancellable =
     [
         "FluxFeed.Interfaces.IVaultFactory.DisposeAllAsync()",
@@ -22,12 +24,17 @@ public class PublicApiConventionTests
         "FluxFeed.Interfaces.IVaultFactory.DisposeAsync(String, Boolean)",
     ];
 
+    // Each of these returns a report, not a failure channel. A failure of the operation itself throws; what the object
+    // carries is per-item outcome data the caller acts on item by item.
     private static readonly string[] KnownResultReturns =
     [
+        // One entry per moved/not-moved file; the entries that failed stay tracked under their old path.
         "FluxFeed.Interfaces.IVault.MoveFolderAsync(String, String, CancellationToken)",
-        "FluxFeed.Interfaces.IVault.SearchAsync(String, VaultSearchOptions, CancellationToken)",
+        // Counts of what a scan queued, with the files it could not read; IsSuccess is ErrorCount == 0.
         "FluxFeed.Interfaces.IVault.SyncAsync(CancellationToken)",
         "FluxFeed.Interfaces.IVault.SyncAsync(VaultJobPriority, CancellationToken)",
+        // The queue worker's job outcome: it is recorded on the entry (stage, error, exception type) and the job
+        // retried or parked, so a failed document is state, not an exception for the worker to unwind.
         "FluxFeed.Interfaces.IVaultPipeline.MemorizeAsync(VaultEntry, MemorizeOptions, CancellationToken)",
         "FluxFeed.Interfaces.IVaultPipeline.RefreshAsync(VaultEntry, MemorizeOptions, CancellationToken)",
     ];

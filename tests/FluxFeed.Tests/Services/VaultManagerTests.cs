@@ -990,7 +990,7 @@ public class VaultManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchAsync_WhenOCE_ButCallerTokenNotCancelled_ReturnsErrorResult()
+    public async Task SearchAsync_WhenOCE_ButCallerTokenNotCancelled_Throws()
     {
         // Arrange - OCE not tied to the caller's token (e.g. an internal timeout)
         var file = CreateTestFile("search-internal-oce.txt", "content");
@@ -1000,16 +1000,15 @@ public class VaultManagerTests : IDisposable
             .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new OperationCanceledException());
 
-        // Act - caller token is live; the when-filter must NOT rethrow
-        var result = await _vault.SearchAsync("query", VaultSearchOptions.All(), CancellationToken.None);
+        // Act
+        var act = () => _vault.SearchAsync("query", VaultSearchOptions.All(), CancellationToken.None);
 
-        // Assert - genuine failure path still produces an error result, no throw
-        result.Should().NotBeNull();
-        result.IsSuccess.Should().BeFalse();
+        // Assert - an internal timeout is a failure, reported by the exception (not an empty result)
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
-    public async Task SearchAsync_WhenPipelineThrowsGenericException_ReturnsErrorResult()
+    public async Task SearchAsync_WhenPipelineThrowsGenericException_Throws()
     {
         // Arrange
         var file = CreateTestFile("search-generic-error.txt", "content");
@@ -1020,12 +1019,10 @@ public class VaultManagerTests : IDisposable
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         // Act
-        var result = await _vault.SearchAsync("query", VaultSearchOptions.All(), CancellationToken.None);
+        var act = () => _vault.SearchAsync("query", VaultSearchOptions.All(), CancellationToken.None);
 
-        // Assert - broad catch still converts real failures into an error result
-        result.Should().NotBeNull();
-        result.IsSuccess.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("boom");
+        // Assert - the failure reaches the caller as the exception the pipeline raised
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*boom*");
     }
 
     #endregion
