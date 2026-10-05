@@ -3,6 +3,7 @@ using FluxIndex.Core.Application.Interfaces;
 using FluxIndex.Core.Domain.Entities;
 using FluxIndex.Core.Domain.ValueObjects;
 using FluxFeed.Domain.Entities;
+using FluxFeed.Domain.Enums;
 using FluxFeed.Interfaces;
 using FluxFeed.Options;
 using FluxFeed.Services;
@@ -163,6 +164,31 @@ public sealed class VaultPipelineGraphRagTests : IDisposable
             Arg.Any<IEnumerable<DocumentChunk>>(),
             Arg.Any<GraphRAGBuildOptions?>(),
             Arg.Any<CancellationToken>());
+    }
+
+    // Stopping the host mid-document is not a failed document: before, the catch-all marked the entry Error and returned
+    // a failure the queue counted against the job; now the cancellation propagates and the entry keeps its stage.
+    [Fact]
+    public async Task Memorize_CallerCancels_PropagatesAndDoesNotMarkTheEntryFailed()
+    {
+        using var cts = new CancellationTokenSource();
+        var graph = Substitute.For<IGraphRAGService>();
+        graph.BuildIndexAsync(Arg.Any<IEnumerable<DocumentChunk>>(), Arg.Any<GraphRAGBuildOptions?>(), Arg.Any<CancellationToken>())
+            .Returns<Task<GraphRAGIndex>>(_ =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            });
+        var pipeline = CreatePipeline(graph);
+        var docPath = Path.Combine(_testDir, "doc.txt");
+        await File.WriteAllTextAsync(docPath, "Alice works at Acme Corp. Bob manages the project in Seoul.", TestContext.Current.CancellationToken);
+        var entry = VaultEntry.Create(docPath, _vaultDir);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+
+        var act = () => pipeline.MemorizeAsync(entry, new MemorizeOptions { MaxChunkSize = 200 }, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        entry.Stage.Should().NotBe(ProcessingStage.Error);
     }
 
     [Fact]

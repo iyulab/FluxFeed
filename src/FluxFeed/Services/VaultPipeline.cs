@@ -332,8 +332,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             return MemorizeResult.Succeeded(result.ChunkCount, result.ContentLength, sw.Elapsed, commitHash);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // A cancelled run is not a failed document: the entry keeps its state and the job is recovered.
             sw.Stop();
             LogMemorizeFailed(_logger, ex, entry.SourcePath);
             entry.MarkError(ex.Message);
@@ -418,8 +419,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             return MemorizeResult.Succeeded(result.ChunkCount, result.ContentLength, sw.Elapsed, commitHash);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // A cancelled run is not a failed document: the entry keeps its state and the job is recovered.
             sw.Stop();
             LogRefreshFailed(_logger, ex, entry.SourcePath);
             entry.MarkError(ex.Message);
@@ -1589,6 +1591,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 // or the retry resumes past chunks that are no longer there and the document is
                 // silently truncated - the failure the checkpoint exists to prevent.
                 await TryRewindCheckpointAsync(entry, options);
+
+                // A cancelled run is rolled back like a failed one, but it is reported as the cancellation it is:
+                // wrapping it would turn a host shutdown into an indexing failure of this document.
+                if (ex is OperationCanceledException && ct.IsCancellationRequested)
+                {
+                    throw;
+                }
 
                 // Carried on the exception rather than in a field: this method's caller is an async
                 // frame above, and mutable state written here does not travel back up to it.

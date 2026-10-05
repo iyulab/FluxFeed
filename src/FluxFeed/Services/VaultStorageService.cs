@@ -81,7 +81,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         {
             await _gitService.InitAsync(entry.VaultPath, ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             LogGitInitFailed(_logger, entry.EntryPath, ex.Message);
         }

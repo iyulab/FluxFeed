@@ -300,8 +300,10 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
             LogFileNotFoundForJob(_logger, job.Id, job.FilePath);
             await ReportFailureAsync(job, $"File not found: {ex.Message}", MemorizeFailureKind.Permanent, ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // Shutdown is not a job failure: the job stays Processing and RecoverStuckJobsAsync resumes it on the
+            // next start (from its last checkpoint) instead of counting a retry or classifying a cancellation.
             LogFailedJob(_logger, ex, job.JobType, job.Id, job.FilePath);
             await ReportFailureAsync(
                 job, ex.Message, MemorizeFailureClassifier.Classify(ex.GetType().Name), ct);

@@ -14,6 +14,14 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [0.44.0] - Unreleased
 
+### Fixed
+- **Stopping the host while a document is being memorized no longer marks that document as failed.** The memorize and
+  refresh pipelines caught the cancellation like any error: the entry went to `Error`, the queue recorded a failed
+  attempt (counted toward the retry limit and classified by exception type), and an interrupted indexing run was
+  reported as an indexing failure. A cancelled run still rolls back what it half-wrote, then lets the cancellation
+  through; the job stays in progress and is resumed on the next start. Creating an entry's git repository no longer
+  treats a cancellation as a non-fatal git error.
+
 ### Changed
 - **`IVault.SearchAsync` throws when the search cannot run.** Before, every failure of the index, the embedding service or
   the pipeline was caught and returned as a result with `IsSuccess = false` and an `ErrorMessage`, which a caller that
