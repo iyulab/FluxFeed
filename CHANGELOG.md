@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.44.0] - Unreleased
+## [0.44.0] - 2026-10-06
 
 ### Fixed
 - **Stopping the host while a document is being memorized no longer marks that document as failed.** The memorize and
