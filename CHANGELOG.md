@@ -29,6 +29,7 @@ Releases before 0.28.0 predate this file — see the git history.
   means only that nothing matched.
   **Breaking**: `VaultSearchResult.IsSuccess`, `VaultSearchResult.ErrorMessage` and `VaultSearchResult.Error(...)` are
   removed. Replace `if (!result.IsSuccess)` with a `try`/`catch` around the call.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.76.1 -> 0.77.0, `FluxIndex.Storage.SQLite` 0.76.1 -> 0.77.0.
 
 ---
 
