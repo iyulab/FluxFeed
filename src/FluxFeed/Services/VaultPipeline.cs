@@ -566,6 +566,16 @@ public sealed partial class VaultPipeline : IVaultPipeline
         {
             ct.ThrowIfCancellationRequested();
 
+            if (!EnricherReads(image.ContentType))
+            {
+                // Known in advance to fail: say why, and do not spend an enricher call on it.
+                await _storage.SetImageEnrichmentFailureAsync(
+                    entry, image.Id, $"{UnsupportedContentTypeReason}{image.ContentType}",
+                    (image.LastEnrichmentFailure?.AttemptCount ?? 0) + 1, isPermanent: true, ct);
+                failed++;
+                continue;
+            }
+
             string? description;
             try
             {
@@ -604,6 +614,21 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         LogEnrichedImages(_logger, described, failed, entry.SourcePath);
         return described;
+    }
+
+    /// <summary>
+    /// Prefix of the enrichment failure reason recorded for an image whose content type the enricher does not read
+    /// (<see cref="FileVaultOptions.ImageEnrichmentContentTypes"/>).
+    /// </summary>
+    public const string UnsupportedContentTypeReason = "unsupported_content_type:";
+
+    private bool EnricherReads(string contentType)
+    {
+        if (_options.ImageEnrichmentContentTypes is not { Count: > 0 } accepted)
+            return true;
+
+        var mediaType = contentType.Split(';', 2)[0].Trim();
+        return accepted.Any(a => string.Equals(a.Trim(), mediaType, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

@@ -614,6 +614,10 @@ the pipeline stops offering it to the enricher — this survives a process resta
 count is persisted in the image manifest, not held in memory. A later success (e.g. after you fix the
 enricher) clears the failure record for that image.
 
+If your enricher reads only some image types (a vision model: PNG, JPEG, WebP), list them in
+`FileVaultOptions.ImageEnrichmentContentTypes`: an image of any other type (TIFF, JPEG XR, EMF/WMF, SVG, BMP) is then not
+offered to it and is recorded as a permanent failure with the reason `unsupported_content_type:<type>`.
+
 Read back what the enricher wrote — or why an image is still pending — with
 `GetImageManifestAsync(filePath)`. Each `VaultImage` carries its `Description` when one has been
 persisted, or `LastEnrichmentFailure` (reason, attempt count, whether it is now permanent) while none

@@ -25,6 +25,11 @@ Releases before 0.28.0 predate this file — see the git history.
   `table_piece`/`table_pieces` and `table_row_start`/`table_row_end`, and — when the chunked text holds exactly the
   stored tables — `table_id`, `table_columns`, `table_section`, `table_caption`, `table_page`. `ContentChunk.Table`
   (`ContentTablePiece`) carries the piece from any `IChunker`.
+- **Images the enricher cannot read are no longer offered to it.** `FileVaultOptions.ImageEnrichmentContentTypes`
+  declares the content types the registered `IVaultImageEnricher` reads (a vision model: PNG, JPEG, WebP); an image of
+  another type (TIFF, JPEG XR, EMF/WMF, SVG, BMP) is recorded at once as a permanent failure with the reason
+  `unsupported_content_type:<type>`, so it is counted apart from enricher failures and costs no call. Null (default)
+  offers every image, as before. Converting those images to a readable raster is not done yet.
 
 ### Changed
 - **Breaking** — `IVault` gains `GetTablesAsync`, and `IVaultStorageService` gains `StoreTablesAsync`/`GetTablesAsync`.

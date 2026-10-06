@@ -123,7 +123,9 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         return embedder;
     }
 
-    private VaultPipeline CreatePipeline(ExtractionResult extraction, IVaultImageEnricher? enricher, int? maxImageEnrichmentAttempts = null) => new(
+    private VaultPipeline CreatePipeline(
+        ExtractionResult extraction, IVaultImageEnricher? enricher, int? maxImageEnrichmentAttempts = null,
+        IReadOnlyList<string>? enricherContentTypes = null) => new(
         _git,
         new ContentHasher(),
         _storage,
@@ -131,7 +133,8 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         options: MsOptions.Create(new FileVaultOptions
         {
             VaultBasePath = _vaultDir,
-            MaxImageEnrichmentAttempts = maxImageEnrichmentAttempts ?? new FileVaultOptions().MaxImageEnrichmentAttempts
+            MaxImageEnrichmentAttempts = maxImageEnrichmentAttempts ?? new FileVaultOptions().MaxImageEnrichmentAttempts,
+            ImageEnrichmentContentTypes = enricherContentTypes
         }),
         extractor: new StubExtractor(extraction),
         vectorStore: _vectorStore,
@@ -299,6 +302,27 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         result.Success.Should().BeTrue();
         result.ChunkCount.Should().Be(0);
         _capture.Chunks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MemorizeAsync_ImageTheEnricherCannotRead_IsNotOffered_AndSaysWhy()
+    {
+        // A vision model reads PNG/JPEG/WebP; a TIFF or EMF sent to it fails on every retry. Declared types let the
+        // pipeline skip the call and record a reason that can be counted apart from enricher failures.
+        var entry = CreateEntry("scan.docx");
+        var enricher = new RecordingEnricher(_ => "A chart.");
+        var tiff = new ImageArtifact { Id = "img_001", Data = [1, 2, 3, 4], ContentType = "image/tiff" };
+        var extraction = new ExtractionResult { Content = "Body.", Images = [Image("img_000"), tiff] };
+
+        await CreatePipeline(extraction, enricher, enricherContentTypes: ["image/png", "image/jpeg"])
+            .MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        enricher.Calls.Should().Equal("img_000");
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
+        var failure = manifest.Single(i => i.Id == "img_001").LastEnrichmentFailure!;
+        failure.Reason.Should().Be(VaultPipeline.UnsupportedContentTypeReason + "image/tiff");
+        failure.IsPermanent.Should().BeTrue();
+        manifest.Single(i => i.Id == "img_000").IsDescribed.Should().BeTrue();
     }
 
     [Fact]

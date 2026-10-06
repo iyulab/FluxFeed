@@ -156,6 +156,14 @@ public sealed class FileVaultOptions
     public int MaxImageEnrichmentAttempts { get; set; } = 3;
 
     /// <summary>
+    /// The image content types the registered <see cref="Interfaces.IVaultImageEnricher"/> can read (for a vision model,
+    /// typically <c>image/png</c>, <c>image/jpeg</c>, <c>image/webp</c>). An image of any other type is not offered to it:
+    /// it is recorded at once as a permanent failure with the reason <c>unsupported_content_type:&lt;type&gt;</c>, so it
+    /// can be counted apart from enricher failures and no call is spent on it. Null (the default) offers every image.
+    /// </summary>
+    public IReadOnlyList<string>? ImageEnrichmentContentTypes { get; set; }
+
+    /// <summary>
     /// <see cref="MaxFileSizeMB"/> in bytes.
     /// </summary>
     public long MaxFileSizeBytes => MaxFileSizeMB * 1024L * 1024L;
