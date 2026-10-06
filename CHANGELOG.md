@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.46.0] - Unreleased
+## [0.46.0] - 2026-10-06
 
 ### Added
 - **`FileVaultOptions.LlmRefine` — page-scoped, checked LLM refinement for vault entries.** The options reach FileFlux's
