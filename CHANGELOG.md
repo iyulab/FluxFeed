@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.47.0] - Unreleased
+## [0.47.0] - 2026-10-06
 
 ### Added
 - **Staged indexing.** `FileVaultOptions.DeferEnrichment` makes a file searchable on its native chunks first: memorize
