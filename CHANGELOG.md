@@ -36,6 +36,7 @@ Releases before 0.28.0 predate this file — see the git history.
   `EnqueueUpgradeAsync`, and `IVaultPipeline` gains `UpgradeAsync`. Migration: an implementation or hand-written double
   of these interfaces adds the members (a test double can throw `NotImplementedException`).
 - Re-pinned sibling package(s) `FileFlux` 0.44.0 -> 0.45.0.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.80.5 -> 0.80.6, `FluxIndex.Storage.SQLite` 0.80.5 -> 0.80.6.
 
 ---
 
