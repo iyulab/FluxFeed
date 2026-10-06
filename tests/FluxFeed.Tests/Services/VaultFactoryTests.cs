@@ -168,7 +168,7 @@ public sealed class VaultFactoryTests : IDisposable
             var values = Enum.GetValues(type).Cast<object>().ToList();
             return values.First(v => !Equals(v, current));
         }
-        if (type == typeof(List<string>) || type == typeof(IList<string>) || type == typeof(string[]))
+        if (type == typeof(List<string>) || type == typeof(IList<string>) || type == typeof(IReadOnlyList<string>) || type == typeof(string[]))
             return type == typeof(string[]) ? new[] { "distinct-" + name } : new List<string> { "distinct-" + name };
         if (type == typeof(HashSet<string>)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".distinct-" + name };
         if (type == typeof(Dictionary<string, string>)) return new Dictionary<string, string> { ["." + name] = "distinct" };

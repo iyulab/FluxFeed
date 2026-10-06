@@ -289,6 +289,7 @@ public sealed partial class VaultFactory : IVaultFactory
             DefaultExcludePatterns = [.. source.DefaultExcludePatterns],
             AdditionalTextExtensions = new HashSet<string>(source.AdditionalTextExtensions, source.AdditionalTextExtensions.Comparer),
             MaxImageEnrichmentAttempts = source.MaxImageEnrichmentAttempts,
+            ImageEnrichmentContentTypes = source.ImageEnrichmentContentTypes?.ToArray(),
             Reextraction = source.Reextraction,
             MaxConcurrentProcessing = source.MaxConcurrentProcessing,
             EnableAutoRetry = source.EnableAutoRetry,
