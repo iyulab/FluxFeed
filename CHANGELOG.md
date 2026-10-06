@@ -35,6 +35,7 @@ Releases before 0.28.0 predate this file — see the git history.
 - **Breaking** — `IVault` gains `GetTablesAsync`, and `IVaultStorageService` gains `StoreTablesAsync`/`GetTablesAsync`.
   Migration: an `IVault` or `IVaultStorageService` implementation (a test double, for instance) adds them — returning
   an empty list is enough for a double.
+- Re-pinned sibling package(s) `FileFlux` 0.40.0 -> 0.41.0.
 
 ---
 
