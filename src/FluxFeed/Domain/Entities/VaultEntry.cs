@@ -607,6 +607,11 @@ public sealed class VaultEntry
     public string ExtractedSpansPath => Path.Combine(EntryPath, "extracted.spans.json");
 
     /// <summary>
+    /// Path to extracted.tables.json (the document's tables as structured rows, not git-tracked).
+    /// </summary>
+    public string ExtractedTablesPath => Path.Combine(EntryPath, "extracted.tables.json");
+
+    /// <summary>
     /// Path to refined.md (LLM-refined content with image descriptions).
     /// </summary>
     public string RefinedMdPath => Path.Combine(VaultPath, "refined.md");

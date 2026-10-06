@@ -80,6 +80,8 @@ public sealed partial class FileFluxExtractor : IExtractor
                 }
             }
 
+            var tables = result.Raw?.Tables is { Count: > 0 } rawTables ? ToTableArtifacts(rawTables) : null;
+
             var hints = ProjectScalarHints(result.Raw?.Hints);
             var warnings = result.Raw?.Warnings is { Count: > 0 } w ? w.ToArray() : null;
 
@@ -95,7 +97,8 @@ public sealed partial class FileFluxExtractor : IExtractor
                 Images = images,
                 Hints = hints,
                 Warnings = warnings,
-                Spans = spans
+                Spans = spans,
+                Tables = tables
             };
         }
         catch (Exception ex)
@@ -104,6 +107,27 @@ public sealed partial class FileFluxExtractor : IExtractor
             throw;
         }
     }
+
+    /// <summary>
+    /// FileFlux's tables as vault table artifacts, ids from their document position. The reader's tables are the ones
+    /// its text carries, in the same order.
+    /// </summary>
+    internal static IReadOnlyList<TableArtifact> ToTableArtifacts(IReadOnlyList<FileFlux.Core.TableData> tables) =>
+        tables.Select((table, index) => new TableArtifact
+        {
+            Id = TableArtifact.IdFor(index),
+            Index = index,
+            Rows = table.Cells.Select(row => (IReadOnlyList<string>)row.ToArray()).ToList(),
+            HeaderRows = table.Props.TryGetValue("header_rows", out var headerRows) && headerRows is int declared
+                ? declared
+                : table.HasHeader ? 1 : 0,
+            PageNumber = table.PageNumber > 0 ? table.PageNumber : null,
+            Section = table.Props.TryGetValue("section_name", out var section) ? section?.ToString() : null,
+            Caption = string.IsNullOrWhiteSpace(table.Caption) ? null : table.Caption,
+            Confidence = table.Confidence,
+            DetectionMethod = table.DetectionMethod.ToString(),
+            MergedCells = table.MergedCells.Select(m => new TableCellSpan(m.StartRow, m.EndRow, m.StartCol, m.EndCol)).ToList(),
+        }).ToList();
 
     #region LoggerMessage Definitions
 

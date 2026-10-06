@@ -357,6 +357,16 @@ public interface IVault
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<VaultImage>> GetImageManifestAsync(string filePath, CancellationToken ct = default);
 
+    /// <summary>
+    /// Gets the tables of an entry's document as structured rows, in document order — header rows, page or sheet,
+    /// caption, merged cells, and the reader's confidence. Rebuilt on re-extraction and removed with the entry; the
+    /// chunks holding a table's rows carry its id (<c>table_id</c>). Returns an empty list when the entry doesn't exist
+    /// or its document has no tables.
+    /// </summary>
+    /// <param name="filePath">Source file path identifying the entry.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<TableArtifact>> GetTablesAsync(string filePath, CancellationToken ct = default);
+
     // === Folder Watching ===
 
     /// <summary>

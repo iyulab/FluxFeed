@@ -1090,7 +1090,7 @@ public class VaultManagerTests : IDisposable
         return entry;
     }
 
-    private static readonly ExtractionIdentity CurrentFileFlux = new("FileFlux", "0.36.2") { PipelineRevision = 1 };
+    private static readonly ExtractionIdentity CurrentFileFlux = new("FileFlux", "0.36.2") { PipelineRevision = VaultPipeline.ExtractionPipelineRevision };
 
     [Theory]
     [InlineData(ReextractionPolicy.WhenExtractorMinorChanges, "0.35.4", ChangeAction.Memorize)]
@@ -1101,7 +1101,7 @@ public class VaultManagerTests : IDisposable
         ReextractionPolicy policy, string recordedVersion, ChangeAction expected)
     {
         var filePath = CreateTestFile("manual.pdf", "body");
-        CreateEntryExtractedBy(filePath, new ExtractionIdentity("FileFlux", recordedVersion) { PipelineRevision = 1 });
+        CreateEntryExtractedBy(filePath, new ExtractionIdentity("FileFlux", recordedVersion) { PipelineRevision = VaultPipeline.ExtractionPipelineRevision });
         GivenModifiedVaultFiles();
         _pipelineMock.CurrentExtractionIdentity.Returns(CurrentFileFlux);
 
@@ -1131,7 +1131,7 @@ public class VaultManagerTests : IDisposable
     public async Task StatusAsync_CountsOutdatedExtractions_EvenWithThePolicyOff()
     {
         CreateEntryExtractedBy(CreateTestFile("legacy.pdf", "a"), extractedBy: null);
-        CreateEntryExtractedBy(CreateTestFile("older.pdf", "b"), new ExtractionIdentity("FileFlux", "0.36.1") { PipelineRevision = 1 });
+        CreateEntryExtractedBy(CreateTestFile("older.pdf", "b"), new ExtractionIdentity("FileFlux", "0.36.1") { PipelineRevision = VaultPipeline.ExtractionPipelineRevision });
         CreateEntryExtractedBy(CreateTestFile("current.pdf", "c"), CurrentFileFlux);
         _pipelineMock.CurrentExtractionIdentity.Returns(CurrentFileFlux);
 

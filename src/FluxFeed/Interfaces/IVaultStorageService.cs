@@ -63,6 +63,17 @@ public interface IVaultStorageService
     Task<ContentSpanSet?> GetContentSpansAsync(VaultEntry entry, CancellationToken ct = default);
 
     /// <summary>
+    /// Stores the document's tables beside extracted.md. An empty list removes any stored set, so a re-extraction never
+    /// leaves the previous document's tables behind.
+    /// </summary>
+    Task StoreTablesAsync(VaultEntry entry, IReadOnlyList<TableArtifact> tables, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets the stored tables in document order, or an empty list when the entry has none.
+    /// </summary>
+    Task<IReadOnlyList<TableArtifact>> GetTablesAsync(VaultEntry entry, CancellationToken ct = default);
+
+    /// <summary>
     /// Stores extracted images to images/ directory.
     /// </summary>
     Task StoreImagesAsync(VaultEntry entry, IEnumerable<ImageArtifact> images, CancellationToken ct = default);
@@ -224,6 +235,60 @@ public sealed class ImageArtifact
     public int Width { get; init; }
     public int Height { get; init; }
 }
+
+/// <summary>
+/// A table of a document, as structured rows. Stored per entry (rebuilt on re-extraction, removed with the entry) and
+/// read with <see cref="IVault.GetTablesAsync"/>; the chunks holding its rows carry its <see cref="Id"/>
+/// (<c>table_id</c>).
+/// </summary>
+public sealed class TableArtifact
+{
+    /// <summary>
+    /// Identifier within the entry, from the table's position (<c>t000</c>, <c>t001</c>, …): stable across
+    /// re-extraction of the same document and across a move. Pair it with the entry (<c>document_id</c>) for a key
+    /// across documents — tables are never matched by their column set.
+    /// </summary>
+    public required string Id { get; init; }
+
+    /// <summary>0-based position of the table in the document.</summary>
+    public int Index { get; init; }
+
+    /// <summary>The <see cref="Id"/> of the table at <paramref name="index"/> within its entry.</summary>
+    public static string IdFor(int index) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"t{index:D3}");
+
+    /// <summary>Cell text by row and column; every row is as wide as the table.</summary>
+    public IReadOnlyList<IReadOnlyList<string>> Rows { get; init; } = [];
+
+    /// <summary>How many leading rows are header rows (0 when the table has none).</summary>
+    public int HeaderRows { get; init; }
+
+    /// <summary>The page the table is on (1-based) — for a workbook, the sheet's position.</summary>
+    public int? PageNumber { get; init; }
+
+    /// <summary>The section the table belongs to when the format has named sections (a worksheet's name).</summary>
+    public string? Section { get; init; }
+
+    /// <summary>Caption or title the source attached to the table, when the reader found one.</summary>
+    public string? Caption { get; init; }
+
+    /// <summary>
+    /// How sure the reader is of the structure (0–1). A table read from document structure (Office, HWP) is 1; one
+    /// inferred from page layout (PDF) is lower, and its header flag is the parser's default rather than a detection.
+    /// </summary>
+    public double Confidence { get; init; } = 1.0;
+
+    /// <summary>How the reader found the table (<c>Structured</c>, <c>Heuristic</c>, …).</summary>
+    public string? DetectionMethod { get; init; }
+
+    /// <summary>Cells that span several rows or columns; their text sits in the first position.</summary>
+    public IReadOnlyList<TableCellSpan> MergedCells { get; init; } = [];
+
+    /// <summary>The column labels: the last header row, or empty when the table has no header.</summary>
+    public IReadOnlyList<string> Columns => HeaderRows > 0 && Rows.Count >= HeaderRows ? Rows[HeaderRows - 1] : [];
+}
+
+/// <summary>A merged cell: 0-based, inclusive row and column bounds.</summary>
+public sealed record TableCellSpan(int StartRow, int EndRow, int StartColumn, int EndColumn);
 
 /// <summary>
 /// A stored image as recorded in the vault's image manifest, without its bytes — the listing form

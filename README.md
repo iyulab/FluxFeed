@@ -619,6 +619,21 @@ Read back what the enricher wrote — or why an image is still pending — with
 persisted, or `LastEnrichmentFailure` (reason, attempt count, whether it is now permanent) while none
 has. Returns an empty list when the entry doesn't exist or has no images.
 
+### Tables
+
+A document's tables are kept as structured rows beside its text: `GetTablesAsync(filePath)` returns them in
+document order as `TableArtifact` — `Id` (`t000`, `t001`, … from the table's position; pair it with the entry for a
+key across documents), `Rows`, `HeaderRows`, `Columns`, `PageNumber` (for a workbook, the sheet's position), `Section`
+(the sheet name), `Caption`, `MergedCells`, `Confidence` and `DetectionMethod` (a PDF table is inferred from page
+layout and says so). They are rebuilt on re-extraction and removed with the entry. Supplied by FileFlux 0.41.0+
+readers (PDF, Word, PowerPoint, Excel, HWP).
+
+A chunk holding table rows is tagged `chunk_kind="table"` with `table_piece` / `table_pieces` and
+`table_row_start` / `table_row_end` (FluxCurator 0.11.0+ keeps a table whole, or splits it between rows with the header
+repeated). When the chunked text holds exactly the tables extraction stored, the chunk also carries `table_id`,
+`table_columns`, `table_section`, `table_caption` and `table_page` from its table — so a hit can be cited as a table
+and its rows read with `GetTablesAsync`.
+
 ### Keyword index — `IKeywordSearchService`
 
 When one is registered, every chunk written to the vector store is written to the keyword index as

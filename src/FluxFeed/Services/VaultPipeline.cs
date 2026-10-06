@@ -125,6 +125,17 @@ public sealed partial class VaultPipeline : IVaultPipeline
     public const string ImageDescriptionChunkKind = "image_description";
 
     /// <summary>
+    /// <c>chunk_kind</c> of a chunk holding table rows. With it: <see cref="TableIdMetadataKey"/> (when the chunk's
+    /// table could be tied to the entry's stored tables), <c>table_piece</c>/<c>table_pieces</c>,
+    /// <c>table_row_start</c>/<c>table_row_end</c>, and from the stored table <c>table_columns</c>, <c>table_section</c>,
+    /// <c>table_caption</c>, <c>table_page</c>.
+    /// </summary>
+    public const string TableChunkKind = "table";
+
+    /// <summary>Metadata key holding the <see cref="TableArtifact.Id"/> of the table a chunk's rows belong to.</summary>
+    public const string TableIdMetadataKey = "table_id";
+
+    /// <summary>
     /// Whether a GraphRAG service is wired into this pipeline. When false, a memorize call with
     /// <see cref="MemorizeOptions.EnableGraphRAG"/> == true will throw.
     /// </summary>
@@ -349,9 +360,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <summary>
     /// FluxFeed's revision of what it derives from an extraction (the content spans file, the image manifest's
     /// fields). Raise it when that changes, so entries extracted before the change read as outdated
-    /// (<see cref="ExtractionIdentity.PipelineRevision"/>). 1: spans + image page numbers (0.42.0).
+    /// (<see cref="ExtractionIdentity.PipelineRevision"/>). 1: spans + image page numbers (0.42.0). 2: the tables file
+    /// (extracted.tables.json, 0.45.0).
     /// </summary>
-    internal const int ExtractionPipelineRevision = 1;
+    internal const int ExtractionPipelineRevision = 2;
 
     /// <inheritdoc/>
     public ExtractionIdentity? CurrentExtractionIdentity =>
@@ -445,6 +457,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         IReadOnlyDictionary<string, string>? extractionHints = null;
         IReadOnlyList<string>? extractionWarnings = null;
         IReadOnlyList<ContentSpan>? extractionSpans = null;
+        IReadOnlyList<TableArtifact>? extractionTables = null;
 
         if (_extractor != null)
         {
@@ -453,6 +466,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             extractionHints = result.Hints;
             extractionWarnings = result.Warnings;
             extractionSpans = result.Spans;
+            extractionTables = result.Tables;
 
             // Identity and alt text come from the extractor as-is. Stored even when there are none: the manifest
             // describes this extraction, and a re-extraction that finds no images must not keep the previous ones.
@@ -473,6 +487,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             entry,
             extractionSpans is { Count: > 0 } ? ContentSpanSet.For(extractedContent, extractionSpans) : null,
             ct);
+        await _storage.StoreTablesAsync(entry, extractionTables ?? [], ct);
 
         // Update entry to Extracted stage, carrying the extractor's structured diagnostics so a
         // legitimate 0-chunk outcome (scanned/blank document) is explainable downstream instead of
@@ -736,6 +751,40 @@ public sealed partial class VaultPipeline : IVaultPipeline
             metadata[StartSecondsMetadataKey] = startTime.TotalSeconds;
         if (location.EndTime is { } endTime)
             metadata[EndSecondsMetadataKey] = endTime.TotalSeconds;
+        return metadata;
+    }
+
+    /// <summary>
+    /// A text chunk's metadata: its source location, and for a piece of a table the table keys
+    /// (<see cref="TableChunkKind"/>).
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object>? TextChunkMetadata(ContentChunk chunk, IReadOnlyList<TableArtifact>? tables)
+    {
+        var location = LocationMetadata(chunk.Location);
+        if (chunk.Table is not { } piece)
+            return location;
+
+        var metadata = location is null ? new Dictionary<string, object>() : new Dictionary<string, object>(location);
+        metadata["chunk_kind"] = TableChunkKind;
+        metadata["table_piece"] = piece.Piece;
+        metadata["table_pieces"] = piece.Pieces;
+        metadata["table_row_start"] = piece.RowStart;
+        metadata["table_row_end"] = piece.RowEnd;
+
+        if (tables is not null && piece.TableIndex >= 0 && piece.TableIndex < tables.Count)
+        {
+            var table = tables[piece.TableIndex];
+            metadata[TableIdMetadataKey] = table.Id;
+            if (table.Columns.Any(c => !string.IsNullOrWhiteSpace(c)))
+                metadata["table_columns"] = string.Join(" | ", table.Columns);
+            if (table.Section is { } section)
+                metadata["table_section"] = section;
+            if (table.Caption is { } caption)
+                metadata["table_caption"] = caption;
+            if (table.PageNumber is { } page)
+                metadata["table_page"] = page;
+        }
+
         return metadata;
     }
 
@@ -1532,7 +1581,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // Identity is taken from the chunker's raw output, before enrichment prepends a context or
         // security sanitizes: those change the wording of a passage, not which passage it is.
         var textIds = ChunkIdentity.ForTexts(entry.FilepathHash, chunks.Select(c => c.Text).ToList());
-        var textChunks = chunks.Select((c, i) => new VaultChunk(textIds[i], c.Text, LocationMetadata(c.Location))).ToList();
+        // A table piece is tied to the stored table at its position only when the chunked content holds exactly the
+        // tables extraction stored (hand edits or tables in notes would shift the positions).
+        var storedTables = chunks.Any(c => c.Table is not null) ? await _storage.GetTablesAsync(entry, ct) : [];
+        var tablesInChunks = chunks.Where(c => c.Table is not null).Select(c => c.Table!.TableIndex).Distinct().Count();
+        var tables = storedTables.Count > 0 && storedTables.Count == tablesInChunks ? storedTables : null;
+        var textChunks = chunks.Select((c, i) => new VaultChunk(textIds[i], c.Text, TextChunkMetadata(c, tables))).ToList();
         if (SupportsContextualEnrichment)
         {
             // Text chunks only — image-description chunks are already a description, not a passage of the document.
@@ -2485,6 +2539,13 @@ public sealed class ExtractionResult
     /// the extractor has no locations.
     /// </summary>
     public IReadOnlyList<ContentSpan>? Spans { get; init; }
+
+    /// <summary>
+    /// The document's tables as structured rows, in document order — the same tables <see cref="Content"/> carries
+    /// as text. The pipeline stores them beside the extracted text (<see cref="IVault.GetTablesAsync"/>) and ties the
+    /// chunks holding their rows to them (<c>table_id</c>). Null when the extractor found none.
+    /// </summary>
+    public IReadOnlyList<TableArtifact>? Tables { get; init; }
 }
 
 /// <summary>
@@ -2512,7 +2573,23 @@ public sealed record ContentChunk(string Text)
 {
     /// <summary>The pages or time range the chunk covers; null when unknown.</summary>
     public ContentLocation? Location { get; init; }
+
+    /// <summary>
+    /// Where the chunk sits in a table, when it holds table rows: which table of the content (0-based), which piece
+    /// of it, and which body rows. Null for a chunk of prose.
+    /// </summary>
+    public ContentTablePiece? Table { get; init; }
 }
+
+/// <summary>
+/// A chunk's place in a table of the chunked content.
+/// </summary>
+/// <param name="TableIndex">0-based position of the table among the tables of the content.</param>
+/// <param name="Piece">1-based piece of the table this chunk is.</param>
+/// <param name="Pieces">How many pieces the table was split into.</param>
+/// <param name="RowStart">First body row (0-based, header excluded) the chunk holds.</param>
+/// <param name="RowEnd">Last body row (0-based, inclusive) the chunk holds.</param>
+public sealed record ContentTablePiece(int TableIndex, int Piece, int Pieces, int RowStart, int RowEnd);
 
 /// <summary>The pages or time range a chunk covers in its source.</summary>
 public sealed record ContentLocation

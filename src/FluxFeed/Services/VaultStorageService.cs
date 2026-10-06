@@ -144,6 +144,29 @@ public sealed partial class VaultStorageService : IVaultStorageService
         return JsonSerializer.Deserialize<ContentSpanSet>(json, JsonOptions);
     }
 
+    public async Task StoreTablesAsync(VaultEntry entry, IReadOnlyList<TableArtifact> tables, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        if (tables.Count == 0)
+        {
+            if (File.Exists(entry.ExtractedTablesPath))
+                File.Delete(entry.ExtractedTablesPath);
+            return;
+        }
+
+        Directory.CreateDirectory(entry.EntryPath);
+        await AtomicFile.WriteAllTextAsync(entry.ExtractedTablesPath, JsonSerializer.Serialize(tables, JsonOptions), entry.EntryPath, ct);
+    }
+
+    public async Task<IReadOnlyList<TableArtifact>> GetTablesAsync(VaultEntry entry, CancellationToken ct = default)
+    {
+        if (!File.Exists(entry.ExtractedTablesPath))
+            return [];
+
+        var json = await AtomicFile.ReadAllTextAsync(entry.ExtractedTablesPath, ct);
+        return JsonSerializer.Deserialize<List<TableArtifact>>(json, JsonOptions) ?? [];
+    }
+
     public Task StoreImagesAsync(VaultEntry entry, IEnumerable<ImageArtifact> images, CancellationToken ct = default) =>
         WithManifestLockAsync(entry, async () => { await StoreImagesCoreAsync(entry, images, ct); return true; }, ct);
 

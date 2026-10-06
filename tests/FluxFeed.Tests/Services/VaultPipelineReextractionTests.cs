@@ -128,7 +128,7 @@ public sealed class VaultPipelineReextractionTests : IDisposable
 
         await Pipeline(new VersionedExtractor("0.36.2", Old)).MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
 
-        entry.ExtractedBy.Should().Be(new ExtractionIdentity("FileFlux", "0.36.2") { PipelineRevision = 1 });
+        entry.ExtractedBy.Should().Be(new ExtractionIdentity("FileFlux", "0.36.2") { PipelineRevision = VaultPipeline.ExtractionPipelineRevision });
         VaultEntry.Load(entry.EntryPath, _vaultDir)!.ExtractedBy.Should().Be(entry.ExtractedBy, "it survives the metadata round trip");
     }
 

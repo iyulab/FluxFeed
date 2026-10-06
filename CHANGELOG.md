@@ -12,6 +12,27 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.45.0] - Unreleased
+
+### Added
+- **Tables are kept as structured rows.** Extraction stores the document's tables (from FileFlux `RawContent.Tables`)
+  beside the text, and `IVault.GetTablesAsync(filePath)` returns them as `TableArtifact` — position-based `Id`
+  (`t000`, …), `Rows`, `HeaderRows`, `Columns`, page or sheet, `Section`, `Caption`, `MergedCells`, `Confidence`,
+  `DetectionMethod`. Rebuilt on re-extraction, removed with the entry. `ExtractionResult.Tables` carries them from any
+  `IExtractor`. The extraction pipeline revision is raised, so entries extracted before read as outdated and pick the
+  tables up on refresh.
+- **Table chunks say what they are.** A chunk holding table rows is tagged `chunk_kind="table"` with
+  `table_piece`/`table_pieces` and `table_row_start`/`table_row_end`, and — when the chunked text holds exactly the
+  stored tables — `table_id`, `table_columns`, `table_section`, `table_caption`, `table_page`. `ContentChunk.Table`
+  (`ContentTablePiece`) carries the piece from any `IChunker`.
+
+### Changed
+- **Breaking** — `IVault` gains `GetTablesAsync`, and `IVaultStorageService` gains `StoreTablesAsync`/`GetTablesAsync`.
+  Migration: an `IVault` or `IVaultStorageService` implementation (a test double, for instance) adds them — returning
+  an empty list is enough for a double.
+
+---
+
 ## [0.44.5] - 2026-10-06
 
 ### Changed

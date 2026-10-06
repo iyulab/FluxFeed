@@ -74,7 +74,7 @@ public sealed partial class FileFluxChunker : IChunker
 
             var chunks = (processor.Result.Chunks ?? [])
                 .Where(c => !string.IsNullOrWhiteSpace(c.Content))
-                .Select(c => new ContentChunk(c.Content) { Location = ToLocation(c.Location) })
+                .Select(c => new ContentChunk(c.Content) { Location = ToLocation(c.Location), Table = ToTablePiece(c.Props) })
                 .ToList();
 
             LogCreatedChunks(_logger, chunks.Count, content.Length);
@@ -86,6 +86,26 @@ public sealed partial class FileFluxChunker : IChunker
             LogChunkingFailed(_logger, ex);
             throw;
         }
+    }
+
+    /// <summary>
+    /// The chunk's place in a table, from the keys FluxCurator's table-aware chunking writes (FileFlux carries them in
+    /// <c>Props</c>); null for prose.
+    /// </summary>
+    internal static ContentTablePiece? ToTablePiece(IReadOnlyDictionary<string, object>? props)
+    {
+        if (props is null || !props.TryGetValue("table", out var flag) || flag is not true)
+            return null;
+
+        static int Int(IReadOnlyDictionary<string, object> p, string key) =>
+            p.TryGetValue(key, out var value) && value is IConvertible c ? Convert.ToInt32(c, System.Globalization.CultureInfo.InvariantCulture) : 0;
+
+        return new ContentTablePiece(
+            Int(props, "table_index"),
+            Int(props, "table_piece"),
+            Int(props, "table_pieces"),
+            Int(props, "table_row_start"),
+            Int(props, "table_row_end"));
     }
 
     private static ContentLocation? ToLocation(SourceLocation? location)
