@@ -12,7 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [0.45.0] - Unreleased
+## [0.45.0] - 2026-10-06
 
 ### Added
 - **Tables are kept as structured rows.** Extraction stores the document's tables (from FileFlux `RawContent.Tables`)
