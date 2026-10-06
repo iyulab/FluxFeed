@@ -230,7 +230,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     public async Task<MemorizeResult> MemorizeAsync(VaultEntry entry, MemorizeOptions? options = null, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
-        options ??= new MemorizeOptions();
+        options ??= VaultDefaults();
 
         try
         {
@@ -275,13 +275,19 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // Step 3: Extract content from source file → extracted.md
             await ExtractAsync(entry, ct);
 
-            // Step 3.5: Describe extracted images (no-op without a registered enricher)
+            // Step 3.5: Describe extracted images (no-op without a registered enricher). With DeferEnrichment the
+            // enricher is not called here: the images wait for an upgrade, and the entry records that they do.
             var extractedContent = await _storage.GetExtractedContentAsync(entry, ct);
-            var describedImages = await EnrichImagesAsync(entry, extractedContent, ct);
+            var defer = _options.DeferEnrichment;
+            var describedImages = defer
+                ? (await _storage.GetImageManifestAsync(entry, ct)).Count(i => i.IsDescribed)
+                : await EnrichImagesAsync(entry, extractedContent, ct);
+            var imagesPending = defer && await HasPendingImagesAsync(entry, ct);
 
             // Step 3.6: Nothing indexable — no text and no described image. An image-only document
-            // whose images were described is NOT empty: the descriptions are its content.
-            if (string.IsNullOrWhiteSpace(extractedContent) && describedImages == 0)
+            // whose images were described is NOT empty: the descriptions are its content. Neither is one whose images
+            // are waiting for a deferred description: it goes on to refine, so an upgrade has refined.md to work from.
+            if (string.IsNullOrWhiteSpace(extractedContent) && describedImages == 0 && !imagesPending)
             {
                 LogNoContentToIndex(_logger, entry.SourcePath);
 
@@ -298,6 +304,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 }
 
                 MarkMemorizedWithIdentity(entry, 0);
+                entry.SetPendingEnrichment(EnrichmentStages.None);
                 entry.MarkInSync();
                 entry.SaveMetadata();
 
@@ -323,7 +330,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             }
 
             // Step 6: Chunk and index (shared with RefreshAsync)
-            var result = await ChunkAndIndexAsync(entry, options, ct);
+            var result = await ChunkAndIndexAsync(entry, options, defer ? ContextGeneration.ReuseOnly : ContextGeneration.Generate, ct);
 
             // Step 7: Git commit
             string? commitHash = null;
@@ -335,6 +342,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             // Step 8: Update entry state
             MarkMemorizedWithIdentity(entry, result.ChunkCount);
+            entry.SetPendingEnrichment(PendingStages(imagesPending, result.ContextPending));
             entry.MarkInSync(); // Set sync status to InSync after successful memorize
             entry.SaveMetadata();
 
@@ -387,14 +395,14 @@ public sealed partial class VaultPipeline : IVaultPipeline
             if ((await _git.StatusAsync(entry.VaultPath, ct)).ModifiedFiles.Count == 0)
             {
                 LogReextractingOutdated(_logger, entry.SourcePath, entry.ExtractedBy?.ToString() ?? "unrecorded", current.ToString());
-                return await MemorizeAsync(entry, options ?? new MemorizeOptions { CommitMessage = $"re-extract: {current}" }, ct);
+                return await MemorizeAsync(entry, options ?? VaultDefaults($"re-extract: {current}"), ct);
             }
 
             LogOutdatedKeptForVaultEdits(_logger, entry.SourcePath);
         }
 
         var sw = Stopwatch.StartNew();
-        options ??= new MemorizeOptions();
+        options ??= VaultDefaults();
 
         try
         {
@@ -407,11 +415,17 @@ public sealed partial class VaultPipeline : IVaultPipeline
             }
 
             // Retry any image that is still without a description. Already-described images cost
-            // nothing here — the enricher is not called for them.
-            await EnrichImagesAsync(entry, await _storage.GetExtractedContentAsync(entry, ct), ct);
+            // nothing here — the enricher is not called for them. With DeferEnrichment that is left to an upgrade.
+            var defer = _options.DeferEnrichment;
+            if (!defer)
+            {
+                await EnrichImagesAsync(entry, await _storage.GetExtractedContentAsync(entry, ct), ct);
+            }
+
+            var imagesPending = defer && await HasPendingImagesAsync(entry, ct);
 
             // Chunk and index vault content
-            var result = await ChunkAndIndexAsync(entry, options, ct);
+            var result = await ChunkAndIndexAsync(entry, options, defer ? ContextGeneration.ReuseOnly : ContextGeneration.Generate, ct);
 
             // Git commit
             string? commitHash = null;
@@ -423,6 +437,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             // Update entry state
             MarkMemorizedWithIdentity(entry, result.ChunkCount);
+            entry.SetPendingEnrichment(PendingStages(imagesPending, result.ContextPending));
             entry.MarkInSync(); // Set sync status to InSync after successful refresh
             entry.SaveMetadata();
 
@@ -444,6 +459,87 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 : MemorizeResult.Failed(ex.Message, sw.Elapsed, ex.GetType().Name);
         }
     }
+
+    /// <inheritdoc/>
+    public async Task<UpgradeSummary> UpgradeAsync(VaultEntry entry, MemorizeOptions? options = null, CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        options ??= VaultDefaults();
+
+        try
+        {
+            LogStartingUpgrade(_logger, entry.SourcePath, entry.PendingEnrichment.ToString());
+
+            // An upgrade works from what memorize already produced; it never re-extracts.
+            if (!entry.RefinedExists)
+            {
+                throw new InvalidOperationException($"No refined content found at {entry.RefinedMdPath}. Run memorize first.");
+            }
+
+            await EnrichImagesAsync(entry, await _storage.GetExtractedContentAsync(entry, ct), ct);
+            var result = await ChunkAndIndexAsync(entry, options, ContextGeneration.Generate, ct);
+
+            string? commitHash = null;
+            if (!options.SkipCommit)
+            {
+                var message = options.CommitMessage
+                    ?? $"upgrade: {result.ChunkCount} chunks ({result.ReEmbedded} re-embedded, {result.Kept} unchanged)";
+                commitHash = await _git.CommitAsync(entry.VaultPath, message, ct);
+            }
+
+            MarkMemorizedWithIdentity(entry, result.ChunkCount);
+            // Images whose description failed (not yet permanently) are still pending; contexts were generated.
+            var stillPending = PendingStages(await HasPendingImagesAsync(entry, ct), result.ContextPending);
+            entry.SetPendingEnrichment(stillPending);
+            entry.MarkInSync();
+            entry.SaveMetadata();
+
+            sw.Stop();
+            LogUpgradeCompleted(_logger, entry.SourcePath, result.ChunkCount, result.ReEmbedded, result.Kept, sw.Elapsed.TotalSeconds);
+            return new UpgradeSummary(result.ChunkCount, result.ReEmbedded, result.Kept, stillPending, commitHash);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Recorded on the entry, then thrown: the caller (or the queue worker, which classifies it) decides.
+            LogUpgradeFailed(_logger, ex, entry.SourcePath);
+            entry.MarkError(ex.Message);
+            entry.SaveMetadata();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The options a call without its own uses: the vault's chunking settings (<see cref="FileVaultOptions.Chunking"/>), as
+    /// the queue worker passes them. Before, a direct call (background processing off) chunked with the
+    /// <see cref="MemorizeOptions"/> defaults instead, whatever the vault was configured with.
+    /// </summary>
+    private MemorizeOptions VaultDefaults(string? commitMessage = null) => new()
+    {
+        MaxChunkSize = _options.Chunking.MaxChunkSize,
+        OverlapSize = _options.Chunking.OverlapSize,
+        Strategy = _options.Chunking.Strategy,
+        Language = _options.Chunking.Language,
+        CommitMessage = commitMessage,
+    };
+
+    /// <summary>Whether the entry has images an upgrade would still offer to a registered image enricher.</summary>
+    private async Task<bool> HasPendingImagesAsync(VaultEntry entry, CancellationToken ct) =>
+        _imageEnricher != null
+        && (await _storage.GetImageManifestAsync(entry, ct)).Any(i => !i.IsDescribed && i.LastEnrichmentFailure?.IsPermanent != true);
+
+    private static EnrichmentStages PendingStages(bool imagesPending, bool contextPending) =>
+        (imagesPending ? EnrichmentStages.ImageDescriptions : EnrichmentStages.None)
+        | (contextPending ? EnrichmentStages.ContextualEnrichment : EnrichmentStages.None);
+
+    /// <summary>Whether contextual enrichment may call the model (<see cref="Generate"/>) or only reuse stored contexts.</summary>
+    private enum ContextGeneration
+    {
+        Generate,
+        ReuseOnly,
+    }
+
+    /// <summary>What one chunk-and-index pass did.</summary>
+    private readonly record struct IndexOutcome(int ChunkCount, int ContentLength, bool ContextPending = false, int ReEmbedded = 0, int Kept = 0);
 
     public async Task ExtractAsync(VaultEntry entry, CancellationToken ct = default)
     {
@@ -843,15 +939,58 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// the context alone is kept in metadata so a consumer can strip it. A blank context leaves the content untouched
     /// but tags the chunk <c>empty</c> and logs a warning — otherwise it would look exactly like enrichment being off.
     /// </summary>
-    private async Task<List<VaultChunk>> ApplyContextualEnrichmentAsync(
+    private async Task<(List<VaultChunk> Chunks, bool Pending)> ApplyContextualEnrichmentAsync(
         List<VaultChunk> chunks,
         string fullDocumentText,
         string sourcePath,
+        IReadOnlyDictionary<string, DocumentChunk> stored,
+        bool generate,
         CancellationToken ct)
     {
         if (chunks.Count == 0 || string.IsNullOrWhiteSpace(fullDocumentText))
         {
-            return chunks;
+            return (chunks, false);
+        }
+
+        // A context written for this passage of this same document text is reused instead of asking the model again:
+        // the chunk id names the passage, the recorded document hash names the text the context was written from.
+        var documentHash = ContextDocumentHash(fullDocumentText);
+        var result = new VaultChunk[chunks.Count];
+        var toGenerate = new List<int>();
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            if (stored.TryGetValue(chunks[i].Id, out var row)
+                && MetadataText(row.Metadata, EnrichmentMetadataKey) == "contextual"
+                && MetadataText(row.Metadata, ContextDocumentHashMetadataKey) == documentHash
+                && MetadataText(row.Metadata, ContextSummaryMetadataKey) is { Length: > 0 } storedContext)
+            {
+                result[i] = WithContext(chunks[i], storedContext, documentHash);
+            }
+            else
+            {
+                toGenerate.Add(i);
+            }
+        }
+
+        if (toGenerate.Count < chunks.Count)
+        {
+            LogContextualEnrichmentReused(_logger, chunks.Count - toGenerate.Count, chunks.Count, sourcePath);
+        }
+
+        if (toGenerate.Count == 0)
+        {
+            return (result.ToList(), false);
+        }
+
+        if (!generate)
+        {
+            // Deferred: the rest stays as it is until an upgrade generates its contexts.
+            foreach (var i in toGenerate)
+            {
+                result[i] = chunks[i];
+            }
+
+            return (result.ToList(), true);
         }
 
         IReadOnlyList<string> contexts;
@@ -859,50 +998,147 @@ public sealed partial class VaultPipeline : IVaultPipeline
         try
         {
             contexts = await _contextualEnrichment!.GenerateContextBatchAsync(
-                chunks.Select(c => c.Content).ToList(),
+                toGenerate.Select(i => chunks[i].Content).ToList(),
                 fullDocumentText,
                 ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && _options.ContextualEnrichment.ContinueOnError)
         {
-            LogContextualEnrichmentFailed(_logger, sourcePath, chunks.Count, ex);
-            return chunks.Select(c => c with { Metadata = WithMetadata(c.Metadata, EnrichmentMetadataKey, "failed") }).ToList();
+            LogContextualEnrichmentFailed(_logger, sourcePath, toGenerate.Count, ex);
+            foreach (var i in toGenerate)
+            {
+                result[i] = chunks[i] with { Metadata = WithMetadata(chunks[i].Metadata, EnrichmentMetadataKey, "failed") };
+            }
+
+            return (result.ToList(), false);
         }
 
-        if (contexts.Count != chunks.Count)
+        if (contexts.Count != toGenerate.Count)
         {
             throw new InvalidOperationException(
-                $"Contextual enrichment returned {contexts.Count} context(s) for {chunks.Count} chunk(s) of '{sourcePath}'; the port must return exactly one per chunk, in order.");
+                $"Contextual enrichment returned {contexts.Count} context(s) for {toGenerate.Count} chunk(s) of '{sourcePath}'; the port must return exactly one per chunk, in order.");
         }
 
-        var result = new List<VaultChunk>(chunks.Count);
         var enrichedCount = 0;
         var emptyCount = 0;
-        for (var i = 0; i < chunks.Count; i++)
+        for (var k = 0; k < toGenerate.Count; k++)
         {
-            var chunk = chunks[i];
-            var context = contexts[i]?.Trim();
+            var i = toGenerate[k];
+            var context = contexts[k]?.Trim();
             if (string.IsNullOrEmpty(context))
             {
                 emptyCount++;
-                result.Add(chunk with { Metadata = WithMetadata(chunk.Metadata, EnrichmentMetadataKey, "empty") });
+                result[i] = chunks[i] with { Metadata = WithMetadata(chunks[i].Metadata, EnrichmentMetadataKey, "empty") };
                 continue;
             }
 
             enrichedCount++;
-            var metadata = WithMetadata(chunk.Metadata, ContextSummaryMetadataKey, context);
-            metadata = WithMetadata(metadata, EnrichmentMetadataKey, "contextual");
-            result.Add(chunk with { Content = context + "\n\n" + chunk.Content, Metadata = metadata });
+            result[i] = WithContext(chunks[i], context, documentHash);
         }
 
         if (emptyCount > 0)
         {
-            LogContextualEnrichmentReturnedNoContext(_logger, emptyCount, chunks.Count, sourcePath);
+            LogContextualEnrichmentReturnedNoContext(_logger, emptyCount, toGenerate.Count, sourcePath);
         }
 
-        LogContextualEnrichmentApplied(_logger, enrichedCount, chunks.Count, sourcePath, stopwatch.ElapsedMilliseconds);
-        return result;
+        LogContextualEnrichmentApplied(_logger, enrichedCount, toGenerate.Count, sourcePath, stopwatch.ElapsedMilliseconds);
+        return (result.ToList(), false);
     }
+
+    /// <summary>
+    /// Metadata key holding a hash of the document text a chunk's context was written from — what lets a later pass reuse
+    /// the context only while that text is unchanged.
+    /// </summary>
+    public const string ContextDocumentHashMetadataKey = "context_doc_hash";
+
+    private static VaultChunk WithContext(VaultChunk chunk, string context, string documentHash)
+    {
+        var metadata = WithMetadata(chunk.Metadata, ContextSummaryMetadataKey, context);
+        metadata = WithMetadata(metadata, EnrichmentMetadataKey, "contextual");
+        metadata = WithMetadata(metadata, ContextDocumentHashMetadataKey, documentHash);
+        return chunk with { Content = context + "\n\n" + chunk.Content, Metadata = metadata };
+    }
+
+    private static string ContextDocumentHash(string text) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
+
+    private static readonly IReadOnlyDictionary<string, DocumentChunk> EmptyStoredChunks = new Dictionary<string, DocumentChunk>();
+
+    /// <summary>
+    /// The rows currently stored under <paramref name="ids"/>. Empty when the store cannot say (no vector store, or a store
+    /// that does not implement the lookup) — then nothing is reused or skipped, which is today's behaviour.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, DocumentChunk>> GetStoredChunksAsync(IReadOnlyList<string> ids, CancellationToken ct)
+    {
+        if (_vectorStore is null || ids.Count == 0)
+        {
+            return EmptyStoredChunks;
+        }
+
+        try
+        {
+            var rows = await _vectorStore.GetChunksByIdsAsync(ids, ct);
+            var byId = new Dictionary<string, DocumentChunk>(StringComparer.Ordinal);
+            foreach (var row in rows)
+            {
+                byId[row.Id] = row;
+            }
+
+            return byId;
+        }
+        catch (Exception ex) when (ex is NotSupportedException or NotImplementedException)
+        {
+            return EmptyStoredChunks;
+        }
+    }
+
+    /// <summary>Counts of one index pass: rows embedded and written, rows left as they were.</summary>
+    private sealed class IndexCounters
+    {
+        public int ReEmbedded;
+        public int Kept;
+    }
+
+    /// <summary>
+    /// Whether the stored row is exactly the row about to be written — same text, position and metadata — so writing it
+    /// again (and embedding its text again) would change nothing. Metadata values are compared in their JSON form, because
+    /// a store may hand them back as JSON; any difference, including one of representation, means «write it».
+    /// </summary>
+    private static bool IsUnchanged(DocumentChunk candidate, IReadOnlyDictionary<string, DocumentChunk> stored) =>
+        stored.TryGetValue(candidate.Id, out var row)
+        && string.Equals(row.Content, candidate.Content, StringComparison.Ordinal)
+        && row.ChunkIndex == candidate.ChunkIndex
+        && row.TotalChunks == candidate.TotalChunks
+        && SameMetadata(row.Metadata, candidate.Metadata);
+
+    private static bool SameMetadata(IReadOnlyDictionary<string, object>? a, IReadOnlyDictionary<string, object>? b)
+    {
+        var left = a ?? EmptyMetadata;
+        var right = b ?? EmptyMetadata;
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        foreach (var (key, value) in left)
+        {
+            if (!right.TryGetValue(key, out var other) || JsonForm(value) != JsonForm(other))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static readonly IReadOnlyDictionary<string, object> EmptyMetadata = new Dictionary<string, object>();
+
+    private static string JsonForm(object? value) => value switch
+    {
+        null => "null",
+        System.Text.Json.JsonElement json => json.GetRawText(),
+        _ => System.Text.Json.JsonSerializer.Serialize(value),
+    };
 
     private static IReadOnlyDictionary<string, object> WithMetadata(IReadOnlyDictionary<string, object>? existing, string key, object value)
     {
@@ -1494,9 +1730,10 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
     }
 
-    private async Task<(int ChunkCount, int ContentLength)> ChunkAndIndexAsync(
+    private async Task<IndexOutcome> ChunkAndIndexAsync(
         VaultEntry entry,
         MemorizeOptions options,
+        ContextGeneration contextGeneration,
         CancellationToken ct)
     {
         // Indexing a document REPLACES the rows previously written for it, and the replacement is
@@ -1559,7 +1796,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // one path where the swap commits with no new generation to swap to.
             await DeleteChunksAsync(previousChunkIds, GraphPartitionFor(options.GraphRAGOptions), ct);
             LogNoContentToIndex(_logger, entry.SourcePath);
-            return (0, 0);
+            return new IndexOutcome(0, 0);
         }
 
         // Where stretches of the refined text came from (pages, time ranges). The offsets index the text extraction
@@ -1612,10 +1849,19 @@ public sealed partial class VaultPipeline : IVaultPipeline
         var tablesInChunks = chunks.Where(c => c.Table is not null).Select(c => c.Table!.TableIndex).Distinct().Count();
         var tables = storedTables.Count > 0 && storedTables.Count == tablesInChunks ? storedTables : null;
         var textChunks = chunks.Select((c, i) => new VaultChunk(textIds[i], c.Text, TextChunkMetadata(c, tables))).ToList();
+
+        // What this document's rows hold now, by id: a stored context can be reused and a row identical to its
+        // replacement need not be embedded again. A resumed run writes only its tail and compares nothing.
+        var stored = isResumedRun
+            ? EmptyStoredChunks
+            : await GetStoredChunksAsync(textChunks.Select(c => c.Id).Concat(imageChunks.Select(c => c.Id)).ToList(), ct);
+
+        var contextPending = false;
         if (SupportsContextualEnrichment)
         {
             // Text chunks only — image-description chunks are already a description, not a passage of the document.
-            textChunks = await ApplyContextualEnrichmentAsync(textChunks, combinedContent, entry.SourcePath, ct);
+            (textChunks, contextPending) = await ApplyContextualEnrichmentAsync(
+                textChunks, combinedContent, entry.SourcePath, stored, contextGeneration == ContextGeneration.Generate, ct);
         }
 
         var allChunks = textChunks
@@ -1634,6 +1880,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
 
         // Index to vector store
+        var counters = new IndexCounters();
         if (_vectorStore != null && _embeddingService != null)
         {
             IReadOnlyList<DocumentChunk> written;
@@ -1644,7 +1891,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             var attemptedChunkIds = new List<string>();
             try
             {
-                written = await IndexChunksAsync(entry, allChunks, options, attemptedChunkIds, ct);
+                written = await IndexChunksAsync(entry, allChunks, options, attemptedChunkIds, stored, counters, ct);
             }
             catch (Exception ex)
             {
@@ -1708,7 +1955,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             LogNoVectorStoreSkipIndexing(_logger);
         }
 
-        return (allChunks.Count, combinedContent.Length);
+        return new IndexOutcome(allChunks.Count, combinedContent.Length, contextPending, counters.ReEmbedded, counters.Kept);
     }
 
     /// <summary>
@@ -2009,19 +2256,31 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
     }
 
-    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, MemorizeOptions options, ICollection<string> attemptedChunkIds, CancellationToken ct)
+    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksAsync(
+        VaultEntry entry,
+        IReadOnlyList<VaultChunk> chunks,
+        MemorizeOptions options,
+        ICollection<string> attemptedChunkIds,
+        IReadOnlyDictionary<string, DocumentChunk> stored,
+        IndexCounters counters,
+        CancellationToken ct)
     {
+        // A row identical to its replacement is left in place rather than embedded and written again. Not with GraphRAG:
+        // the graph is rebuilt from the written chunks, and a kept row carries no embedding to hand it.
+        var keepUnchanged = stored.Count > 0 && !(options.EnableGraphRAG ?? (_graphRAGService != null));
+        var keep = keepUnchanged ? stored : EmptyStoredChunks;
+
         // Branch: when CheckpointCallback is set (job-queue path), use per-chunk processing
         // for crash-resilient resume. Otherwise, use the existing batch path (faster for the
         // common case of one-shot direct API calls).
         IReadOnlyList<DocumentChunk> indexedChunks;
         if (options.CheckpointCallback != null)
         {
-            indexedChunks = await IndexChunksResumableAsync(entry, chunks, options.StartFromChunkIndex, options.CheckpointCallback, attemptedChunkIds, ct);
+            indexedChunks = await IndexChunksResumableAsync(entry, chunks, options.StartFromChunkIndex, options.CheckpointCallback, attemptedChunkIds, keep, counters, ct);
         }
         else
         {
-            indexedChunks = await IndexChunksBatchAsync(entry, chunks, attemptedChunkIds, ct);
+            indexedChunks = await IndexChunksBatchAsync(entry, chunks, attemptedChunkIds, keep, counters, ct);
         }
 
         // Keyword indexing — the third search backend alongside vector and graph. Unconditional
@@ -2149,28 +2408,43 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// Used by direct callers of MemorizeAsync (no checkpoint hooks).
     /// </summary>
     /// <returns>The embedded chunks that were stored, for downstream GraphRAG indexing.</returns>
-    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksBatchAsync(VaultEntry entry, IReadOnlyList<VaultChunk> chunks, ICollection<string> attemptedChunkIds, CancellationToken ct)
+    private async Task<IReadOnlyList<DocumentChunk>> IndexChunksBatchAsync(
+        VaultEntry entry,
+        IReadOnlyList<VaultChunk> chunks,
+        ICollection<string> attemptedChunkIds,
+        IReadOnlyDictionary<string, DocumentChunk> keep,
+        IndexCounters counters,
+        CancellationToken ct)
     {
         var documentId = entry.FilepathHash;
-
-        // Generate embeddings
-        var embeddings = await _embeddingService!.GenerateEmbeddingsBatchAsync(chunks.Select(c => c.Content).ToList(), ct);
-        var embeddingList = embeddings.ToList();
-
-        if (embeddingList.Count != chunks.Count)
-        {
-            throw new InvalidOperationException(
-                $"Embedding count mismatch: expected {chunks.Count}, got {embeddingList.Count}");
-        }
 
         // Create document chunks
         var documentChunks = new List<DocumentChunk>();
         for (var i = 0; i < chunks.Count; i++)
         {
             var chunk = CreateDocumentChunk(documentId, chunks[i], i, chunks.Count);
-            chunk.SetEmbedding(embeddingList[i]);
             ApplyChunkMetadata(chunk, entry, chunks[i].Metadata);
             documentChunks.Add(chunk);
+        }
+
+        // Only rows that differ from what is stored are embedded and written.
+        var changed = documentChunks.Where(c => !IsUnchanged(c, keep)).ToList();
+        counters.Kept += documentChunks.Count - changed.Count;
+        counters.ReEmbedded += changed.Count;
+
+        if (changed.Count > 0)
+        {
+            var embeddingList = (await _embeddingService!.GenerateEmbeddingsBatchAsync(changed.Select(c => c.Content).ToList(), ct)).ToList();
+            if (embeddingList.Count != changed.Count)
+            {
+                throw new InvalidOperationException(
+                    $"Embedding count mismatch: expected {changed.Count}, got {embeddingList.Count}");
+            }
+
+            for (var i = 0; i < changed.Count; i++)
+            {
+                changed[i].SetEmbedding(embeddingList[i]);
+            }
         }
 
         // Recorded before the write, not after: deleting an id that never landed is a no-op, while
@@ -2182,9 +2456,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
         }
 
         // Store in vector store
-        var storedIds = await _vectorStore!.StoreBatchAsync(documentChunks, ct);
-        var storedCount = storedIds.Count();
+        var storedCount = changed.Count == 0 ? 0 : (await _vectorStore!.StoreBatchAsync(changed, ct)).Count();
         LogIndexedChunks(_logger, storedCount, documentId);
+        if (changed.Count < documentChunks.Count)
+        {
+            LogKeptUnchangedChunks(_logger, documentChunks.Count - changed.Count, documentChunks.Count, documentId);
+        }
 
         return documentChunks;
     }
@@ -2207,6 +2484,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         int startFromChunk,
         Func<int, CancellationToken, Task> checkpointCallback,
         ICollection<string> attemptedChunkIds,
+        IReadOnlyDictionary<string, DocumentChunk> keep,
+        IndexCounters counters,
         CancellationToken ct)
     {
         var documentId = entry.FilepathHash;
@@ -2224,12 +2503,22 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 continue;
             }
 
-            // Embed single chunk
-            var embedding = await _embeddingService!.GenerateEmbeddingAsync(chunks[i].Content, ct);
-
             var chunk = CreateDocumentChunk(documentId, chunks[i], i, chunks.Count);
-            chunk.SetEmbedding(embedding);
             ApplyChunkMetadata(chunk, entry, chunks[i].Metadata);
+
+            if (IsUnchanged(chunk, keep))
+            {
+                // The stored row is this row: nothing to embed or write. It is still this generation's row.
+                attemptedChunkIds.Add(chunk.Id);
+                await checkpointCallback(i, ct);
+                processedChunks.Add(chunk);
+                counters.Kept++;
+                continue;
+            }
+
+            // Embed single chunk
+            chunk.SetEmbedding(await _embeddingService!.GenerateEmbeddingAsync(chunks[i].Content, ct));
+            counters.ReEmbedded++;
 
             // Recorded before the write for the same reason as the batch path: a chunk that lands
             // and is not recorded is a row the rollback will never delete.
@@ -2493,6 +2782,21 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Moving a re-keyed leg of {SourcePath} back failed; its rows may be split between the old and the new document id")]
     private static partial void LogMoveRollbackFailed(ILogger logger, Exception exception, string sourcePath);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Reused {ReusedCount}/{ChunkCount} stored contexts for {SourcePath} (passage and document text unchanged)")]
+    private static partial void LogContextualEnrichmentReused(ILogger logger, int reusedCount, int chunkCount, string sourcePath);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Kept {KeptCount}/{ChunkCount} unchanged chunks of {DocumentId} without re-embedding")]
+    private static partial void LogKeptUnchangedChunks(ILogger logger, int keptCount, int chunkCount, string documentId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Starting upgrade for {SourcePath} (pending: {Pending})")]
+    private static partial void LogStartingUpgrade(ILogger logger, string sourcePath, string pending);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Upgrade completed for {SourcePath}: {ChunkCount} chunks, {ReEmbedded} re-embedded, {Kept} unchanged, in {Seconds:F1}s")]
+    private static partial void LogUpgradeCompleted(ILogger logger, string sourcePath, int chunkCount, int reEmbedded, int kept, double seconds);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Upgrade failed for {SourcePath}")]
+    private static partial void LogUpgradeFailed(ILogger logger, Exception exception, string sourcePath);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Contextual enrichment failed for {SourcePath}; indexing {ChunkCount} chunks without context")]
     private static partial void LogContextualEnrichmentFailed(ILogger logger, string sourcePath, int chunkCount, Exception exception);

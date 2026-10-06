@@ -1535,6 +1535,57 @@ public sealed partial class VaultManager : IVault
             e.SyncStatus == SyncStatus.RemovalPartial).ToList();
     }
 
+    public async Task<IReadOnlyList<VaultEntry>> GetPendingEnrichmentAsync(CancellationToken ct = default)
+    {
+        var entries = await ListAsync(ct: ct);
+        return entries.Where(e => e.PendingEnrichment != EnrichmentStages.None).ToList();
+    }
+
+    public async Task<VaultEntry> UpgradeAsync(
+        string filePath,
+        VaultJobPriority priority = VaultJobPriority.Low,
+        bool waitForCompletion = false,
+        CancellationToken ct = default)
+    {
+        var fullPath = Path.GetFullPath(filePath);
+
+        var entry = await GetAsync(fullPath, ct)
+            ?? throw new InvalidOperationException($"No vault entry exists for: {fullPath}. Use MemorizeAsync first.");
+
+        // An upgrade works from memorize's output and never re-extracts, so refined.md is its precondition.
+        if (!entry.RefinedExists)
+            throw new InvalidOperationException(
+                $"No refined content found at {entry.RefinedMdPath}. Run memorize first. Current stage: {entry.Stage}");
+
+        if (!_options.EnableBackgroundProcessing)
+        {
+            try
+            {
+                await _pipeline.UpgradeAsync(entry, ct: ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                throw new InvalidOperationException($"Upgrade failed for {fullPath}: {ex.Message}", ex);
+            }
+
+            return await GetByHashAsync(entry.FilepathHash, ct) ?? entry;
+        }
+
+        var job = await _queue.EnqueueUpgradeAsync(entry.FilepathHash, fullPath, priority, _options.EffectiveQueueGroupKey, ct);
+        LogQueuedUpgrade(_logger, fullPath);
+        if (!waitForCompletion)
+            return entry;
+
+        var terminal = await _queue.WaitForJobAsync(job.Id, ct);
+        if (terminal.Status == VaultJobStatus.Failed)
+            throw new InvalidOperationException(
+                $"Upgrade job failed for {fullPath}: {terminal.ErrorMessage ?? "unknown error"}");
+        if (terminal.Status == VaultJobStatus.Cancelled)
+            throw new OperationCanceledException($"Upgrade job was cancelled for {fullPath}.");
+
+        return await GetByHashAsync(entry.FilepathHash, ct) ?? entry;
+    }
+
     public async Task<IReadOnlyList<VaultEntry>> GetErrorEntriesAsync(CancellationToken ct = default)
     {
         var entries = await ListAsync(ct: ct);
@@ -1746,6 +1797,9 @@ public sealed partial class VaultManager : IVault
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Queued refresh job for {FilePath}")]
     private static partial void LogQueuedRefresh(ILogger logger, string filePath);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Queued upgrade for {FilePath}")]
+    private static partial void LogQueuedUpgrade(ILogger logger, string filePath);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to scan folder {Path}")]
     private static partial void LogFailedToScanFolder(ILogger logger, Exception exception, string path);

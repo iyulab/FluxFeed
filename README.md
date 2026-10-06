@@ -742,7 +742,8 @@ what gets stored, embedded and keyword-indexed, so retrieval and display agree; 
 chunk metadata (`context_summary`) and the step is recorded as `enrichment=contextual`. A port that succeeds but
 returns a blank context leaves that chunk's text as it was, tags it `enrichment=empty` and logs a warning — so "the
 model said nothing" is never mistaken for "enrichment is off". Image-description chunks
-are not enriched. Refresh re-runs it, since it happens at the chunk stage.
+are not enriched. A refresh or re-memorize reuses a chunk's stored context when its passage and the document text are
+unchanged (recorded as `context_doc_hash`), and asks the port only for the rest.
 
 The port is FluxIndex.Core's own `IContextualEnrichmentService` (`GenerateContextBatchAsync(chunks, fullDocumentText)`
 → one context per chunk, in order). FluxFeed does not depend on any particular LLM library for it; the FluxImprover-backed
@@ -767,6 +768,24 @@ services.AddFileVaultWithFluxIndex(options =>
 Cost is whatever the port spends — typically one generation call per chunk with the whole document in the prompt,
 so budget it per document size. With `ContinueOnError = false` an enrichment failure fails the memorize instead of
 degrading; a port that returns the wrong number of contexts is always a failure (never a silent misalignment).
+
+### Staged indexing — searchable first, enriched later
+
+Every index pass embeds and writes only the chunks whose stored row differs (text, position or metadata); unchanged
+chunks keep their vectors. With `options.DeferEnrichment = true` a memorize or refresh also skips the slow LLM stages:
+the file is searchable on its native chunks, image descriptions and contextual enrichment wait, and the entry records
+what is left in `VaultEntry.PendingEnrichment` (`ImageDescriptions`, `ContextualEnrichment`). When to run them is the
+host's call:
+
+```csharp
+using FluxFeed.Domain.Entities;   // VaultJobPriority
+
+foreach (var pending in await vault.GetPendingEnrichmentAsync())
+    await vault.UpgradeAsync(pending.SourcePath, VaultJobPriority.Low, waitForCompletion: true);
+```
+
+`UpgradeAsync` runs the pending stages without re-extracting and re-embeds only the chunks whose text changed; with
+background processing it is a queued job (`VaultJobType.Upgrade`) like a refresh.
 
 ## Multi-tenant
 

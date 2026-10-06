@@ -189,6 +189,16 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Refresh, priority, groupKey, ct);
     }
 
+    public Task<VaultJob> EnqueueUpgradeAsync(
+        string filepathHash,
+        string filePath,
+        VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
+        CancellationToken ct = default)
+    {
+        return EnqueueJobAsync(filepathHash, filePath, VaultJobType.Upgrade, priority, groupKey, ct);
+    }
+
     public Task<VaultJob> EnqueueRemoveAsync(
         string filepathHash,
         string filePath,

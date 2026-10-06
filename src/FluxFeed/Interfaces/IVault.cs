@@ -496,6 +496,27 @@ public interface IVault
     Task<IReadOnlyList<VaultEntry>> GetErrorEntriesAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Gets entries still waiting for an enrichment stage (<see cref="VaultEntry.PendingEnrichment"/> is not
+    /// <see cref="Domain.Enums.EnrichmentStages.None"/>) — what <see cref="Options.FileVaultOptions.DeferEnrichment"/> left for
+    /// an upgrade. The host decides when to call <see cref="UpgradeAsync"/> for them.
+    /// </summary>
+    Task<IReadOnlyList<VaultEntry>> GetPendingEnrichmentAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Runs the enrichment stages a file's entry is still waiting for — image descriptions, contextual enrichment — and
+    /// re-indexes only the chunks whose text changed; unchanged chunks keep their vectors and the source is not
+    /// re-extracted. With background processing it queues an upgrade job (same priority and grouping rules as a
+    /// refresh); pass <paramref name="waitForCompletion"/> = true to get the upgraded entry back.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No entry exists, it has no refined content yet, or the upgrade failed.</exception>
+    /// <exception cref="OperationCanceledException">The upgrade job was cancelled.</exception>
+    Task<VaultEntry> UpgradeAsync(
+        string filePath,
+        VaultJobPriority priority = VaultJobPriority.Low,
+        bool waitForCompletion = false,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Gets entries that need synchronization (SourceModified or VaultModified).
     /// </summary>
     Task<IReadOnlyList<VaultEntry>> GetEntriesNeedingSyncAsync(CancellationToken ct = default);

@@ -187,6 +187,7 @@ public class VaultBackgroundServiceRecordFailureTests : IDisposable
         // The remaining interface members are unused by VaultBackgroundService in these tests
         public Task<VaultJob> EnqueueMemorizeAsync(string h, string p, VaultJobPriority pr = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<VaultJob> EnqueueRefreshAsync(string h, string p, VaultJobPriority pr = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<VaultJob> EnqueueUpgradeAsync(string h, string p, VaultJobPriority pr = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<VaultJob> EnqueueRemoveAsync(string h, string p, VaultJobPriority pr = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => EnqueueRemoveAsync(h, p, ct: ct);
         public Task<IReadOnlyList<VaultJob>> EnqueueBatchAsync(IEnumerable<(string, string)> files, VaultJobType jobType = VaultJobType.Memorize, VaultJobPriority priority = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<bool> RetryAsync(Guid jobId, CancellationToken ct = default) => Task.FromResult(false);

@@ -114,6 +114,7 @@ public class VaultBackgroundServiceSignalingTests
         // The remaining interface members are unused by VaultBackgroundService in these tests
         public Task<VaultJob> EnqueueMemorizeAsync(string h, string p, VaultJobPriority pr = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<VaultJob> EnqueueRefreshAsync(string h, string p, VaultJobPriority pr = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<VaultJob> EnqueueUpgradeAsync(string h, string p, VaultJobPriority pr = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<VaultJob> EnqueueRemoveAsync(string h, string p, VaultJobPriority pr = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<VaultJob>> EnqueueBatchAsync(IEnumerable<(string, string)> files, VaultJobType jobType = VaultJobType.Memorize, VaultJobPriority priority = VaultJobPriority.Normal, string? groupKey = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task CompleteAsync(Guid jobId, CancellationToken ct = default) => Task.CompletedTask;

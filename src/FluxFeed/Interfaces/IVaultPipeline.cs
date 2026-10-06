@@ -109,6 +109,14 @@ public interface IVaultPipeline
     Task<MemorizeResult> RefreshAsync(VaultEntry entry, MemorizeOptions? options = null, CancellationToken ct = default);
 
     /// <summary>
+    /// Upgrade pipeline: describe the entry's pending images, generate contexts for its text chunks, and re-index only the
+    /// chunks whose text changed (no re-extraction). Clears <see cref="VaultEntry.PendingEnrichment"/> for the stages it
+    /// completed. The counterpart of <see cref="Options.FileVaultOptions.DeferEnrichment"/>. Throws when the upgrade fails
+    /// (the entry is marked with the error first); the previous rows stay searchable.
+    /// </summary>
+    Task<UpgradeSummary> UpgradeAsync(VaultEntry entry, MemorizeOptions? options = null, CancellationToken ct = default);
+
+    /// <summary>
     /// Extract content from source file to extracted.md (not git-tracked).
     /// </summary>
     Task ExtractAsync(VaultEntry entry, CancellationToken ct = default);

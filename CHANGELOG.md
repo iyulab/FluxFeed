@@ -12,6 +12,32 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.47.0] - Unreleased
+
+### Added
+- **Staged indexing.** `FileVaultOptions.DeferEnrichment` makes a file searchable on its native chunks first: memorize
+  and refresh skip image descriptions and contextual enrichment and record what is left in
+  `VaultEntry.PendingEnrichment`. `IVault.GetPendingEnrichmentAsync()` lists those entries, and
+  `IVault.UpgradeAsync(path, priority, waitForCompletion)` (a queued `VaultJobType.Upgrade` job with background
+  processing) runs the pending stages without re-extracting. Off by default.
+- **An index pass embeds only what changed.** A chunk whose stored row is identical (text, position, metadata) is kept
+  as it is instead of being embedded and written again — a refresh of unchanged content embeds nothing. Not with
+  GraphRAG enabled (the graph is rebuilt from the written chunks).
+- **Stored contexts are reused.** Contextual enrichment asks the port only for chunks without a stored context for the
+  same passage of the same document text (`context_doc_hash` in chunk metadata).
+
+### Fixed
+- **A vault with background processing off chunks with its configured settings.** Direct memorize/refresh/upgrade calls
+  used the `MemorizeOptions` defaults (1024 / 128 / `Auto`) instead of `FileVaultOptions.Chunking`, as the queue worker
+  passes them; a refresh that re-extracted an outdated entry did the same.
+
+### Changed
+- **Breaking**: `IVault` gains `GetPendingEnrichmentAsync` and `UpgradeAsync`, `IVaultQueueService` gains
+  `EnqueueUpgradeAsync`, and `IVaultPipeline` gains `UpgradeAsync`. Migration: an implementation or hand-written double
+  of these interfaces adds the members (a test double can throw `NotImplementedException`).
+
+---
+
 ## [0.46.1] - 2026-10-06
 
 ### Changed

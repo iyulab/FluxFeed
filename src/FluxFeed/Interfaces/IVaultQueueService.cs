@@ -63,6 +63,17 @@ public interface IVaultQueueService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Enqueues an upgrade job (<see cref="VaultJobType.Upgrade"/>), or merges into one already queued for the same file —
+    /// same coalescing and grouping as <see cref="EnqueueRefreshAsync"/>.
+    /// </summary>
+    Task<VaultJob> EnqueueUpgradeAsync(
+        string filepathHash,
+        string filePath,
+        VaultJobPriority priority = VaultJobPriority.Normal,
+        string? groupKey = null,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Enqueues a remove job, or merges into one already queued for the same file and type —
     /// raising that job to this priority when this request is the more urgent one.
     /// </summary>

@@ -163,6 +163,16 @@ public sealed class VaultEntry
     public ExtractionIdentity? ExtractedBy { get; private set; }
 
     /// <summary>
+    /// Enrichment stages this entry is still waiting for — set when <c>FileVaultOptions.DeferEnrichment</c> indexed it
+    /// without them, cleared by the upgrade (<c>IVault.UpgradeAsync</c>), memorize or refresh that ran them. The entry is
+    /// searchable meanwhile, on its native chunks. <see cref="EnrichmentStages.None"/> for entries written before the field.
+    /// </summary>
+    public EnrichmentStages PendingEnrichment { get; private set; }
+
+    /// <summary>Records which enrichment stages are still pending (see <see cref="PendingEnrichment"/>).</summary>
+    internal void SetPendingEnrichment(EnrichmentStages stages) => PendingEnrichment = stages;
+
+    /// <summary>
     /// Current synchronization status with source file and vector store.
     /// </summary>
     public SyncStatus SyncStatus { get; private set; }
@@ -256,6 +266,7 @@ public sealed class VaultEntry
                 ExtractionHints = meta.ExtractionHints is { Count: > 0 } ? meta.ExtractionHints : null,
                 ExtractionWarnings = meta.ExtractionWarnings is { Count: > 0 } ? meta.ExtractionWarnings : null,
                 ExtractedBy = meta.ExtractedBy,
+                PendingEnrichment = meta.PendingEnrichment,
                 SyncStatus = meta.SyncStatus,
                 LastSyncCheckAt = meta.LastSyncCheckAt,
                 RemovalPhase = meta.RemovalPhase
@@ -557,6 +568,7 @@ public sealed class VaultEntry
             ExtractionHints = ExtractionHints?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
             ExtractionWarnings = ExtractionWarnings?.ToList(),
             ExtractedBy = ExtractedBy,
+            PendingEnrichment = PendingEnrichment,
             SyncStatus = SyncStatus,
             LastSyncCheckAt = LastSyncCheckAt,
             RemovalPhase = RemovalPhase
@@ -669,6 +681,7 @@ public sealed class VaultEntry
         public Dictionary<string, string>? ExtractionHints { get; set; }
         public List<string>? ExtractionWarnings { get; set; }
         public ExtractionIdentity? ExtractedBy { get; set; }
+        public EnrichmentStages PendingEnrichment { get; set; }
 
         // SyncStatus fields
         public SyncStatus SyncStatus { get; set; }

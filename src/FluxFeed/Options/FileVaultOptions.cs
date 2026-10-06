@@ -174,6 +174,16 @@ public sealed class FileVaultOptions
     public LlmRefineOptions? LlmRefine { get; set; }
 
     /// <summary>
+    /// Index a file on its native chunks first and leave the slow LLM stages — image descriptions, contextual enrichment
+    /// — for a later <c>IVault.UpgradeAsync</c>. With it on, memorize and refresh make the entry searchable without
+    /// calling the image enricher or generating contexts (a context already stored for an unchanged passage of an
+    /// unchanged document is reused), and record what is left in <see cref="Domain.Entities.VaultEntry.PendingEnrichment"/>;
+    /// <c>IVault.GetPendingEnrichmentAsync</c> lists those entries. When to upgrade is the host's call. Default false:
+    /// every stage runs inline, as before.
+    /// </summary>
+    public bool DeferEnrichment { get; set; }
+
+    /// <summary>
     /// <see cref="MaxFileSizeMB"/> in bytes.
     /// </summary>
     public long MaxFileSizeBytes => MaxFileSizeMB * 1024L * 1024L;

@@ -301,7 +301,13 @@ public enum VaultJobType
     /// <summary>
     /// Remove: delete chunks from vector store.
     /// </summary>
-    Remove = 2
+    Remove = 2,
+
+    /// <summary>
+    /// Upgrade: run the enrichment stages an entry is still waiting for (image descriptions, contextual enrichment) and
+    /// re-index only the chunks whose text changed — no re-extraction.
+    /// </summary>
+    Upgrade = 3
 }
 
 /// <summary>

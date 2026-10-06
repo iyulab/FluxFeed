@@ -400,10 +400,12 @@ public sealed class ReadmeDefaultStackChunkIdentityTests : IDisposable
         var previousKeywordGeneration = await keyword.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, TestContext.Current.CancellationToken);
         previousKeywordGeneration.Should().Contain(legacyId);
 
-        // Change the last paragraph and let the per-chunk worker path write at least one chunk before
-        // the embedder throws: a genuine half-written generation.
+        // Change the first and the last paragraph and let the per-chunk worker path write one of them before the
+        // embedder throws on the other: a genuine half-written generation. (Unchanged chunks are kept without being
+        // embedded again, so the failing call has to be the second CHANGED chunk.)
         await File.WriteAllTextAsync(_file,
-            Paragraphs.Replace("marmalade board", "turquoise ledger", StringComparison.Ordinal),
+            Paragraphs.Replace("marmalade board", "turquoise ledger", StringComparison.Ordinal)
+                .Replace("refuelled every six hours", "recharged every six hours", StringComparison.Ordinal),
             TestContext.Current.CancellationToken);
         _embedder.FailOnSingleCall(2);
 

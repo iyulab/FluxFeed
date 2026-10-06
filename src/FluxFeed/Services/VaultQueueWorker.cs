@@ -279,6 +279,11 @@ public sealed partial class VaultQueueWorker : IDisposable, IAsyncDisposable
                     await ProcessRemoveJobAsync(entry, pipeline, ct);
                     break;
 
+                case VaultJobType.Upgrade:
+                    // Throws on failure; the catch below reports and classifies it like any job failure.
+                    await pipeline.UpgradeAsync(entry, memorizeOptions, ct);
+                    break;
+
                 default:
                     throw new InvalidOperationException($"Unknown job type: {job.JobType}");
             }
