@@ -27,6 +27,7 @@ Releases before 0.28.0 predate this file — see the git history.
   replaces `ExtractAsync(string, CancellationToken)`; the vault passes its settings. Migration: an implementation adds
   the `settings` parameter (and may ignore it); a caller that passed the token positionally writes `ct: token`; an
   NSubstitute double configures `ExtractAsync(Arg.Any<string>(), Arg.Any<ExtractionSettings?>(), Arg.Any<CancellationToken>())`.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.80.3 -> 0.80.4, `FluxIndex.Storage.SQLite` 0.80.3 -> 0.80.4.
 
 ### Dependencies
 - FileFlux 0.43.0.
