@@ -12,6 +12,13 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.44.3] - 2026-10-06
+
+### Changed
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.78.0 -> 0.79.0, `FluxIndex.Storage.SQLite` 0.78.0 -> 0.79.0. No source changes.
+
+---
+
 ## [0.44.2] - 2026-10-06
 
 ### Changed
