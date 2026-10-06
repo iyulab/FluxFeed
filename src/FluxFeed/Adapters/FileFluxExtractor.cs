@@ -33,7 +33,7 @@ public sealed partial class FileFluxExtractor : IExtractor
 
     ExtractionIdentity? IExtractor.Identity => Identity;
 
-    public async Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default)
+    public async Task<ExtractionResult> ExtractAsync(string sourcePath, ExtractionSettings? settings = null, CancellationToken ct = default)
     {
         LogExtracting(_logger, sourcePath);
 
@@ -43,16 +43,19 @@ public sealed partial class FileFluxExtractor : IExtractor
 
             // Read and refine only (rule-based, then LLM when a refiner is registered): the vault chunks the stored
             // text later, at memorize. The refined text is what gets stored, and its spans (pages, time ranges) index
-            // exactly that text. An LLM rewrite changes the text, so its spans no longer apply and are not kept.
+            // exactly that text. A whole-document LLM rewrite changes the text, so its spans no longer apply and are not
+            // kept; a page-scoped refinement re-expresses them over its text, so they are.
             await processor.RefineAsync(cancellationToken: ct);
-            await processor.LlmRefineAsync(cancellationToken: ct);
+            await processor.LlmRefineAsync(settings?.LlmRefine, cancellationToken: ct);
 
             var result = processor.Result;
             var refinedText = result.Refined?.Text ?? string.Empty;
             var llmText = result.LlmRefined?.Text;
-            var content = !string.IsNullOrEmpty(llmText) && llmText != refinedText ? llmText : refinedText;
-            var spans = content == refinedText && result.Refined?.Spans is { Count: > 0 } refinedSpans
-                ? refinedSpans.Select(s => new ContentSpan(s.Start, s.End) { Page = s.Page, StartTime = s.StartTime, EndTime = s.EndTime }).ToList()
+            var useLlm = !string.IsNullOrEmpty(llmText) && llmText != refinedText;
+            var content = useLlm ? llmText! : refinedText;
+            var sourceSpans = useLlm ? result.LlmRefined!.Spans : result.Refined?.Spans;
+            var spans = sourceSpans is { Count: > 0 }
+                ? sourceSpans.Select(s => new ContentSpan(s.Start, s.End) { Page = s.Page, StartTime = s.StartTime, EndTime = s.EndTime }).ToList()
                 : null;
 
             // Extract images from RawContent if available
@@ -82,7 +85,7 @@ public sealed partial class FileFluxExtractor : IExtractor
 
             var tables = result.Raw?.Tables is { Count: > 0 } rawTables ? ToTableArtifacts(rawTables) : null;
 
-            var hints = ProjectScalarHints(result.Raw?.Hints);
+            var hints = WithPageRefinement(ProjectScalarHints(result.Raw?.Hints), result.LlmRefined?.Pages);
             var warnings = result.Raw?.Warnings is { Count: > 0 } w ? w.ToArray() : null;
 
             LogExtracted(_logger, content.Length, images?.Count ?? 0, sourcePath);
@@ -130,6 +133,27 @@ public sealed partial class FileFluxExtractor : IExtractor
         }).ToList();
 
     #region LoggerMessage Definitions
+
+    /// <summary>
+    /// Adds a page-scoped refinement's outcome to the extraction hints: pages per outcome
+    /// (<c>llm_refine_pages_refined</c> / <c>_native</c> / <c>_rejected</c> / <c>_skipped</c>) and, when any page kept its
+    /// text, <c>llm_refine_rejected</c> — <c>page:reason</c> pairs, comma separated.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? WithPageRefinement(
+        IReadOnlyDictionary<string, string>? hints, IReadOnlyList<PageRefinement>? pages)
+    {
+        if (pages is not { Count: > 0 })
+            return hints;
+
+        var merged = hints is null ? new Dictionary<string, string>() : new Dictionary<string, string>(hints);
+        foreach (var outcome in Enum.GetValues<PageRefinementOutcome>())
+            merged[$"llm_refine_pages_{outcome.ToString().ToLowerInvariant()}"] =
+                pages.Count(p => p.Outcome == outcome).ToString(CultureInfo.InvariantCulture);
+        var rejected = pages.Where(p => p.Outcome == PageRefinementOutcome.Rejected).ToList();
+        if (rejected.Count > 0)
+            merged["llm_refine_rejected"] = string.Join(",", rejected.Select(p => $"{p.Page.ToString(CultureInfo.InvariantCulture)}:{p.Reason}"));
+        return merged;
+    }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Extracting content from {SourcePath}")]
     private static partial void LogExtracting(ILogger logger, string sourcePath);

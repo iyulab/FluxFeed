@@ -461,7 +461,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         if (_extractor != null)
         {
-            var result = await _extractor.ExtractAsync(entry.SourcePath, ct);
+            var result = await _extractor.ExtractAsync(entry.SourcePath, new ExtractionSettings { LlmRefine = _options.LlmRefine }, ct);
             extractedContent = result.Content;
             extractionHints = result.Hints;
             extractionWarnings = result.Warnings;
@@ -2517,7 +2517,12 @@ internal sealed record VaultChunk(string Id, string Content, IReadOnlyDictionary
 /// </summary>
 public interface IExtractor
 {
-    Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default);
+    /// <summary>
+    /// Extracts <paramref name="sourcePath"/>. <paramref name="settings"/> carries what the vault asks of the extraction
+    /// (from <see cref="Options.FileVaultOptions"/>); null means the extractor's defaults. An extractor with no use for a
+    /// setting ignores it.
+    /// </summary>
+    Task<ExtractionResult> ExtractAsync(string sourcePath, ExtractionSettings? settings = null, CancellationToken ct = default);
 
     /// <summary>
     /// Which extractor this is and at what version — recorded on every entry it extracts
@@ -2526,6 +2531,15 @@ public interface IExtractor
     /// never judged outdated.
     /// </summary>
     ExtractionIdentity? Identity { get; }
+}
+
+/// <summary>
+/// What a vault asks of its extractor, from <see cref="Options.FileVaultOptions"/>.
+/// </summary>
+public sealed record ExtractionSettings
+{
+    /// <summary><see cref="Options.FileVaultOptions.LlmRefine"/>.</summary>
+    public FileFlux.Core.LlmRefineOptions? LlmRefine { get; init; }
 }
 
 /// <summary>

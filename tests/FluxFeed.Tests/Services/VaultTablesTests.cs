@@ -56,7 +56,7 @@ public sealed class VaultTablesTests : IDisposable
 
     private sealed class StubExtractor(ExtractionResult result) : IExtractor
     {
-        public Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default) => Task.FromResult(result);
+        public Task<ExtractionResult> ExtractAsync(string sourcePath, ExtractionSettings? settings = null, CancellationToken ct = default) => Task.FromResult(result);
 
         public FluxFeed.Domain.ValueObjects.ExtractionIdentity? Identity => null;
     }

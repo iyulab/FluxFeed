@@ -1,3 +1,5 @@
+using FileFlux.Core;
+
 namespace FluxFeed.Options;
 
 /// <summary>
@@ -162,6 +164,14 @@ public sealed class FileVaultOptions
     /// can be counted apart from enricher failures and no call is spent on it. Null (the default) offers every image.
     /// </summary>
     public IReadOnlyList<string>? ImageEnrichmentContentTypes { get; set; }
+
+    /// <summary>
+    /// How the extractor's LLM refinement runs, when an <c>ILlmRefiner</c> is registered (without one there is no LLM
+    /// refinement and this is not read). Null uses FileFlux's defaults: one whole-document pass, after which the entry has no
+    /// page spans. <c>Scope = LlmRefineScope.Pages</c> refines page by page, checks each output against its page and keeps
+    /// the spans; the per-page outcomes arrive as extraction hints (<c>llm_refine_pages_*</c>).
+    /// </summary>
+    public LlmRefineOptions? LlmRefine { get; set; }
 
     /// <summary>
     /// <see cref="MaxFileSizeMB"/> in bytes.

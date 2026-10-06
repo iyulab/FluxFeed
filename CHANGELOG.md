@@ -12,6 +12,27 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
+## [0.46.0] - Unreleased
+
+### Added
+- **`FileVaultOptions.LlmRefine` — page-scoped, checked LLM refinement for vault entries.** The options reach FileFlux's
+  LLM refinement at extraction (it still runs only when an `ILlmRefiner` is registered). With
+  `Scope = LlmRefineScope.Pages` each selected page is refined alone and kept only if it keeps the page's words and
+  numbers. The entry keeps its page spans, so chunks keep their pages. The per-page outcome is in the extraction
+  hints (`llm_refine_pages_refined` / `_native` / `_rejected` / `_skipped`, `llm_refine_rejected`). Tenants made by
+  `IVaultFactory` carry the setting.
+
+### Changed
+- **Breaking**: `IExtractor.ExtractAsync(string sourcePath, ExtractionSettings? settings = null, CancellationToken ct = default)`
+  replaces `ExtractAsync(string, CancellationToken)`; the vault passes its settings. Migration: an implementation adds
+  the `settings` parameter (and may ignore it); a caller that passed the token positionally writes `ct: token`; an
+  NSubstitute double configures `ExtractAsync(Arg.Any<string>(), Arg.Any<ExtractionSettings?>(), Arg.Any<CancellationToken>())`.
+
+### Dependencies
+- FileFlux 0.43.0.
+
+---
+
 ## [0.45.2] - 2026-10-06
 
 ### Changed

@@ -825,6 +825,7 @@ services.Configure<FileVaultOptions>(configuration.GetSection(FileVaultOptions.S
 | `AutoCleanupOrphans` | `false` | Remove entries whose source file is gone, during sync |
 | `Chunking.MaxChunkSize` / `OverlapSize` / `Strategy` | `1024` / `128` / `Intelligent` | Chunking defaults, with per-extension overrides via `Chunking.FormatStrategies` |
 | `Chunking.Language` | `null` | Chunking language; null = auto-detect |
+| `LlmRefine` | `null` | How FileFlux's LLM refinement runs at extraction, when an `ILlmRefiner` is registered (none = no LLM pass). `null` = one whole-document rewrite, after which the entry has no page spans. `new LlmRefineOptions { Scope = LlmRefineScope.Pages, SelectPages = … }` refines page by page, keeps an output only if it keeps the page's words (`MinTokenCoverage`) and numbers, and keeps the page spans; the per-page outcome arrives as extraction hints `llm_refine_pages_refined` / `_native` / `_rejected` / `_skipped` and `llm_refine_rejected` (`page:reason,…`) |
 | `AdditionalTextExtensions` | empty | Extra extensions (lowercase, leading dot, e.g. `.myext`) read as plain text by the fallback extraction used when no `IExtractor` is registered (e.g. `AddFileVault` without FileFlux) |
 | `DefaultIncludePatterns` / `DefaultExcludePatterns` | common document / temp-file globs | See [File selection patterns](#file-selection-patterns) |
 

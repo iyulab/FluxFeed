@@ -100,7 +100,7 @@ public sealed class VaultPipelineSourceLocationTests : IDisposable
     private static IExtractor ExtractorReturning(string content, IReadOnlyList<ContentSpan>? spans)
     {
         var extractor = Substitute.For<IExtractor>();
-        extractor.ExtractAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+        extractor.ExtractAsync(Arg.Any<string>(), Arg.Any<ExtractionSettings?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new ExtractionResult { Content = content, Spans = spans }));
         return extractor;
     }

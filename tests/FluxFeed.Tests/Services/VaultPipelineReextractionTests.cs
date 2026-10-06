@@ -77,7 +77,7 @@ public sealed class VaultPipelineReextractionTests : IDisposable
 
         public ExtractionIdentity? Identity { get; } = new("FileFlux", version);
 
-        public Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default)
+        public Task<ExtractionResult> ExtractAsync(string sourcePath, ExtractionSettings? settings = null, CancellationToken ct = default)
         {
             Calls++;
             return Task.FromResult(result);
@@ -238,7 +238,7 @@ public sealed class VaultPipelineReextractionTests : IDisposable
     {
         public ExtractionIdentity? Identity => null;
 
-        public Task<ExtractionResult> ExtractAsync(string sourcePath, CancellationToken ct = default) => Task.FromResult(result);
+        public Task<ExtractionResult> ExtractAsync(string sourcePath, ExtractionSettings? settings = null, CancellationToken ct = default) => Task.FromResult(result);
     }
 }
 

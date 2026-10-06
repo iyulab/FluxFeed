@@ -290,6 +290,7 @@ public sealed partial class VaultFactory : IVaultFactory
             AdditionalTextExtensions = new HashSet<string>(source.AdditionalTextExtensions, source.AdditionalTextExtensions.Comparer),
             MaxImageEnrichmentAttempts = source.MaxImageEnrichmentAttempts,
             ImageEnrichmentContentTypes = source.ImageEnrichmentContentTypes?.ToArray(),
+            LlmRefine = source.LlmRefine,
             Reextraction = source.Reextraction,
             MaxConcurrentProcessing = source.MaxConcurrentProcessing,
             EnableAutoRetry = source.EnableAutoRetry,

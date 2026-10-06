@@ -53,7 +53,7 @@ public class FileFluxExtractorDiagnosticsTests
         var extractor = CreateExtractor(raw);
 
         // Act
-        var result = await extractor.ExtractAsync("scan.pdf", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("scan.pdf", ct: TestContext.Current.CancellationToken);
 
         // Assert
         result.Content.Should().BeEmpty();
@@ -75,7 +75,7 @@ public class FileFluxExtractorDiagnosticsTests
         };
         var extractor = CreateExtractor(raw);
 
-        var result = await extractor.ExtractAsync("blank.pdf", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("blank.pdf", ct: TestContext.Current.CancellationToken);
 
         result.Hints!["extraction_failure_reason"].Should().Be("blank_page");
     }
@@ -87,7 +87,7 @@ public class FileFluxExtractorDiagnosticsTests
         var spans = new List<SourceSpan> { new(0, 5) { Page = 1 }, new(7, 12) { Page = 2, StartTime = TimeSpan.FromSeconds(3) } };
         var extractor = CreateExtractor(new RawContent { Text = "raw" }, [new DocumentChunk { Content = "first" }, new DocumentChunk { Content = "again" }], spans);
 
-        var result = await extractor.ExtractAsync("two-pages.pdf", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("two-pages.pdf", ct: TestContext.Current.CancellationToken);
 
         result.Content.Should().Be("first\n\nagain");
         result.Spans.Should().NotBeNull();
@@ -102,7 +102,7 @@ public class FileFluxExtractorDiagnosticsTests
         var extractor = CreateExtractor(new RawContent { Text = "raw" }, [new DocumentChunk { Content = "refined" }],
             [new SourceSpan(0, 7) { Page = 1 }], llmText: "rewritten by the model");
 
-        var result = await extractor.ExtractAsync("doc.pdf", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("doc.pdf", ct: TestContext.Current.CancellationToken);
 
         result.Content.Should().Be("rewritten by the model");
         result.Spans.Should().BeNull();
@@ -114,7 +114,7 @@ public class FileFluxExtractorDiagnosticsTests
         var raw = new RawContent { Text = "hello" };
         var extractor = CreateExtractor(raw, [new DocumentChunk { Content = "hello" }]);
 
-        var result = await extractor.ExtractAsync("plain.txt", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("plain.txt", ct: TestContext.Current.CancellationToken);
 
         result.Content.Should().Be("hello");
         result.Hints.Should().BeNull();
@@ -137,7 +137,7 @@ public class FileFluxExtractorDiagnosticsTests
         };
         var extractor = CreateExtractor(raw, [new DocumentChunk { Content = "x" }]);
 
-        var result = await extractor.ExtractAsync("doc.pdf", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("doc.pdf", ct: TestContext.Current.CancellationToken);
 
         result.Hints.Should().BeEquivalentTo(new Dictionary<string, string>
         {
@@ -170,7 +170,7 @@ public class FileFluxExtractorDiagnosticsTests
         };
         var extractor = CreateExtractor(raw, [new DocumentChunk { Content = "body" }]);
 
-        var result = await extractor.ExtractAsync("report.docx", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("report.docx", ct: TestContext.Current.CancellationToken);
 
         result.Images.Should().HaveCount(2);
 
@@ -203,7 +203,7 @@ public class FileFluxExtractorDiagnosticsTests
         };
         var extractor = CreateExtractor(raw, [new DocumentChunk { Content = "body" }]);
 
-        var result = await extractor.ExtractAsync("page.html", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("page.html", ct: TestContext.Current.CancellationToken);
 
         result.Images.Should().ContainSingle().Which.Id.Should().Be("real");
     }
@@ -213,7 +213,7 @@ public class FileFluxExtractorDiagnosticsTests
     {
         var extractor = CreateExtractor(new RawContent { Text = "body" }, [new DocumentChunk { Content = "body" }]);
 
-        (await extractor.ExtractAsync("plain.txt", TestContext.Current.CancellationToken)).Images.Should().BeNull();
+        (await extractor.ExtractAsync("plain.txt", ct: TestContext.Current.CancellationToken)).Images.Should().BeNull();
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public class FileFluxExtractorDiagnosticsTests
         };
         var extractor = CreateExtractor(raw, [new DocumentChunk { Content = "x" }]);
 
-        var result = await extractor.ExtractAsync("doc.pdf", TestContext.Current.CancellationToken);
+        var result = await extractor.ExtractAsync("doc.pdf", ct: TestContext.Current.CancellationToken);
 
         result.Hints.Should().ContainKey("page_count");
         result.Hints.Should().NotContainKey("PageRanges");

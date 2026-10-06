@@ -172,6 +172,8 @@ public sealed class VaultFactoryTests : IDisposable
             return type == typeof(string[]) ? new[] { "distinct-" + name } : new List<string> { "distinct-" + name };
         if (type == typeof(HashSet<string>)) return new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".distinct-" + name };
         if (type == typeof(Dictionary<string, string>)) return new Dictionary<string, string> { ["." + name] = "distinct" };
+        if (type == typeof(FileFlux.Core.LlmRefineOptions))
+            return new FileFlux.Core.LlmRefineOptions { Scope = FileFlux.Core.LlmRefineScope.Pages, MinTokenCoverage = 0.9 };
         throw new InvalidOperationException($"No distinct value generator for {name} ({type.Name}) - extend the test when FileVaultOptions grows a new kind of property");
     }
 
