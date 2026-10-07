@@ -21,6 +21,7 @@ Releases before 0.28.0 predate this file — see the git history.
   the property; a threshold tuned against the old word count may now accept more pages.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.80.9 -> 0.80.10, `FluxIndex.Storage.SQLite` 0.80.9 -> 0.80.10.
 - Re-pinned sibling package(s) `FileFlux` 0.48.0 -> 0.48.1.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.80.10 -> 0.80.11, `FluxIndex.Storage.SQLite` 0.80.10 -> 0.80.11.
 
 ### Dependencies
 - FileFlux 0.48.0.
