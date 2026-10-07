@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [0.50.0] - Unreleased
+## [0.50.0] - 2026-10-07
 
 ### Added
 - **Page reads and LLM refinement can wait for the upgrade too.** With `FileVaultOptions.DeferEnrichment`, extraction now
