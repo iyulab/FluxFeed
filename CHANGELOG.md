@@ -6,6 +6,11 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
+## [0.50.3] - 2026-10-08
+
+### Changed
+- Re-pinned sibling package(s) `FileFlux` 0.49.1 -> 0.49.2, `FluxIndex.Core` 0.80.13 -> 0.80.14, `FluxIndex.Storage.SQLite` 0.80.13 -> 0.80.14, `Iyu.Conventions.Testing` 0.4.0 -> 0.5.0. No source changes.
+
 ## [0.50.2] - 2026-10-07
 
 ### Changed
