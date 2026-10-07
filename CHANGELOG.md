@@ -22,6 +22,7 @@ Releases before 0.28.0 predate this file — see the git history.
 ### Changed
 - The FileFlux extractor extracts with the vault's extraction options before refining (it let refinement extract with
   none). `ExtractionSettings` gains `PageReading`.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.80.8 -> 0.80.9, `FluxIndex.Storage.SQLite` 0.80.8 -> 0.80.9.
 
 ### Dependencies
 - FileFlux 0.47.0.
