@@ -190,6 +190,29 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
         _capture.Chunks.Last(c => c.Metadata != null && Equals(c.Metadata.GetValueOrDefault("image_id"), imageId));
 
     [Fact]
+    public async Task MemorizeAsync_AnImageReadAsItsPage_IsNotDescribedAgain()
+    {
+        // A scanned page whose text came from a read of the rendered page: its scan image is that page, so describing it
+        // would index the page twice. It is stored, not offered, and is not pending; its sibling still is described.
+        var entry = CreateEntry("scan.pdf");
+        var enricher = new RecordingEnricher(r => $"Figure {r.Image.Id}.");
+        var pipeline = CreatePipeline(
+            new ExtractionResult
+            {
+                Content = "Text read from the scanned page.",
+                Images = [new ImageArtifact { Id = "page1_scan", Data = [1, 2, 3, 4], ContentType = "image/png", PageNumber = 1, ReadAsPage = true }, Image("page2_chart", page: 2)],
+            },
+            enricher);
+
+        await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        enricher.Calls.Should().Equal("page2_chart");
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
+        manifest.Single(i => i.Id == "page1_scan").ReadAsPage.Should().BeTrue();
+        manifest.Single(i => i.Id == "page1_scan").LastEnrichmentFailure.Should().BeNull("skipping it is not a failure");
+    }
+
+    [Fact]
     public async Task MemorizeAsync_ImageWithAPage_ChunkCarriesThePageKeysTextChunksUse()
     {
         // A text chunk says where it sits with pageNumber / ff_start_page / ff_end_page; an image chunk from the same

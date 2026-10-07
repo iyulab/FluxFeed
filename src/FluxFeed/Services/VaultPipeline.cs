@@ -525,7 +525,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <summary>Whether the entry has images an upgrade would still offer to a registered image enricher.</summary>
     private async Task<bool> HasPendingImagesAsync(VaultEntry entry, CancellationToken ct) =>
         _imageEnricher != null
-        && (await _storage.GetImageManifestAsync(entry, ct)).Any(i => !i.IsDescribed && i.LastEnrichmentFailure?.IsPermanent != true);
+        && (await _storage.GetImageManifestAsync(entry, ct)).Any(i => !i.IsDescribed && !i.ReadAsPage && i.LastEnrichmentFailure?.IsPermanent != true);
 
     private static EnrichmentStages PendingStages(bool imagesPending, bool contextPending) =>
         (imagesPending ? EnrichmentStages.ImageDescriptions : EnrichmentStages.None)
@@ -649,7 +649,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // will never succeed, and re-offering it every scan wastes the enricher's backing resource
         // (e.g. a shared vision API) on a call already known to be pointless.
         var skippedPermanent = images.Count(i => !i.IsDescribed && i.LastEnrichmentFailure?.IsPermanent == true);
-        var pending = images.Where(i => !i.IsDescribed && i.LastEnrichmentFailure?.IsPermanent != true).ToList();
+        // An image on a page read as a page is already in the text: describing it would repeat that page.
+        var pending = images.Where(i => !i.IsDescribed && !i.ReadAsPage && i.LastEnrichmentFailure?.IsPermanent != true).ToList();
         if (skippedPermanent > 0)
             LogSkippingPermanentlyFailedImages(_logger, skippedPermanent, entry.SourcePath);
         if (pending.Count == 0)

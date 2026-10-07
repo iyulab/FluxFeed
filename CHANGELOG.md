@@ -14,6 +14,10 @@ Releases before 0.28.0 predate this file — see the git history.
   through FileFlux's registered `IImageToTextService`, and a read replaces a page's text only where the page could not be
   read. The outcome is in the extraction hints (`page_reads`, `page_reads_replaced`); a failed read is an extraction
   warning. Tenants made by `IVaultFactory` carry the setting. Off by default.
+- **An image on a page read as a page is not described again.** FileFlux marks it (`ImageInfo.ReadAsPage`); the vault
+  stores it with `ImageArtifact.ReadAsPage` / `VaultImage.ReadAsPage`, does not offer it to the image enricher and does
+  not count it as pending enrichment — the page's text already carries it (a full-page scan would otherwise be indexed
+  twice).
 
 ### Changed
 - The FileFlux extractor extracts with the vault's extraction options before refining (it let refinement extract with

@@ -215,6 +215,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 Description = carriedDescription,
                 AltText = image.AltText,
                 PageNumber = image.PageNumber,
+                ReadAsPage = image.ReadAsPage,
                 Width = image.Width,
                 Height = image.Height,
                 Size = image.Data.Length,
@@ -269,6 +270,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                     Description = item.Description,
                     AltText = item.AltText,
                     PageNumber = item.PageNumber,
+                    ReadAsPage = item.ReadAsPage,
                     Width = item.Width,
                     Height = item.Height
                 });
@@ -295,6 +297,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 Description = item.Description,
                 AltText = item.AltText,
                 PageNumber = item.PageNumber,
+                ReadAsPage = item.ReadAsPage,
                 LastEnrichmentFailure = item.LastEnrichmentFailure
             })
             .ToList();
@@ -628,6 +631,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         public string? Description { get; set; }
         public string? AltText { get; init; }
         public int? PageNumber { get; init; }
+        public bool ReadAsPage { get; init; }
         public int Width { get; init; }
         public int Height { get; init; }
         public long Size { get; init; }

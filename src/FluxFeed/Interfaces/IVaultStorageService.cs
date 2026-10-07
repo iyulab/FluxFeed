@@ -232,6 +232,12 @@ public sealed class ImageArtifact
     /// </summary>
     public int? PageNumber { get; init; }
 
+    /// <summary>
+    /// The image is on a page whose text was replaced by a read of the rendered page (FileFlux page reading): what it
+    /// shows is already in the text, so it is not offered to the image enricher.
+    /// </summary>
+    public bool ReadAsPage { get; init; }
+
     public int Width { get; init; }
     public int Height { get; init; }
 }
@@ -318,6 +324,12 @@ public sealed class VaultImage
     /// Null in a manifest written before it was recorded - a re-memorize records it.
     /// </summary>
     public int? PageNumber { get; init; }
+
+    /// <summary>
+    /// The image is on a page whose text was replaced by a read of the rendered page: what it shows is already in the
+    /// entry's text, so the pipeline does not offer it to the image enricher and it does not count as pending.
+    /// </summary>
+    public bool ReadAsPage { get; init; }
 
     /// <summary>True once a description has been persisted for this image.</summary>
     public bool IsDescribed => !string.IsNullOrWhiteSpace(Description);
