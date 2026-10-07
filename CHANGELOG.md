@@ -6,6 +6,23 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
+## [0.49.0] - Unreleased
+
+### Added
+- **A page-scoped refinement says why a page was not changed, and which pass failed.** Two extraction hints join the
+  per-outcome counts: `llm_refine_native_reasons` (`page:no_pass_needed` when no pass applied and no model call was made,
+  `page:passes_failed` when every call failed) and `llm_refine_pass_failures` (`page:pass:reason` — `truncated`,
+  `context_too_small`, `empty_output`, `error`). One Information log line per document carries the counts and both lists,
+  so «0 refined, 40 native» no longer hides a serving slot too small for the pages.
+
+### Changed
+- **Breaking**: `FileVaultOptions.LlmRefine` takes FileFlux 0.48.0's options, where `MinTokenCoverage` is now
+  `MinNativeCoverage` and no longer counts a re-spacing (joining words a line wrap split) as lost text. Migration: rename
+  the property; a threshold tuned against the old word count may now accept more pages.
+
+### Dependencies
+- FileFlux 0.48.0.
+
 ## [0.48.0] - 2026-10-07
 
 ### Added

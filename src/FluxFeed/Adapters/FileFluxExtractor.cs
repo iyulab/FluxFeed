@@ -92,6 +92,16 @@ public sealed partial class FileFluxExtractor : IExtractor
             var warnings = result.Raw?.Warnings is { Count: > 0 } w ? w.ToArray() : null;
 
             LogExtracted(_logger, content.Length, images?.Count ?? 0, sourcePath);
+            if (result.LlmRefined?.Pages is { Count: > 0 } refinedPages)
+            {
+                LogPageRefinement(_logger, sourcePath,
+                    refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Refined),
+                    refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Native),
+                    refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Rejected),
+                    refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Skipped),
+                    PageReasons(refinedPages) ?? "none",
+                    PassFailures(refinedPages) ?? "none");
+            }
             if (hints != null || warnings != null)
             {
                 LogExtractionDiagnostics(_logger, hints?.Count ?? 0, warnings?.Length ?? 0, sourcePath);
@@ -139,8 +149,11 @@ public sealed partial class FileFluxExtractor : IExtractor
 
     /// <summary>
     /// Adds a page-scoped refinement's outcome to the extraction hints: pages per outcome
-    /// (<c>llm_refine_pages_refined</c> / <c>_native</c> / <c>_rejected</c> / <c>_skipped</c>) and, when any page kept its
-    /// text, <c>llm_refine_rejected</c> — <c>page:reason</c> pairs, comma separated.
+    /// (<c>llm_refine_pages_refined</c> / <c>_native</c> / <c>_rejected</c> / <c>_skipped</c>); when any page was
+    /// rejected, <c>llm_refine_rejected</c> — <c>page:reason</c> pairs, comma separated; when a native page was not changed
+    /// by the model, <c>llm_refine_native_reasons</c> — <c>page:no_pass_needed</c> (no call made) or
+    /// <c>page:passes_failed</c>; and when a refinement pass failed on a page, <c>llm_refine_pass_failures</c> —
+    /// <c>page:pass:reason</c> (<c>truncated</c>, <c>context_too_small</c>, <c>empty_output</c>, <c>error</c>).
     /// </summary>
     internal static IReadOnlyDictionary<string, string>? WithPageRefinement(
         IReadOnlyDictionary<string, string>? hints, IReadOnlyList<PageRefinement>? pages)
@@ -155,7 +168,29 @@ public sealed partial class FileFluxExtractor : IExtractor
         var rejected = pages.Where(p => p.Outcome == PageRefinementOutcome.Rejected).ToList();
         if (rejected.Count > 0)
             merged["llm_refine_rejected"] = string.Join(",", rejected.Select(p => $"{p.Page.ToString(CultureInfo.InvariantCulture)}:{p.Reason}"));
+        var native = pages.Where(p => p.Outcome == PageRefinementOutcome.Native && p.Reason is not null).ToList();
+        if (native.Count > 0)
+            merged["llm_refine_native_reasons"] = string.Join(",", native.Select(p => $"{p.Page.ToString(CultureInfo.InvariantCulture)}:{p.Reason}"));
+        if (PassFailures(pages) is { } failures)
+            merged["llm_refine_pass_failures"] = failures;
         return merged;
+    }
+
+    /// <summary>Every page that has a reason, as <c>page:reason</c> pairs; null when none has one.</summary>
+    private static string? PageReasons(IReadOnlyList<PageRefinement> pages)
+    {
+        var reasons = pages.Where(p => p.Reason is not null).Select(p => $"{p.Page.ToString(CultureInfo.InvariantCulture)}:{p.Reason}").ToList();
+        return reasons.Count > 0 ? string.Join(",", reasons) : null;
+    }
+
+    /// <summary>Every failed refinement pass, as <c>page:pass:reason</c>; null when none failed.</summary>
+    private static string? PassFailures(IReadOnlyList<PageRefinement> pages)
+    {
+        var failures = pages
+            .SelectMany(p => (p.Passes ?? []).Where(pass => pass.Outcome == LlmRefinementPassOutcome.Failed)
+                .Select(pass => $"{p.Page.ToString(CultureInfo.InvariantCulture)}:{pass.Name}:{pass.Reason}"))
+            .ToList();
+        return failures.Count > 0 ? string.Join(",", failures) : null;
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Extracting content from {SourcePath}")]
@@ -169,6 +204,9 @@ public sealed partial class FileFluxExtractor : IExtractor
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Extraction reported {HintCount} hints and {WarningCount} warnings for {SourcePath}")]
     private static partial void LogExtractionDiagnostics(ILogger logger, int hintCount, int warningCount, string sourcePath);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Page refinement of {SourcePath}: {Refined} refined, {Native} native, {Rejected} rejected, {Skipped} skipped; page reasons: {Reasons}; failed passes: {Failures}")]
+    private static partial void LogPageRefinement(ILogger logger, string sourcePath, int refined, int native, int rejected, int skipped, string reasons, string failures);
 
     #endregion
 

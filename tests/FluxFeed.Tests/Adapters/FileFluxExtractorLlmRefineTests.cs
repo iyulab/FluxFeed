@@ -71,7 +71,7 @@ public class FileFluxExtractorLlmRefineTests
             Spans = [new SourceSpan(0, 5) { Page = 1 }, new SourceSpan(7, 12) { Page = 2 }],
             Pages =
             [
-                new PageRefinement(1) { Outcome = PageRefinementOutcome.Refined, TokenCoverage = 1.0, NumbersMatched = true },
+                new PageRefinement(1) { Outcome = PageRefinementOutcome.Refined, NativeCoverage = 1.0, NumbersMatched = true },
                 new PageRefinement(2) { Outcome = PageRefinementOutcome.Rejected, Reason = PageRefinement.LowCoverage },
             ],
         };
@@ -86,6 +86,50 @@ public class FileFluxExtractorLlmRefineTests
         result.Hints["llm_refine_pages_rejected"].Should().Be("1");
         result.Hints["llm_refine_pages_skipped"].Should().Be("0");
         result.Hints["llm_refine_rejected"].Should().Be("2:low_coverage");
+        result.Hints.Should().NotContainKey("llm_refine_native_reasons");
+        result.Hints.Should().NotContainKey("llm_refine_pass_failures");
+    }
+
+    /// <summary>
+    /// «0 refined, 3 native» is not one outcome: the model may have kept the pages, never been asked, or failed every time
+    /// it was asked. The hints and the log line say which, per page.
+    /// </summary>
+    [Fact]
+    public async Task NativePages_SayWhyTheModelDidNotChangeThem_AndWhichPassFailed()
+    {
+        var truncated = new LlmRefinementPass("RestoreSentences") { Outcome = LlmRefinementPassOutcome.Failed, Reason = LlmRefinementPass.Truncated };
+        var tooSmall = new LlmRefinementPass("CorrectOcrErrors") { Outcome = LlmRefinementPassOutcome.Failed, Reason = LlmRefinementPass.ContextTooSmall };
+        const string text = "alpha\n\nbravo\n\ncharlie";
+        var llm = new LlmRefinedContent
+        {
+            Text = text,
+            Spans = [new SourceSpan(0, 5) { Page = 1 }, new SourceSpan(7, 12) { Page = 2 }, new SourceSpan(14, 21) { Page = 3 }],
+            Pages =
+            [
+                new PageRefinement(1) { Outcome = PageRefinementOutcome.Native, Reason = PageRefinement.PassesFailed, Passes = [truncated, tooSmall] },
+                new PageRefinement(2) { Outcome = PageRefinementOutcome.Native, Reason = PageRefinement.NoPassNeeded },
+                new PageRefinement(3) { Outcome = PageRefinementOutcome.Native },
+            ],
+        };
+        var logger = new ListLogger();
+        var processor = Substitute.For<IDocumentProcessor>();
+        processor.Result.Returns(new ProcessingResult
+        {
+            Raw = new RawContent { Text = text },
+            Refined = new RefinedContent { Text = text, Spans = llm.Spans },
+            LlmRefined = llm,
+        });
+        var factory = Substitute.For<IDocumentProcessorFactory>();
+        factory.Create(Arg.Any<string>()).Returns(processor);
+
+        var result = await new FileFluxExtractor(factory, logger).ExtractAsync("doc.pdf", ct: TestContext.Current.CancellationToken);
+
+        result.Hints!["llm_refine_pages_native"].Should().Be("3");
+        result.Hints["llm_refine_native_reasons"].Should().Be("1:passes_failed,2:no_pass_needed");
+        result.Hints["llm_refine_pass_failures"].Should().Be("1:RestoreSentences:truncated,1:CorrectOcrErrors:context_too_small");
+        logger.Messages.Should().ContainSingle(m => m.StartsWith("Page refinement of doc.pdf", StringComparison.Ordinal))
+            .Which.Should().Be("Page refinement of doc.pdf: 0 refined, 3 native, 0 rejected, 0 skipped; page reasons: "
+                + "1:passes_failed,2:no_pass_needed; failed passes: 1:RestoreSentences:truncated,1:CorrectOcrErrors:context_too_small");
     }
 
     [Fact]
@@ -127,6 +171,18 @@ public class FileFluxExtractorLlmRefineTests
         {
             try { Directory.Delete(dir, recursive: true); } catch (IOException) { }
         }
+    }
+
+    private sealed class ListLogger : Microsoft.Extensions.Logging.ILogger<FileFluxExtractor>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
     }
 
     private sealed class RecordingExtractor : IExtractor
