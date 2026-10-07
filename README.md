@@ -786,6 +786,9 @@ foreach (var pending in await vault.GetPendingEnrichmentAsync())
     await vault.UpgradeAsync(pending.SourcePath, VaultJobPriority.Low, waitForCompletion: true);
 ```
 
+`vault.EntryUpgraded` is raised when an upgrade finishes — run directly or by the background queue — with the entry as it
+now stands (`PendingEnrichment`, `ChunkCount`), so a host that queues upgrades without waiting can refresh what it shows.
+
 `UpgradeAsync` runs the pending stages without re-extracting and re-embeds only the chunks whose text changed; with
 background processing it is a queued job (`VaultJobType.Upgrade`) like a refresh.
 

@@ -60,6 +60,51 @@ public sealed partial class VaultManager : IVault
         _watchedFolders = watchedFolders ?? WatchedFolderSync.Detached(_fileWatcher);
 
         VaultBasePath = _options.VaultBasePath ?? _options.VaultDirectoryName;
+
+        // An upgrade the background queue ran reaches this vault through the queue's completion.
+        _queue.JobCompleted += OnJobCompleted;
+    }
+
+    /// <inheritdoc/>
+    public event EventHandler<VaultEntry>? EntryUpgraded;
+
+    private void OnJobCompleted(object? sender, VaultJob job)
+    {
+        if (job.JobType != VaultJobType.Upgrade)
+            return;
+
+        _ = RaiseEntryUpgradedAsync(job.FilepathHash);
+    }
+
+    private async Task RaiseEntryUpgradedAsync(string filepathHash)
+    {
+        try
+        {
+            if (await GetByHashAsync(filepathHash, CancellationToken.None) is { } entry)
+                RaiseEntryUpgraded(entry);
+        }
+        catch (Exception ex)
+        {
+            LogEntryUpgradedFailed(_logger, ex, filepathHash);
+        }
+    }
+
+    private void RaiseEntryUpgraded(VaultEntry entry)
+    {
+        if (EntryUpgraded is not { } handlers)
+            return;
+
+        foreach (var handler in handlers.GetInvocationList().Cast<EventHandler<VaultEntry>>())
+        {
+            try
+            {
+                handler(this, entry);
+            }
+            catch (Exception ex)
+            {
+                LogEntryUpgradedFailed(_logger, ex, entry.SourcePath);
+            }
+        }
     }
 
     #region Core Commands
@@ -1568,7 +1613,9 @@ public sealed partial class VaultManager : IVault
                 throw new InvalidOperationException($"Upgrade failed for {fullPath}: {ex.Message}", ex);
             }
 
-            return await GetByHashAsync(entry.FilepathHash, ct) ?? entry;
+            var upgraded = await GetByHashAsync(entry.FilepathHash, ct) ?? entry;
+            RaiseEntryUpgraded(upgraded);
+            return upgraded;
         }
 
         var job = await _queue.EnqueueUpgradeAsync(entry.FilepathHash, fullPath, priority, _options.EffectiveQueueGroupKey, ct);
@@ -1800,6 +1847,9 @@ public sealed partial class VaultManager : IVault
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Queued upgrade for {FilePath}")]
     private static partial void LogQueuedUpgrade(ILogger logger, string filePath);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "An EntryUpgraded handler failed for {Entry}; the upgrade itself is unaffected")]
+    private static partial void LogEntryUpgradedFailed(ILogger logger, Exception exception, string entry);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to scan folder {Path}")]
     private static partial void LogFailedToScanFolder(ILogger logger, Exception exception, string path);

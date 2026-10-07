@@ -19,8 +19,13 @@ Releases before 0.28.0 predate this file — see the git history.
   pending and runs the other stages.
 - `ExtractionSettings.SkipLlmRefine`: the FileFlux extractor runs no LLM refinement at all — not the default
   whole-document rewrite — when it is set.
+- **`IVault.EntryUpgraded`**: raised when an upgrade finishes, whether `UpgradeAsync` ran it directly or the background
+  queue did, with the entry as it now stands (`PendingEnrichment` says what is still left). Not raised for a failed
+  upgrade; a handler that throws is logged and changes nothing.
 
 ### Changed
+- **Breaking**: `IVault` has a new member, `event EventHandler<VaultEntry>? EntryUpgraded`. Migration: a class that
+  implements `IVault` (a test double, say) adds `public event EventHandler<VaultEntry>? EntryUpgraded { add { } remove { } }`.
 - With `DeferEnrichment` on and `PageReading` or `LlmRefine` configured, `GetPendingEnrichmentAsync` now also lists
   entries whose only pending stages are page reads or refinement. A refinement left at its default (`LlmRefine` unset,
   the whole-document rewrite) still runs inline.

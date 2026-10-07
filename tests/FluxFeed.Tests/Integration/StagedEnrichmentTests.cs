@@ -139,6 +139,43 @@ public sealed class StagedEnrichmentTests : IDisposable
         _contexts.Chunks.Should().BeGreaterThan(0);
     }
 
+    /// <summary>A host learns that an upgrade finished, with the entry as it now stands; a failing handler changes nothing.</summary>
+    [Fact]
+    public async Task ADirectUpgrade_RaisesEntryUpgraded_AndAThrowingHandlerDoesNotFailIt()
+    {
+        await using var provider = BuildStack(o => o.DeferEnrichment = true, withContexts: true);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var entry = await vault.MemorizeAsync(_file, Ct);
+        var raised = new List<FluxFeed.Domain.Entities.VaultEntry>();
+        vault.EntryUpgraded += (_, _) => throw new InvalidOperationException("handler bug");
+        vault.EntryUpgraded += (_, e) => raised.Add(e);
+
+        var upgraded = await vault.UpgradeAsync(_file, ct: Ct);
+
+        upgraded.PendingEnrichment.Should().Be(EnrichmentStages.None);
+        raised.Should().ContainSingle().Which.FilepathHash.Should().Be(entry.FilepathHash);
+        raised[0].PendingEnrichment.Should().Be(EnrichmentStages.None);
+    }
+
+    [Fact]
+    public async Task AQueuedUpgrade_RaisesEntryUpgraded_WhenTheJobCompletes()
+    {
+        await using var provider = BuildStack(o => { o.DeferEnrichment = true; o.EnableBackgroundProcessing = true; }, withContexts: true);
+        await using var worker = await StartHostedServicesAsync(provider);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+        var entry = await vault.MemorizeAsync(_file, waitForCompletion: true, Ct);
+        var raised = new TaskCompletionSource<FluxFeed.Domain.Entities.VaultEntry>(TaskCreationOptions.RunContinuationsAsynchronously);
+        vault.EntryUpgraded += (_, e) => raised.TrySetResult(e);
+
+        await vault.UpgradeAsync(_file, ct: Ct);
+        var upgraded = await raised.Task.WaitAsync(TimeSpan.FromSeconds(30), Ct);
+
+        upgraded.FilepathHash.Should().Be(entry.FilepathHash);
+        upgraded.PendingEnrichment.Should().Be(EnrichmentStages.None);
+    }
+
     private ServiceProvider BuildStack(Action<FileVaultOptions>? configure = null, bool withContexts = false)
     {
         var services = new ServiceCollection();

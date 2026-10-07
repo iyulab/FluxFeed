@@ -517,6 +517,14 @@ public interface IVault
         CancellationToken ct = default);
 
     /// <summary>
+    /// Raised after an upgrade finished for an entry — run directly or by the background queue — with the entry as it
+    /// now stands (<see cref="VaultEntry.PendingEnrichment"/> says what is still left, <see cref="VaultEntry.ChunkCount"/>
+    /// what is indexed). Not raised for a failed upgrade. A handler that throws is logged and does not affect the upgrade
+    /// or other handlers.
+    /// </summary>
+    event EventHandler<VaultEntry>? EntryUpgraded;
+
+    /// <summary>
     /// Gets entries that need synchronization (SourceModified or VaultModified).
     /// </summary>
     Task<IReadOnlyList<VaultEntry>> GetEntriesNeedingSyncAsync(CancellationToken ct = default);
