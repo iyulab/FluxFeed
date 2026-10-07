@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [0.48.0] - Unreleased
+## [0.48.0] - 2026-10-07
 
 ### Added
 - **`FileVaultOptions.PageReading` — scanned and damaged PDF pages read by a vision model at extraction.** The options
