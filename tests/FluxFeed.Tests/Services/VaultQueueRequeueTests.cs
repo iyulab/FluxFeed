@@ -34,16 +34,16 @@ public sealed class VaultQueueRequeueTests : IDisposable
     {
         // The case the operator button exists for, and the one the budget-respecting path refused.
         using var queue = CreateQueue();
-        var job = await queue.EnqueueMemorizeAsync("hash-1", "/vault/a.txt");
+        var job = await queue.EnqueueMemorizeAsync("hash-1", "/vault/a.txt", ct: TestContext.Current.CancellationToken);
 
         await ExhaustBudgetAsync(queue, job.Id);
 
-        (await queue.RetryAsync(job.Id)).Should().BeFalse(
+        (await queue.RetryAsync(job.Id, TestContext.Current.CancellationToken)).Should().BeFalse(
             "the automatic path is budget-bound, and this is what the operator ran into");
 
-        await queue.RequeueAsync(job.Id);
+        await queue.RequeueAsync(job.Id, TestContext.Current.CancellationToken);
 
-        var revived = await queue.GetJobAsync(job.Id);
+        var revived = await queue.GetJobAsync(job.Id, TestContext.Current.CancellationToken);
         revived!.Status.Should().Be(VaultJobStatus.Queued);
         revived.RetryCount.Should().Be(0, "an explicit instruction clears the automatic budget");
         revived.ErrorMessage.Should().BeNull();
@@ -56,18 +56,18 @@ public sealed class VaultQueueRequeueTests : IDisposable
         // spends budget, so the job looked retryable and was re-queued, only to fail identically.
         // The operator saw a button that appeared to work.
         using var queue = CreateQueue();
-        var job = await queue.EnqueueMemorizeAsync("hash-2", "/vault/locked.xlsx");
-        await queue.DequeueAsync();
-        await queue.FailAsync(job.Id, "document is encrypted", MemorizeFailureKind.Permanent);
+        var job = await queue.EnqueueMemorizeAsync("hash-2", "/vault/locked.xlsx", ct: TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
+        await queue.FailAsync(job.Id, "document is encrypted", MemorizeFailureKind.Permanent, TestContext.Current.CancellationToken);
 
         var refusal = await Assert.ThrowsAsync<VaultJobNotRetryableException>(
-            () => queue.RequeueAsync(job.Id));
+            () => queue.RequeueAsync(job.Id, TestContext.Current.CancellationToken));
 
         refusal.Reason.Should().Be(VaultRetryRefusal.PermanentFailure);
         refusal.JobId.Should().Be(job.Id);
         refusal.Message.Should().Contain("encrypted", "the operator needs the reason, not just a refusal");
 
-        var untouched = await queue.GetJobAsync(job.Id);
+        var untouched = await queue.GetJobAsync(job.Id, TestContext.Current.CancellationToken);
         untouched!.Status.Should().Be(VaultJobStatus.Failed, "a refused request changes nothing");
     }
 
@@ -77,13 +77,13 @@ public sealed class VaultQueueRequeueTests : IDisposable
         // A row written before the classification existed reads as null, and null is not evidence
         // of permanence. Upgrading must not start refusing what it used to allow.
         using var queue = CreateQueue();
-        var job = await queue.EnqueueMemorizeAsync("hash-3", "/vault/b.txt");
-        await queue.DequeueAsync();
-        await queue.FailAsync(job.Id, "provider timed out");
+        var job = await queue.EnqueueMemorizeAsync("hash-3", "/vault/b.txt", ct: TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
+        await queue.FailAsync(job.Id, "provider timed out", TestContext.Current.CancellationToken);
 
-        await queue.RequeueAsync(job.Id);
+        await queue.RequeueAsync(job.Id, TestContext.Current.CancellationToken);
 
-        (await queue.GetJobAsync(job.Id))!.Status.Should().Be(VaultJobStatus.Queued);
+        (await queue.GetJobAsync(job.Id, TestContext.Current.CancellationToken))!.Status.Should().Be(VaultJobStatus.Queued);
     }
 
     [Fact]
@@ -93,11 +93,11 @@ public sealed class VaultQueueRequeueTests : IDisposable
         // versus explain why this one is stuck.
         using var queue = CreateQueue();
 
-        await Assert.ThrowsAsync<VaultJobNotFoundException>(() => queue.RequeueAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<VaultJobNotFoundException>(() => queue.RequeueAsync(Guid.NewGuid(), TestContext.Current.CancellationToken));
 
-        var queued = await queue.EnqueueMemorizeAsync("hash-4", "/vault/c.txt");
+        var queued = await queue.EnqueueMemorizeAsync("hash-4", "/vault/c.txt", ct: TestContext.Current.CancellationToken);
         var refusal = await Assert.ThrowsAsync<VaultJobNotRetryableException>(
-            () => queue.RequeueAsync(queued.Id));
+            () => queue.RequeueAsync(queued.Id, TestContext.Current.CancellationToken));
         refusal.Reason.Should().Be(VaultRetryRefusal.NotFailed);
     }
 
@@ -107,11 +107,11 @@ public sealed class VaultQueueRequeueTests : IDisposable
         // Pins the fact the refusal above depends on. If a permanent failure ever started spending
         // budget, PermanentFailure and an exhausted budget would become indistinguishable again.
         using var queue = CreateQueue();
-        var job = await queue.EnqueueMemorizeAsync("hash-5", "/vault/locked2.xlsx");
-        await queue.DequeueAsync();
-        await queue.FailAsync(job.Id, "document is encrypted", MemorizeFailureKind.Permanent);
+        var job = await queue.EnqueueMemorizeAsync("hash-5", "/vault/locked2.xlsx", ct: TestContext.Current.CancellationToken);
+        await queue.DequeueAsync(TestContext.Current.CancellationToken);
+        await queue.FailAsync(job.Id, "document is encrypted", MemorizeFailureKind.Permanent, TestContext.Current.CancellationToken);
 
-        var failed = await queue.GetJobAsync(job.Id);
+        var failed = await queue.GetJobAsync(job.Id, TestContext.Current.CancellationToken);
         failed!.RetryCount.Should().Be(0);
         failed.FailureKind.Should().Be(MemorizeFailureKind.Permanent);
         failed.CanRetry.Should().BeTrue(

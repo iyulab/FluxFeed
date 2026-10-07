@@ -264,7 +264,7 @@ public sealed class VaultPipelineReindexReplacementTests : IDisposable
         await keyword.Received(1).DeleteChunksAsync(
             Arg.Is<IEnumerable<string>>(ids => ids.ToHashSet(StringComparer.Ordinal).SetEquals(previousIds)),
             Arg.Any<CancellationToken>());
-        await keyword.DidNotReceiveWithAnyArgs().DeleteChunkAsync(default!, default);
+        await keyword.DidNotReceiveWithAnyArgs().DeleteChunkAsync(default!, TestContext.Current.CancellationToken);
     }
 
     [Fact]

@@ -126,8 +126,8 @@ public sealed class VaultPipelineContextualEnrichmentTests : IDisposable
         var result = await MemorizeAsync(pipeline);
 
         result.Success.Should().BeTrue();
-        await port.DidNotReceiveWithAnyArgs().GenerateContextBatchAsync(default!, default!, default);
-        _stored.Should().OnlyContain(c => c.Content == Document && !c.Metadata.ContainsKey(VaultPipeline.EnrichmentMetadataKey));
+        await port.DidNotReceiveWithAnyArgs().GenerateContextBatchAsync(default!, default!, TestContext.Current.CancellationToken);
+        _stored.Should().OnlyContain(c => c.Content == Document && !c.Metadata!.ContainsKey(VaultPipeline.EnrichmentMetadataKey));
     }
 
     [Fact]
@@ -155,7 +155,7 @@ public sealed class VaultPipelineContextualEnrichmentTests : IDisposable
         result.ChunkCount.Should().Be(1);
         var stored = _stored.Should().ContainSingle().Subject;
         stored.Content.Should().Be("Quarterly sales report, north region section.\n\n" + Document);
-        stored.Metadata[VaultPipeline.ContextSummaryMetadataKey].Should().Be("Quarterly sales report, north region section.");
+        stored.Metadata![VaultPipeline.ContextSummaryMetadataKey].Should().Be("Quarterly sales report, north region section.");
         stored.Metadata[VaultPipeline.EnrichmentMetadataKey].Should().Be("contextual");
 
         // The embedding saw the enriched text, not the plain passage.
@@ -193,7 +193,7 @@ public sealed class VaultPipelineContextualEnrichmentTests : IDisposable
         result.Success.Should().BeTrue();
         var stored = _stored.Should().ContainSingle().Subject;
         stored.Content.Should().Be(Document);
-        stored.Metadata[VaultPipeline.EnrichmentMetadataKey].Should().Be("empty");
+        stored.Metadata![VaultPipeline.EnrichmentMetadataKey].Should().Be("empty");
         stored.Metadata.Should().NotContainKey(VaultPipeline.ContextSummaryMetadataKey);
         logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("no context for 1/1"));
     }
@@ -212,7 +212,7 @@ public sealed class VaultPipelineContextualEnrichmentTests : IDisposable
 
         result.Success.Should().BeTrue();
         _stored.Should().HaveCountGreaterThan(1, "the fixture must produce more than one chunk for this fact to mean anything");
-        _stored.OrderBy(c => c.ChunkIndex).Select(c => c.Metadata[VaultPipeline.EnrichmentMetadataKey])
+        _stored.OrderBy(c => c.ChunkIndex).Select(c => c.Metadata![VaultPipeline.EnrichmentMetadataKey])
             .Should().Equal(new object[] { "empty" }.Concat(Enumerable.Repeat<object>("contextual", _stored.Count - 1)));
     }
 
@@ -229,7 +229,7 @@ public sealed class VaultPipelineContextualEnrichmentTests : IDisposable
         result.Success.Should().BeTrue("ContinueOnError defaults to true — the document is still indexed");
         var stored = _stored.Should().ContainSingle().Subject;
         stored.Content.Should().Be(Document);
-        stored.Metadata[VaultPipeline.EnrichmentMetadataKey].Should().Be("failed");
+        stored.Metadata![VaultPipeline.EnrichmentMetadataKey].Should().Be("failed");
     }
 
     [Fact]

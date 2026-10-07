@@ -112,7 +112,7 @@ public sealed class VaultPipelineGraphRagTests : IDisposable
         _vectorStore.GetChunkIdsByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<string>>(["c1", "c2"]));
 
-        await pipeline.RemoveAsync(entry);
+        await pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken);
 
         await _vectorStore.Received(1).DeleteByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>());
         await graph.Received(1).ForgetChunksAsync(
@@ -127,7 +127,7 @@ public sealed class VaultPipelineGraphRagTests : IDisposable
         var pipeline = CreatePipeline(graphRAG: null);
         var entry = VaultEntry.Create(Path.Combine(_testDir, "doc.txt"), _vaultDir);
 
-        await pipeline.RemoveAsync(entry);
+        await pipeline.RemoveAsync(entry, TestContext.Current.CancellationToken);
 
         await _vectorStore.Received(1).DeleteByDocumentIdAsync(entry.FilepathHash, Arg.Any<CancellationToken>());
         await _vectorStore.DidNotReceive().GetChunkIdsByDocumentIdAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());

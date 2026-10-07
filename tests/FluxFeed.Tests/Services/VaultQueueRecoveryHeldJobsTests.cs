@@ -48,27 +48,27 @@ public sealed class VaultQueueRecoveryHeldJobsTests : IDisposable
     public async Task Recovery_leaves_a_job_this_process_is_running_alone()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash-running", Path.Combine(_testDir, "running.txt"));
-        (await queue.DequeueAsync()).Should().NotBeNull();
+        var job = await queue.EnqueueMemorizeAsync("hash-running", Path.Combine(_testDir, "running.txt"), ct: TestContext.Current.CancellationToken);
+        (await queue.DequeueAsync(TestContext.Current.CancellationToken)).Should().NotBeNull();
 
-        var recovered = await queue.RecoverStuckJobsAsync();
+        var recovered = await queue.RecoverStuckJobsAsync(TestContext.Current.CancellationToken);
 
         recovered.Should().Be(0, "the job is still being processed by this process");
-        (await queue.GetJobAsync(job.Id))!.Status.Should().Be(VaultJobStatus.Processing);
-        (await queue.DequeueAsync()).Should().BeNull("a running job must not be handed out a second time");
+        (await queue.GetJobAsync(job.Id, TestContext.Current.CancellationToken))!.Status.Should().Be(VaultJobStatus.Processing);
+        (await queue.DequeueAsync(TestContext.Current.CancellationToken)).Should().BeNull("a running job must not be handed out a second time");
     }
 
     [Fact]
     public async Task Recovery_resets_a_processing_job_no_live_process_holds()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash-orphan", Path.Combine(_testDir, "orphan.txt"));
+        var job = await queue.EnqueueMemorizeAsync("hash-orphan", Path.Combine(_testDir, "orphan.txt"), ct: TestContext.Current.CancellationToken);
         MarkProcessingAsIfAPreviousProcessDequeuedIt(job.Id);
 
-        var recovered = await queue.RecoverStuckJobsAsync();
+        var recovered = await queue.RecoverStuckJobsAsync(TestContext.Current.CancellationToken);
 
         recovered.Should().Be(1);
-        (await queue.GetJobAsync(job.Id))!.Status.Should().Be(VaultJobStatus.Queued);
+        (await queue.GetJobAsync(job.Id, TestContext.Current.CancellationToken))!.Status.Should().Be(VaultJobStatus.Queued);
     }
 
     [Fact]
@@ -78,18 +78,18 @@ public sealed class VaultQueueRecoveryHeldJobsTests : IDisposable
         // throws and the row stays Processing. The job is no longer running; recovery must be able to
         // hand it out again instead of treating it as held until the process restarts.
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash-unreported", Path.Combine(_testDir, "unreported.txt"));
-        (await queue.DequeueAsync()).Should().NotBeNull();
+        var job = await queue.EnqueueMemorizeAsync("hash-unreported", Path.Combine(_testDir, "unreported.txt"), ct: TestContext.Current.CancellationToken);
+        (await queue.DequeueAsync(TestContext.Current.CancellationToken)).Should().NotBeNull();
 
         using var cancelled = new CancellationTokenSource();
         await cancelled.CancelAsync();
         var report = () => queue.FailAsync(job.Id, "stopped", cancelled.Token);
         await report.Should().ThrowAsync<OperationCanceledException>();
 
-        var recovered = await queue.RecoverStuckJobsAsync();
+        var recovered = await queue.RecoverStuckJobsAsync(TestContext.Current.CancellationToken);
 
         recovered.Should().Be(1);
-        (await queue.GetJobAsync(job.Id))!.Status.Should().Be(VaultJobStatus.Queued);
+        (await queue.GetJobAsync(job.Id, TestContext.Current.CancellationToken))!.Status.Should().Be(VaultJobStatus.Queued);
     }
 
     [Fact]
@@ -98,27 +98,27 @@ public sealed class VaultQueueRecoveryHeldJobsTests : IDisposable
         // A tenant re-created by VaultFactory gets a new queue instance over the same queue.db while
         // the previous worker may still be finishing a job past its stop grace period.
         using var first = CreateService();
-        var job = await first.EnqueueMemorizeAsync("hash-shared", Path.Combine(_testDir, "shared.txt"));
-        (await first.DequeueAsync()).Should().NotBeNull();
+        var job = await first.EnqueueMemorizeAsync("hash-shared", Path.Combine(_testDir, "shared.txt"), ct: TestContext.Current.CancellationToken);
+        (await first.DequeueAsync(TestContext.Current.CancellationToken)).Should().NotBeNull();
 
         using var second = CreateService();
-        var recovered = await second.RecoverStuckJobsAsync();
+        var recovered = await second.RecoverStuckJobsAsync(TestContext.Current.CancellationToken);
 
         recovered.Should().Be(0);
-        (await second.GetJobAsync(job.Id))!.Status.Should().Be(VaultJobStatus.Processing);
+        (await second.GetJobAsync(job.Id, TestContext.Current.CancellationToken))!.Status.Should().Be(VaultJobStatus.Processing);
     }
 
     [Fact]
     public async Task A_job_retried_after_its_report_is_held_again_when_dequeued()
     {
         using var queue = CreateService();
-        var job = await queue.EnqueueMemorizeAsync("hash-retry", Path.Combine(_testDir, "retry.txt"));
-        (await queue.DequeueAsync()).Should().NotBeNull();
-        await queue.FailAsync(job.Id, "transient");
-        (await queue.RetryAsync(job.Id)).Should().BeTrue();
-        (await queue.DequeueAsync()).Should().NotBeNull();
+        var job = await queue.EnqueueMemorizeAsync("hash-retry", Path.Combine(_testDir, "retry.txt"), ct: TestContext.Current.CancellationToken);
+        (await queue.DequeueAsync(TestContext.Current.CancellationToken)).Should().NotBeNull();
+        await queue.FailAsync(job.Id, "transient", TestContext.Current.CancellationToken);
+        (await queue.RetryAsync(job.Id, TestContext.Current.CancellationToken)).Should().BeTrue();
+        (await queue.DequeueAsync(TestContext.Current.CancellationToken)).Should().NotBeNull();
 
-        var recovered = await queue.RecoverStuckJobsAsync();
+        var recovered = await queue.RecoverStuckJobsAsync(TestContext.Current.CancellationToken);
 
         recovered.Should().Be(0);
     }

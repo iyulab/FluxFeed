@@ -159,8 +159,8 @@ public sealed class VaultPipelineMoveTests : IDisposable
         var act = () => Pipeline().ReassignAsync(MovedEntry(), _oldPath, Ct);
 
         (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*cannot be re-keyed*");
-        await _vectorStore.DidNotReceiveWithAnyArgs().ReassignDocumentAsync(default!, default!, default!, default, default);
-        await _keyword.DidNotReceiveWithAnyArgs().ReassignDocumentAsync(default!, default!, default!, default, default);
+        await _vectorStore.DidNotReceiveWithAnyArgs().ReassignDocumentAsync(default!, default!, default!, default, TestContext.Current.CancellationToken);
+        await _keyword.DidNotReceiveWithAnyArgs().ReassignDocumentAsync(default!, default!, default!, default, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -172,7 +172,7 @@ public sealed class VaultPipelineMoveTests : IDisposable
         var act = () => Pipeline().ReassignAsync(MovedEntry(), _oldPath, Ct);
 
         (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*RepairKeywordIndexAsync*");
-        await _vectorStore.DidNotReceiveWithAnyArgs().ReassignDocumentAsync(default!, default!, default!, default, default);
+        await _vectorStore.DidNotReceiveWithAnyArgs().ReassignDocumentAsync(default!, default!, default!, default, TestContext.Current.CancellationToken);
     }
 
     [Fact]

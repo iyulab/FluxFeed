@@ -271,7 +271,7 @@ public sealed class WatchedFolderSyncTests : IDisposable
         public event EventHandler<FileChangeEventArgs>? FileModified;
         public event EventHandler<FileChangeEventArgs>? FileDeleted;
         public event EventHandler<FileRenamedEventArgs>? FileRenamed;
-        public event EventHandler<WatcherErrorEventArgs>? ErrorOccurred;
+        public event EventHandler<WatcherErrorEventArgs>? ErrorOccurred { add { } remove { } }
 
         public void Created(Guid folder, string path) => FileCreated?.Invoke(this, new FileChangeEventArgs { FolderId = folder, FilePath = path });
 
@@ -292,6 +292,6 @@ public sealed class WatchedFolderSyncTests : IDisposable
 
         public IReadOnlyList<WatcherInfo> GetAllWatchers() => [];
 
-        public void Dispose() => ErrorOccurred = null;
+        public void Dispose() { }
     }
 }

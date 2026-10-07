@@ -85,7 +85,7 @@ public sealed class VaultManagerInlineFailureTests : IDisposable
         _pipeline.MemorizeAsync(Arg.Any<VaultEntry>(), Arg.Any<MemorizeOptions>(), Arg.Any<CancellationToken>())
             .Returns(MemorizeResult.Succeeded(3, 900, TimeSpan.Zero));
 
-        var entry = await _vault.MemorizeAsync(_file);
+        var entry = await _vault.MemorizeAsync(_file, TestContext.Current.CancellationToken);
 
         entry.Should().NotBeNull();
     }
@@ -106,7 +106,7 @@ public sealed class VaultManagerInlineFailureTests : IDisposable
         _pipeline.MemorizeAsync(Arg.Any<VaultEntry>(), Arg.Any<MemorizeOptions>(), Arg.Any<CancellationToken>())
             .Returns(MemorizeResult.Failed("should never be consulted", TimeSpan.Zero));
 
-        var entry = await queued.MemorizeAsync(_file);
+        var entry = await queued.MemorizeAsync(_file, TestContext.Current.CancellationToken);
 
         entry.Should().NotBeNull();
         await _pipeline.DidNotReceive().MemorizeAsync(

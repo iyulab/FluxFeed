@@ -133,12 +133,12 @@ public sealed class VaultPipelineSourceLocationTests : IDisposable
 
         result.Success.Should().BeTrue();
         _stored.Should().NotBeEmpty();
-        _stored.Should().OnlyContain(c => c.Metadata.ContainsKey(VaultPipeline.StartPageMetadataKey));
+        _stored.Should().OnlyContain(c => c.Metadata!.ContainsKey(VaultPipeline.StartPageMetadataKey));
         _stored.Should().HaveCountGreaterThan(1);
         _stored.Where(c => !c.Content.Contains("north region", StringComparison.Ordinal))
-            .Should().NotBeEmpty().And.OnlyContain(c => (int)c.Metadata[VaultPipeline.PageNumberMetadataKey] == 2 && (int)c.Metadata[VaultPipeline.EndPageMetadataKey] == 2);
+            .Should().NotBeEmpty().And.OnlyContain(c => (int)c.Metadata![VaultPipeline.PageNumberMetadataKey] == 2 && (int)c.Metadata![VaultPipeline.EndPageMetadataKey] == 2);
         _stored.Where(c => !c.Content.Contains("Returns", StringComparison.Ordinal))
-            .Should().NotBeEmpty().And.OnlyContain(c => (int)c.Metadata[VaultPipeline.StartPageMetadataKey] == 1 && (int)c.Metadata[VaultPipeline.EndPageMetadataKey] == 1);
+            .Should().NotBeEmpty().And.OnlyContain(c => (int)c.Metadata![VaultPipeline.StartPageMetadataKey] == 1 && (int)c.Metadata![VaultPipeline.EndPageMetadataKey] == 1);
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public sealed class VaultPipelineSourceLocationTests : IDisposable
 
         var returns = _stored.Where(c => !c.Content.Contains("north region", StringComparison.Ordinal)).ToList();
         returns.Should().NotBeEmpty();
-        returns.Should().OnlyContain(c => (double)c.Metadata[VaultPipeline.StartSecondsMetadataKey] == 12.5
+        returns.Should().OnlyContain(c => (double)c.Metadata![VaultPipeline.StartSecondsMetadataKey] == 12.5
             && (double)c.Metadata[VaultPipeline.EndSecondsMetadataKey] == 30.0
             && !c.Metadata.ContainsKey(VaultPipeline.StartPageMetadataKey));
     }
@@ -172,7 +172,7 @@ public sealed class VaultPipelineSourceLocationTests : IDisposable
         await pipeline.MemorizeAsync(entry, SmallChunks, TestContext.Current.CancellationToken);
 
         _stored.Should().NotBeEmpty();
-        _stored.Should().OnlyContain(c => !c.Metadata.ContainsKey(VaultPipeline.StartPageMetadataKey));
+        _stored.Should().OnlyContain(c => !c.Metadata!.ContainsKey(VaultPipeline.StartPageMetadataKey));
         File.Exists(entry.ExtractedSpansPath).Should().BeFalse();
     }
 
@@ -193,7 +193,7 @@ public sealed class VaultPipelineSourceLocationTests : IDisposable
         await pipeline.RefreshAsync(entry, SmallChunks, TestContext.Current.CancellationToken);
 
         _stored.Should().NotBeEmpty();
-        _stored.Should().OnlyContain(c => !c.Metadata.ContainsKey(VaultPipeline.StartPageMetadataKey));
+        _stored.Should().OnlyContain(c => !c.Metadata!.ContainsKey(VaultPipeline.StartPageMetadataKey));
         logger.ReceivedCalls().Should().Contain(call =>
             call.GetMethodInfo().Name == nameof(ILogger.Log)
             && (LogLevel)call.GetArguments()[0]! == LogLevel.Warning
