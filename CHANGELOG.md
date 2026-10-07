@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [0.49.0] - Unreleased
+## [0.49.0] - 2026-10-07
 
 ### Added
 - **A page-scoped refinement says why a page was not changed, and which pass failed.** Two extraction hints join the
