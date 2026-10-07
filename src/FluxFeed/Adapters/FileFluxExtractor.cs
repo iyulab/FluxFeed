@@ -45,6 +45,8 @@ public sealed partial class FileFluxExtractor : IExtractor
             // text later, at memorize. The refined text is what gets stored, and its spans (pages, time ranges) index
             // exactly that text. A whole-document LLM rewrite changes the text, so its spans no longer apply and are not
             // kept; a page-scoped refinement re-expresses them over its text, so they are.
+            // Extraction first, with the vault's extraction options: refine would otherwise extract on its own, with none.
+            await processor.ExtractAsync(new ExtractOptions { PageReading = settings?.PageReading }, ct);
             await processor.RefineAsync(cancellationToken: ct);
             await processor.LlmRefineAsync(settings?.LlmRefine, cancellationToken: ct);
 

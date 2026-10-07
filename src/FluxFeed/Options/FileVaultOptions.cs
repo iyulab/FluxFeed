@@ -174,6 +174,15 @@ public sealed class FileVaultOptions
     public LlmRefineOptions? LlmRefine { get; set; }
 
     /// <summary>
+    /// Which PDF pages the extractor renders and reads through FileFlux's registered <c>IImageToTextService</c> (FileFlux
+    /// <c>ExtractOptions.PageReading</c>): a read replaces a page's text only where the page could not be read (a scan, lost
+    /// content), never from an incomplete render. Null (the default): no page is rendered. The per-page outcome arrives in
+    /// the extraction hints (<c>page_reads</c>, <c>page_reads_replaced</c>); a failed read is an extraction warning.
+    /// Changing it does not re-extract stored entries by itself — refresh with re-extraction to apply it to them.
+    /// </summary>
+    public PageReadingOptions? PageReading { get; set; }
+
+    /// <summary>
     /// Index a file on its native chunks first and leave the slow LLM stages — image descriptions, contextual enrichment
     /// — for a later <c>IVault.UpgradeAsync</c>. With it on, memorize and refresh make the entry searchable without
     /// calling the image enricher or generating contexts (a context already stored for an unchanged passage of an

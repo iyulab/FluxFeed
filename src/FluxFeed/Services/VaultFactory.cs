@@ -291,6 +291,7 @@ public sealed partial class VaultFactory : IVaultFactory
             MaxImageEnrichmentAttempts = source.MaxImageEnrichmentAttempts,
             ImageEnrichmentContentTypes = source.ImageEnrichmentContentTypes?.ToArray(),
             LlmRefine = source.LlmRefine,
+            PageReading = source.PageReading,
             DeferEnrichment = source.DeferEnrichment,
             Reextraction = source.Reextraction,
             MaxConcurrentProcessing = source.MaxConcurrentProcessing,

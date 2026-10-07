@@ -6,6 +6,24 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
+## [0.48.0] - Unreleased
+
+### Added
+- **`FileVaultOptions.PageReading` — scanned and damaged PDF pages read by a vision model at extraction.** The options
+  reach FileFlux's page reading (FileFlux 0.47.0, `ExtractOptions.PageReading`): selected pages are rendered and read
+  through FileFlux's registered `IImageToTextService`, and a read replaces a page's text only where the page could not be
+  read. The outcome is in the extraction hints (`page_reads`, `page_reads_replaced`); a failed read is an extraction
+  warning. Tenants made by `IVaultFactory` carry the setting. Off by default.
+
+### Changed
+- The FileFlux extractor extracts with the vault's extraction options before refining (it let refinement extract with
+  none). `ExtractionSettings` gains `PageReading`.
+
+### Dependencies
+- FileFlux 0.47.0.
+
+---
+
 ---
 
 ## [Unreleased]

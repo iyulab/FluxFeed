@@ -48,6 +48,21 @@ public class FileFluxExtractorLlmRefineTests
     }
 
     [Fact]
+    public async Task TheVaultsPageReading_ReachesFileFluxExtraction_BeforeRefinement()
+    {
+        var pageReading = new PageReadingOptions { SelectPages = q => !q.HasTextLayer };
+        var (extractor, processor) = Create("alpha\n\nbravo", TwoPages, llm: null);
+
+        await extractor.ExtractAsync("doc.pdf", new ExtractionSettings { PageReading = pageReading }, TestContext.Current.CancellationToken);
+
+        Received.InOrder(() =>
+        {
+            processor.ExtractAsync(Arg.Is<ExtractOptions>(o => o.PageReading == pageReading), Arg.Any<CancellationToken>());
+            processor.RefineAsync(Arg.Any<RefineOptions?>(), Arg.Any<CancellationToken>());
+        });
+    }
+
+    [Fact]
     public async Task APageScopedRefinement_KeepsItsSpans_AndReportsThePages()
     {
         var llm = new LlmRefinedContent

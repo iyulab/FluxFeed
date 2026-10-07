@@ -557,7 +557,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         if (_extractor != null)
         {
-            var result = await _extractor.ExtractAsync(entry.SourcePath, new ExtractionSettings { LlmRefine = _options.LlmRefine }, ct);
+            var result = await _extractor.ExtractAsync(entry.SourcePath, new ExtractionSettings { LlmRefine = _options.LlmRefine, PageReading = _options.PageReading }, ct);
             extractedContent = result.Content;
             extractionHints = result.Hints;
             extractionWarnings = result.Warnings;
@@ -2844,6 +2844,9 @@ public sealed record ExtractionSettings
 {
     /// <summary><see cref="Options.FileVaultOptions.LlmRefine"/>.</summary>
     public FileFlux.Core.LlmRefineOptions? LlmRefine { get; init; }
+
+    /// <summary><see cref="Options.FileVaultOptions.PageReading"/>.</summary>
+    public FileFlux.Core.PageReadingOptions? PageReading { get; init; }
 }
 
 /// <summary>
