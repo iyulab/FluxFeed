@@ -47,6 +47,18 @@ public class FileFluxExtractorLlmRefineTests
         await processor.Received(1).LlmRefineAsync(options, Arg.Any<CancellationToken>());
     }
 
+    /// <summary>A deferring vault asks for no LLM refinement at all — not the default whole-document rewrite.</summary>
+    [Fact]
+    public async Task SkipLlmRefine_RunsNoRefinement()
+    {
+        var (extractor, processor) = Create("alpha\n\nbravo", TwoPages, llm: null);
+
+        await extractor.ExtractAsync("doc.pdf", new ExtractionSettings { LlmRefine = new LlmRefineOptions { Scope = LlmRefineScope.Pages }, SkipLlmRefine = true },
+            TestContext.Current.CancellationToken);
+
+        await processor.DidNotReceive().LlmRefineAsync(Arg.Any<LlmRefineOptions?>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task TheVaultsPageReading_ReachesFileFluxExtraction_BeforeRefinement()
     {

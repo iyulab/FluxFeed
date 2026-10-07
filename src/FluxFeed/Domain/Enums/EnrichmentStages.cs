@@ -16,4 +16,16 @@ public enum EnrichmentStages
 
     /// <summary>Text chunks still without a contextual-enrichment context (a contextual enrichment service is enabled).</summary>
     ContextualEnrichment = 2,
+
+    /// <summary>
+    /// Pages still not read by a vision model: <c>FileVaultOptions.PageReading</c> selects pages, and the extraction ran
+    /// without it. An upgrade re-extracts the document with page reading and re-indexes the chunks that changed.
+    /// </summary>
+    PageReads = 4,
+
+    /// <summary>
+    /// LLM refinement configured through <c>FileVaultOptions.LlmRefine</c> that the extraction ran without. An upgrade
+    /// re-extracts the document with it and re-indexes the chunks that changed.
+    /// </summary>
+    LlmRefinement = 8,
 }

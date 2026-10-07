@@ -48,7 +48,10 @@ public sealed partial class FileFluxExtractor : IExtractor
             // Extraction first, with the vault's extraction options: refine would otherwise extract on its own, with none.
             await processor.ExtractAsync(new ExtractOptions { PageReading = settings?.PageReading }, ct);
             await processor.RefineAsync(cancellationToken: ct);
-            await processor.LlmRefineAsync(settings?.LlmRefine, cancellationToken: ct);
+            if (settings?.SkipLlmRefine != true)
+            {
+                await processor.LlmRefineAsync(settings?.LlmRefine, cancellationToken: ct);
+            }
 
             var result = processor.Result;
             var refinedText = result.Refined?.Text ?? string.Empty;

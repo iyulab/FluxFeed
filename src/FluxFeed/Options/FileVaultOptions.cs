@@ -183,12 +183,15 @@ public sealed class FileVaultOptions
     public PageReadingOptions? PageReading { get; set; }
 
     /// <summary>
-    /// Index a file on its native chunks first and leave the slow LLM stages — image descriptions, contextual enrichment
-    /// — for a later <c>IVault.UpgradeAsync</c>. With it on, memorize and refresh make the entry searchable without
-    /// calling the image enricher or generating contexts (a context already stored for an unchanged passage of an
-    /// unchanged document is reused), and record what is left in <see cref="Domain.Entities.VaultEntry.PendingEnrichment"/>;
-    /// <c>IVault.GetPendingEnrichmentAsync</c> lists those entries. When to upgrade is the host's call. Default false:
-    /// every stage runs inline, as before.
+    /// Index a file on its native chunks first and leave the slow LLM stages — page reads (<see cref="PageReading"/>), LLM
+    /// refinement (<see cref="LlmRefine"/>, when set), image descriptions, contextual enrichment — for a later
+    /// <c>IVault.UpgradeAsync</c>. With it on, extraction runs without page reads and refinement, and memorize and refresh
+    /// make the entry searchable without calling the image enricher or generating contexts (a context already stored for an
+    /// unchanged passage of an unchanged document is reused); the entry records what is left in
+    /// <see cref="Domain.Entities.VaultEntry.PendingEnrichment"/>, and <c>IVault.GetPendingEnrichmentAsync</c> lists those
+    /// entries. An upgrade extracts the document again with the deferred extraction stages and re-embeds only the chunks
+    /// whose text changed; a scan with no text layer waits for that upgrade instead of being indexed as empty. When to
+    /// upgrade is the host's call. Default false: every stage runs inline, as before.
     /// </summary>
     public bool DeferEnrichment { get; set; }
 

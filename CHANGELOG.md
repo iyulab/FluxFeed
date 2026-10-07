@@ -6,6 +6,25 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
+## [0.50.0] - Unreleased
+
+### Added
+- **Page reads and LLM refinement can wait for the upgrade too.** With `FileVaultOptions.DeferEnrichment`, extraction now
+  runs without `PageReading` and without the refinement configured in `LlmRefine`, so a file is searchable on its native
+  text without waiting for a vision model or an LLM. The entry records them as `EnrichmentStages.PageReads` /
+  `LlmRefinement` in `PendingEnrichment`. `IVault.UpgradeAsync` extracts the document again with them, describes images
+  and generates contexts as before, and re-embeds only the chunks whose text changed; the commit message says
+  `re-extracted`. A scan with no text layer is kept for that upgrade instead of being indexed as empty. A refresh keeps
+  the two stages pending (it re-chunks the stored extraction), and an upgrade whose source file is gone leaves them
+  pending and runs the other stages.
+- `ExtractionSettings.SkipLlmRefine`: the FileFlux extractor runs no LLM refinement at all — not the default
+  whole-document rewrite — when it is set.
+
+### Changed
+- With `DeferEnrichment` on and `PageReading` or `LlmRefine` configured, `GetPendingEnrichmentAsync` now also lists
+  entries whose only pending stages are page reads or refinement. A refinement left at its default (`LlmRefine` unset,
+  the whole-document rewrite) still runs inline.
+
 ## [0.49.0] - 2026-10-07
 
 ### Added

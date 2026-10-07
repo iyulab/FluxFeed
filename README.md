@@ -773,9 +773,11 @@ degrading; a port that returns the wrong number of contexts is always a failure 
 
 Every index pass embeds and writes only the chunks whose stored row differs (text, position or metadata); unchanged
 chunks keep their vectors. With `options.DeferEnrichment = true` a memorize or refresh also skips the slow LLM stages:
-the file is searchable on its native chunks, image descriptions and contextual enrichment wait, and the entry records
-what is left in `VaultEntry.PendingEnrichment` (`ImageDescriptions`, `ContextualEnrichment`). When to run them is the
-host's call:
+the file is searchable on its native chunks, and page reads (`PageReading`), LLM refinement (`LlmRefine`, when set),
+image descriptions and contextual enrichment wait. The entry records what is left in `VaultEntry.PendingEnrichment`
+(`PageReads`, `LlmRefinement`, `ImageDescriptions`, `ContextualEnrichment`). An upgrade extracts the document again for
+the first two and re-embeds only the chunks whose text changed; a scan with no text layer waits for it instead of being
+indexed as empty. When to run them is the host's call:
 
 ```csharp
 using FluxFeed.Domain.Entities;   // VaultJobPriority

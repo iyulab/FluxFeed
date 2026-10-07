@@ -283,11 +283,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 ? (await _storage.GetImageManifestAsync(entry, ct)).Count(i => i.IsDescribed)
                 : await EnrichImagesAsync(entry, extractedContent, ct);
             var imagesPending = defer && await HasPendingImagesAsync(entry, ct);
+            var extractionPending = (entry.PendingEnrichment & ExtractionStages) != EnrichmentStages.None;
 
             // Step 3.6: Nothing indexable — no text and no described image. An image-only document
             // whose images were described is NOT empty: the descriptions are its content. Neither is one whose images
-            // are waiting for a deferred description: it goes on to refine, so an upgrade has refined.md to work from.
-            if (string.IsNullOrWhiteSpace(extractedContent) && describedImages == 0 && !imagesPending)
+            // are waiting for a deferred description, or whose pages wait for a deferred read (a scan has no text until
+            // it is read): it goes on to refine, so an upgrade has refined.md to work from.
+            if (string.IsNullOrWhiteSpace(extractedContent) && describedImages == 0 && !imagesPending && !extractionPending)
             {
                 LogNoContentToIndex(_logger, entry.SourcePath);
 
@@ -342,7 +344,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             // Step 8: Update entry state
             MarkMemorizedWithIdentity(entry, result.ChunkCount);
-            entry.SetPendingEnrichment(PendingStages(imagesPending, result.ContextPending));
+            entry.SetPendingEnrichment(PendingStages(entry, imagesPending, result.ContextPending));
             entry.MarkInSync(); // Set sync status to InSync after successful memorize
             entry.SaveMetadata();
 
@@ -437,7 +439,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             // Update entry state
             MarkMemorizedWithIdentity(entry, result.ChunkCount);
-            entry.SetPendingEnrichment(PendingStages(imagesPending, result.ContextPending));
+            entry.SetPendingEnrichment(PendingStages(entry, imagesPending, result.ContextPending));
             entry.MarkInSync(); // Set sync status to InSync after successful refresh
             entry.SaveMetadata();
 
@@ -476,6 +478,24 @@ public sealed partial class VaultPipeline : IVaultPipeline
                 throw new InvalidOperationException($"No refined content found at {entry.RefinedMdPath}. Run memorize first.");
             }
 
+            // Stages that belong to extraction (page reads, LLM refinement) need the document again: extract it with
+            // them, then chunk and index as usual — only chunks whose text changed are re-embedded. Without the source
+            // file they stay pending and the other stages still run.
+            var reextracted = false;
+            if ((entry.PendingEnrichment & ExtractionStages) != EnrichmentStages.None)
+            {
+                if (File.Exists(entry.SourcePath))
+                {
+                    await ExtractAsync(entry, deferExtractionStages: false, ct);
+                    await RefineAsync(entry, ct);
+                    reextracted = true;
+                }
+                else
+                {
+                    LogUpgradeSourceMissing(_logger, entry.SourcePath);
+                }
+            }
+
             await EnrichImagesAsync(entry, await _storage.GetExtractedContentAsync(entry, ct), ct);
             var result = await ChunkAndIndexAsync(entry, options, ContextGeneration.Generate, ct);
 
@@ -483,13 +503,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
             if (!options.SkipCommit)
             {
                 var message = options.CommitMessage
-                    ?? $"upgrade: {result.ChunkCount} chunks ({result.ReEmbedded} re-embedded, {result.Kept} unchanged)";
+                    ?? $"upgrade: {result.ChunkCount} chunks ({result.ReEmbedded} re-embedded, {result.Kept} unchanged{(reextracted ? ", re-extracted" : "")})";
                 commitHash = await _git.CommitAsync(entry.VaultPath, message, ct);
             }
 
             MarkMemorizedWithIdentity(entry, result.ChunkCount);
             // Images whose description failed (not yet permanently) are still pending; contexts were generated.
-            var stillPending = PendingStages(await HasPendingImagesAsync(entry, ct), result.ContextPending);
+            var stillPending = PendingStages(entry, await HasPendingImagesAsync(entry, ct), result.ContextPending);
             entry.SetPendingEnrichment(stillPending);
             entry.MarkInSync();
             entry.SaveMetadata();
@@ -527,8 +547,16 @@ public sealed partial class VaultPipeline : IVaultPipeline
         _imageEnricher != null
         && (await _storage.GetImageManifestAsync(entry, ct)).Any(i => !i.IsDescribed && !i.ReadAsPage && i.LastEnrichmentFailure?.IsPermanent != true);
 
-    private static EnrichmentStages PendingStages(bool imagesPending, bool contextPending) =>
-        (imagesPending ? EnrichmentStages.ImageDescriptions : EnrichmentStages.None)
+    /// <summary>The stages that belong to extraction: set by <see cref="ExtractAsync(VaultEntry, bool, CancellationToken)"/>, kept until an extraction runs them.</summary>
+    private const EnrichmentStages ExtractionStages = EnrichmentStages.PageReads | EnrichmentStages.LlmRefinement;
+
+    /// <summary>
+    /// What is still pending after a pass: the extraction stages the last extraction left (memorize, refresh and the chunk
+    /// stages do not run them), plus images and contexts as this pass found them.
+    /// </summary>
+    private static EnrichmentStages PendingStages(VaultEntry entry, bool imagesPending, bool contextPending) =>
+        (entry.PendingEnrichment & ExtractionStages)
+        | (imagesPending ? EnrichmentStages.ImageDescriptions : EnrichmentStages.None)
         | (contextPending ? EnrichmentStages.ContextualEnrichment : EnrichmentStages.None);
 
     /// <summary>Whether contextual enrichment may call the model (<see cref="Generate"/>) or only reuse stored contexts.</summary>
@@ -541,9 +569,30 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <summary>What one chunk-and-index pass did.</summary>
     private readonly record struct IndexOutcome(int ChunkCount, int ContentLength, bool ContextPending = false, int ReEmbedded = 0, int Kept = 0);
 
-    public async Task ExtractAsync(VaultEntry entry, CancellationToken ct = default)
+    public Task ExtractAsync(VaultEntry entry, CancellationToken ct = default) =>
+        ExtractAsync(entry, _options.DeferEnrichment, ct);
+
+    /// <summary>
+    /// Extracts the source. With <paramref name="deferExtractionStages"/>, the stages that only enrich an extraction —
+    /// page reads (<see cref="FileVaultOptions.PageReading"/>) and LLM refinement (<see cref="FileVaultOptions.LlmRefine"/>)
+    /// — are not run, and the entry records them in <see cref="VaultEntry.PendingEnrichment"/> for an upgrade; without it,
+    /// they run and are cleared from it.
+    /// </summary>
+    private async Task ExtractAsync(VaultEntry entry, bool deferExtractionStages, CancellationToken ct)
     {
         LogExtractingContent(_logger, entry.SourcePath);
+
+        var deferred = EnrichmentStages.None;
+        if (deferExtractionStages && _options.PageReading?.SelectPages is not null)
+            deferred |= EnrichmentStages.PageReads;
+        if (deferExtractionStages && _options.LlmRefine is not null)
+            deferred |= EnrichmentStages.LlmRefinement;
+        var settings = new ExtractionSettings
+        {
+            LlmRefine = _options.LlmRefine,
+            PageReading = (deferred & EnrichmentStages.PageReads) != 0 ? null : _options.PageReading,
+            SkipLlmRefine = (deferred & EnrichmentStages.LlmRefinement) != 0,
+        };
 
         // Calculate source content hash
         var contentHash = await _hasher.ComputeHashAsync(entry.SourcePath, ct);
@@ -557,7 +606,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         if (_extractor != null)
         {
-            var result = await _extractor.ExtractAsync(entry.SourcePath, new ExtractionSettings { LlmRefine = _options.LlmRefine, PageReading = _options.PageReading }, ct);
+            var result = await _extractor.ExtractAsync(entry.SourcePath, settings, ct);
             extractedContent = result.Content;
             extractionHints = result.Hints;
             extractionWarnings = result.Warnings;
@@ -589,6 +638,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // legitimate 0-chunk outcome (scanned/blank document) is explainable downstream instead of
         // looking like a silent success.
         entry.MarkExtracted(contentHash, extractionHints, extractionWarnings, CurrentExtractionIdentity);
+        entry.SetPendingEnrichment((entry.PendingEnrichment & ~ExtractionStages) | deferred);
         entry.SaveMetadata();
 
         LogExtracted(_logger, extractedContent.Length, entry.ExtractedMdPath);
@@ -2799,6 +2849,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
     [LoggerMessage(Level = LogLevel.Error, Message = "Upgrade failed for {SourcePath}")]
     private static partial void LogUpgradeFailed(ILogger logger, Exception exception, string sourcePath);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Upgrade of {SourcePath}: the source file is gone, so page reads and LLM refinement stay pending")]
+    private static partial void LogUpgradeSourceMissing(ILogger logger, string sourcePath);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Contextual enrichment failed for {SourcePath}; indexing {ChunkCount} chunks without context")]
     private static partial void LogContextualEnrichmentFailed(ILogger logger, string sourcePath, int chunkCount, Exception exception);
 
@@ -2848,6 +2901,12 @@ public sealed record ExtractionSettings
 
     /// <summary><see cref="Options.FileVaultOptions.PageReading"/>.</summary>
     public FileFlux.Core.PageReadingOptions? PageReading { get; init; }
+
+    /// <summary>
+    /// Run no LLM refinement at all, whatever <see cref="LlmRefine"/> says — the vault defers it
+    /// (<see cref="Options.FileVaultOptions.DeferEnrichment"/>) to a later upgrade.
+    /// </summary>
+    public bool SkipLlmRefine { get; init; }
 }
 
 /// <summary>
