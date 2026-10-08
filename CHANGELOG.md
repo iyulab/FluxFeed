@@ -102,6 +102,13 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Added
+- **An image shown on several pages names every page** — a picture a deck reuses on slides 1 and 4 used to reach the
+  vault with its first slide only. `ImageArtifact.PageNumbers` / `VaultImage.PageNumbers` list every page (ascending;
+  `PageNumber` stays the first), the image manifest records the list, and the description chunk carries
+  `pageNumbers` (`"1,4"`, `VaultPipeline.PageNumbersMetadataKey`) beside the first-page keys. Single-page images and their
+  manifests are unchanged. Needs FileFlux 0.51.0 (`ImageInfo.PageNumbers`); an entry gains the list on its next memorize.
+
 ### Dependencies
 - Re-pinned sibling package(s) `FileFlux` 0.50.1 -> 0.51.0.
 

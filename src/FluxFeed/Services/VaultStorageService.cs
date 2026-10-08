@@ -215,6 +215,9 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 Description = carriedDescription,
                 AltText = image.AltText,
                 PageNumber = image.PageNumber,
+                // Written only for an image on several pages: a single page is PageNumber, and the manifest of every
+                // other entry stays as it was.
+                PageNumbers = image.PageNumbers.Count > 1 ? [.. image.PageNumbers] : null,
                 ReadAsPage = image.ReadAsPage,
                 Width = image.Width,
                 Height = image.Height,
@@ -270,6 +273,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                     Description = item.Description,
                     AltText = item.AltText,
                     PageNumber = item.PageNumber,
+                    PageNumbers = item.ShownOn(),
                     ReadAsPage = item.ReadAsPage,
                     Width = item.Width,
                     Height = item.Height
@@ -297,6 +301,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 Description = item.Description,
                 AltText = item.AltText,
                 PageNumber = item.PageNumber,
+                PageNumbers = item.ShownOn(),
                 ReadAsPage = item.ReadAsPage,
                 LastEnrichmentFailure = item.LastEnrichmentFailure
             })
@@ -631,11 +636,17 @@ public sealed partial class VaultStorageService : IVaultStorageService
         public string? Description { get; set; }
         public string? AltText { get; init; }
         public int? PageNumber { get; init; }
+        // Null unless the image is on several pages (and in manifests written before it existed); not written when null,
+        // so the manifest of every single-page image stays byte-for-byte as it was.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public List<int>? PageNumbers { get; init; }
         public bool ReadAsPage { get; init; }
         public int Width { get; init; }
         public int Height { get; init; }
         public long Size { get; init; }
         // Settable: recorded per attempt, cleared once Description is finally set.
         public EnrichmentFailure? LastEnrichmentFailure { get; set; }
+
+        public IReadOnlyList<int> ShownOn() => PageNumbers is { Count: > 0 } pages ? pages : PageNumber is { } page ? [page] : [];
     }
 }

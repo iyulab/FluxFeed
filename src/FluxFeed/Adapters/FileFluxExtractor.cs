@@ -64,30 +64,7 @@ public sealed partial class FileFluxExtractor : IExtractor
                 : null;
 
             // Extract images from RawContent if available
-            List<ImageArtifact>? images = null;
-            if (result.Raw?.Images?.Count > 0)
-            {
-                foreach (var (img, idx) in result.Raw.Images.Select((img, idx) => (img, idx)))
-                {
-                    if (img.Data is not { Length: > 0 })
-                        continue;
-
-                    images ??= [];
-                    images.Add(new ImageArtifact
-                    {
-                        Id = !string.IsNullOrEmpty(img.Id) ? img.Id : $"img_{idx:D3}",
-                        Data = img.Data,
-                        // No format guess here: an unrecognized MIME type must surface as
-                        // "we don't know" so consumers can decide, not be silently mislabeled
-                        // as a format the bytes may not actually be.
-                        ContentType = img.MimeType ?? "application/octet-stream",
-                        // Alt text / caption when the format carries one (HTML alt, Office alt text).
-                        AltText = string.IsNullOrWhiteSpace(img.Caption) ? null : img.Caption,
-                        PageNumber = img.PageNumber,
-                        ReadAsPage = img.ReadAsPage
-                    });
-                }
-            }
+            var images = result.Raw?.Images is { Count: > 0 } rawImages ? ToImageArtifacts(rawImages) : null;
 
             var tables = result.Raw?.Tables is { Count: > 0 } rawTables ? ToTableArtifacts(rawTables) : null;
 
@@ -125,6 +102,39 @@ public sealed partial class FileFluxExtractor : IExtractor
             LogExtractionFailed(_logger, ex, sourcePath);
             throw;
         }
+    }
+
+    /// <summary>
+    /// FileFlux's images as vault image artifacts; an image without bytes is left out (null when none remain). Ids fall
+    /// back to the document position when the reader gave none.
+    /// </summary>
+    internal static List<ImageArtifact>? ToImageArtifacts(IReadOnlyList<FileFlux.Core.ImageInfo> rawImages)
+    {
+        List<ImageArtifact>? images = null;
+        foreach (var (img, idx) in rawImages.Select((img, idx) => (img, idx)))
+        {
+            if (img.Data is not { Length: > 0 })
+                continue;
+
+            images ??= [];
+            images.Add(new ImageArtifact
+            {
+                Id = !string.IsNullOrEmpty(img.Id) ? img.Id : $"img_{idx:D3}",
+                Data = img.Data,
+                // No format guess here: an unrecognized MIME type must surface as
+                // "we don't know" so consumers can decide, not be silently mislabeled
+                // as a format the bytes may not actually be.
+                ContentType = img.MimeType ?? "application/octet-stream",
+                // Alt text / caption when the format carries one (HTML alt, Office alt text).
+                AltText = string.IsNullOrWhiteSpace(img.Caption) ? null : img.Caption,
+                PageNumber = img.PageNumber,
+                // Every page that shows it (a picture reused across slides); FileFlux answers [PageNumber] for one page.
+                PageNumbers = img.PageNumbers.ToArray(),
+                ReadAsPage = img.ReadAsPage
+            });
+        }
+
+        return images;
     }
 
     /// <summary>

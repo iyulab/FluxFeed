@@ -238,6 +238,40 @@ public class VaultPipelineImageEnrichmentTests : IDisposable
     }
 
     [Fact]
+    public async Task MemorizeAsync_ImageOnSeveralSlides_ListsEverySlide_AndKeepsTheFirstInThePageKeys()
+    {
+        // A picture a deck reuses on slides 1 and 4 is one image with one description. The page keys name the first slide,
+        // as for any image; pageNumbers lists both, so a citation can attribute the description to each slide.
+        var entry = CreateEntry("deck.pptx");
+        var pipeline = CreatePipeline(
+            new ExtractionResult
+            {
+                Content = "Slides.",
+                Images =
+                [
+                    new ImageArtifact { Id = "image1.png", Data = [1, 2, 3, 4], ContentType = "image/png", PageNumber = 1, PageNumbers = [1, 4] },
+                    new ImageArtifact { Id = "image2.png", Data = [5, 6, 7, 8], ContentType = "image/png", PageNumber = 2, PageNumbers = [2] },
+                ],
+            },
+            new RecordingEnricher(r => $"Figure {r.Image.Id}."));
+
+        await pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        var reused = ImageChunk("image1.png").Metadata!;
+        reused[VaultPipeline.PageNumberMetadataKey].Should().Be(1);
+        reused[VaultPipeline.EndPageMetadataKey].Should().Be(1);
+        reused[VaultPipeline.PageNumbersMetadataKey].Should().Be("1,4");
+        ImageChunk("image2.png").Metadata.Should().NotContainKey(VaultPipeline.PageNumbersMetadataKey, "a single page needs no list");
+
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
+        manifest.Single(i => i.Id == "image1.png").PageNumbers.Should().Equal(1, 4);
+        manifest.Single(i => i.Id == "image2.png").PageNumbers.Should().Equal(2);
+        var manifestJson = await File.ReadAllTextAsync(Directory.GetFiles(entry.EntryPath, "*.json", SearchOption.AllDirectories)
+            .Single(f => File.ReadAllText(f).Contains("image2.png", StringComparison.Ordinal)), TestContext.Current.CancellationToken);
+        manifestJson.Split("pageNumbers").Length.Should().Be(2, "only the image on several pages writes the list");
+    }
+
+    [Fact]
     public async Task ReMemorize_AfterAnUpgrade_GainsThePage_WithoutDescribingTheImageAgain()
     {
         // An entry memorized before pages were recorded: re-extraction records the page and the description is

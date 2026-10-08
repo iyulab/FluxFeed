@@ -874,6 +874,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
                     metadata[EndPageMetadataKey] = page;
                 }
 
+                // A picture shown on several pages (a slide reused across a deck): the page keys above name the first,
+                // and this one lists every page, so a citation can attribute the description to each.
+                if (image.PageNumbers.Count > 1)
+                {
+                    metadata[PageNumbersMetadataKey] = string.Join(',', image.PageNumbers.Select(p => p.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                }
+
                 chunks.Add(new VaultChunk(ChunkIdentity.ForImage(entry.FilepathHash, image.Id, part), parts[part], metadata));
             }
         }
@@ -890,6 +897,12 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// </summary>
     /// <summary>Metadata key holding the first page (1-based) a text chunk covers — the key FluxIndex's own FileFlux integration uses.</summary>
     public const string PageNumberMetadataKey = "pageNumber";
+
+    /// <summary>
+    /// Metadata key on an image description chunk listing every page that shows the image, ascending and comma-separated
+    /// (<c>"1,4"</c>) — present only when there is more than one. <see cref="PageNumberMetadataKey"/> holds the first.
+    /// </summary>
+    public const string PageNumbersMetadataKey = "pageNumbers";
 
     /// <summary>Metadata key holding the first page (1-based) a text chunk covers.</summary>
     public const string StartPageMetadataKey = "ff_start_page";

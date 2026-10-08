@@ -598,9 +598,11 @@ Descriptions are persisted per image, so re-memorizing does not re-describe imag
 succeeded, and one image's failure aborts neither the others nor the memorize. Each description is
 indexed as its own chunk tagged `chunk_kind="image_description"` with `image_id` / `image_file`
 metadata — no markers are injected into the document text. When the reader reports the page an image is
-on (PDF), the chunk also carries the page keys text chunks use (`pageNumber` / `ff_start_page` /
+on (PDF, a presentation's slide), the chunk also carries the page keys text chunks use (`pageNumber` / `ff_start_page` /
 `ff_end_page`); an entry memorized before 0.42.0 gains them on its next memorize, without describing
-the image again.
+the image again. A picture shown on several pages (a slide reused across a deck) keeps the first in those keys and
+lists every page in `pageNumbers` (`"1,4"`, `VaultPipeline.PageNumbersMetadataKey`); `ImageArtifact.PageNumbers` and
+`VaultImage.PageNumbers` carry the same list.
 
 Descriptions go through the same chunker as the body, so `MaxChunkSize` bounds them too and a long
 description becomes several chunks that each carry the same `image_id` / `image_file`. Returning a

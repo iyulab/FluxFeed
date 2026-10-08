@@ -228,9 +228,16 @@ public sealed class ImageArtifact
     public string? AltText { get; init; }
 
     /// <summary>
-    /// The page the image is drawn on (1-based), when the source document has pages and its reader reports it (PDF).
+    /// The page the image is drawn on (1-based), when the source document has pages and its reader reports it (a PDF
+    /// page, a presentation's slide). For an image shown on several pages, the first; see <see cref="PageNumbers"/>.
     /// </summary>
     public int? PageNumber { get; init; }
+
+    /// <summary>
+    /// Every page that shows the image, ascending — a picture a presentation reuses on several slides lists each slide.
+    /// When the reader knows a single page this is <see cref="PageNumber"/> alone; empty when the page is unknown.
+    /// </summary>
+    public IReadOnlyList<int> PageNumbers { get; init; } = [];
 
     /// <summary>
     /// The image is on a page whose text was replaced by a read of the rendered page (FileFlux page reading): what it
@@ -320,10 +327,17 @@ public sealed class VaultImage
     public string? AltText { get; init; }
 
     /// <summary>
-    /// The page the image is drawn on (1-based), when the source document has pages and its reader reported it (PDF).
-    /// Null in a manifest written before it was recorded - a re-memorize records it.
+    /// The page the image is drawn on (1-based), when the source document has pages and its reader reported it (a PDF
+    /// page, a presentation's slide); for an image shown on several pages, the first. Null in a manifest written before
+    /// it was recorded - a re-memorize records it.
     /// </summary>
     public int? PageNumber { get; init; }
+
+    /// <summary>
+    /// Every page that shows the image, ascending (a reused slide picture lists each slide); <see cref="PageNumber"/>
+    /// alone when it is the only page, empty when unknown.
+    /// </summary>
+    public IReadOnlyList<int> PageNumbers { get; init; } = [];
 
     /// <summary>
     /// The image is on a page whose text was replaced by a read of the rendered page: what it shows is already in the
