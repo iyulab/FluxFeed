@@ -102,6 +102,9 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Dependencies
+- Re-pinned sibling package(s) `FileFlux` 0.50.1 -> 0.51.0.
+
 ---
 
 ## [0.47.2] - 2026-10-07
