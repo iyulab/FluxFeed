@@ -100,7 +100,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ---
 
-## [Unreleased]
+## [0.51.0] - 2026-10-08
 
 ### Added
 - **An image shown on several pages names every page** — a picture a deck reuses on slides 1 and 4 used to reach the
