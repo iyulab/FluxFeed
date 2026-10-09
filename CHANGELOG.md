@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.52.0] - 2026-10-09
 
 ### Added
 - **`FileVaultOptions.SlideRendering`** reaches FileFlux's extraction (`ExtractOptions.SlideRendering`, FileFlux 0.55.0):
