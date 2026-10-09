@@ -153,13 +153,13 @@ public class VaultPipelineLegacyChunkScopeTests
         protected override Task<DocumentChunk?> GetCoreAsync(string id, CancellationToken cancellationToken)
             => Task.FromResult(_chunks.TryGetValue(id, out var chunk) ? chunk : null);
 
-        protected override Task<IEnumerable<VectorSearchResult>> SearchCoreAsync(
+        protected override Task<IEnumerable<ScoredChunk>> SearchCoreAsync(
             float[] queryEmbedding, int topK, Dictionary<string, object>? filters, CancellationToken cancellationToken)
         {
             var results = _chunks.Values
                 .Where(c => Vectors.ContainsKey(c.Id))
-                .Select(c => new VectorSearchResult(Strip(c), Cosine(queryEmbedding, Vectors[c.Id])));
-            return Task.FromResult<IEnumerable<VectorSearchResult>>(results.ToList());
+                .Select(c => new ScoredChunk(Strip(c), Cosine(queryEmbedding, Vectors[c.Id])));
+            return Task.FromResult<IEnumerable<ScoredChunk>>(results.ToList());
         }
 
         protected override Task<bool> UpdateCoreAsync(DocumentChunk chunk, CancellationToken cancellationToken)

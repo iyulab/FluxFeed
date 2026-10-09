@@ -8,6 +8,11 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Fixed
+- **Runs on FluxIndex 0.81.0.** FluxIndex 0.81.0 moved `HybridSearchService` and its siblings from `FluxIndex.Core.Services` to
+  `FluxIndex.Core.Application.Services`; FluxFeed 0.51.0 and earlier build the stock hybrid search service from the old name and fail to
+  load it against FluxIndex 0.81.0. Move FluxFeed and FluxIndex together.
+
 ### Dependencies
 - Re-pinned sibling package(s) `FileFlux` 0.51.0 -> 0.52.0, `FluxIndex.Core` 0.80.16 -> 0.80.17, `FluxIndex.Storage.SQLite` 0.80.16 -> 0.80.17.
 - Re-pinned sibling package(s) `FileFlux` 0.52.0 -> 0.53.0.
