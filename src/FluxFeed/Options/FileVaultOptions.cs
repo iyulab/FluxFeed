@@ -183,6 +183,15 @@ public sealed class FileVaultOptions
     public PageReadingOptions? PageReading { get; set; }
 
     /// <summary>
+    /// Which presentation slides (<c>.pptx</c>) the extractor renders as images (FileFlux <c>ExtractOptions.SlideRendering</c>):
+    /// a slide drawn with shapes, connectors, charts or SmartArt keeps its labels in the text but not its drawing, so the
+    /// rendered slide joins the entry's images with its slide number and is described like any other image. Null (the
+    /// default): no slide is rendered. Changing it does not re-extract stored entries by itself — refresh with
+    /// re-extraction to apply it to them.
+    /// </summary>
+    public SlideRenderingOptions? SlideRendering { get; set; }
+
+    /// <summary>
     /// Index a file on its native chunks first and leave the slow LLM stages — page reads (<see cref="PageReading"/>), LLM
     /// refinement (<see cref="LlmRefine"/>, when set), image descriptions, contextual enrichment — for a later
     /// <c>IVault.UpgradeAsync</c>. With it on, extraction runs without page reads and refinement, and memorize and refresh

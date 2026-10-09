@@ -590,6 +590,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         {
             LlmRefine = _options.LlmRefine,
             PageReading = (deferred & EnrichmentStages.PageReads) != 0 ? null : _options.PageReading,
+            SlideRendering = _options.SlideRendering,
             SkipLlmRefine = (deferred & EnrichmentStages.LlmRefinement) != 0,
         };
 
@@ -2913,6 +2914,9 @@ public sealed record ExtractionSettings
 
     /// <summary><see cref="Options.FileVaultOptions.PageReading"/>.</summary>
     public FileFlux.Core.PageReadingOptions? PageReading { get; init; }
+
+    /// <summary><see cref="Options.FileVaultOptions.SlideRendering"/>.</summary>
+    public FileFlux.Core.SlideRenderingOptions? SlideRendering { get; init; }
 
     /// <summary>
     /// Run no LLM refinement at all, whatever <see cref="LlmRefine"/> says — the vault defers it

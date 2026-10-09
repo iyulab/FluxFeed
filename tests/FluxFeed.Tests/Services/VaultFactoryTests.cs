@@ -176,6 +176,8 @@ public sealed class VaultFactoryTests : IDisposable
             return new FileFlux.Core.LlmRefineOptions { Scope = FileFlux.Core.LlmRefineScope.Pages, MinNativeCoverage = 0.9 };
         if (type == typeof(FileFlux.Core.PageReadingOptions))
             return new FileFlux.Core.PageReadingOptions { SelectPages = q => !q.HasTextLayer, Dpi = 200 };
+        if (type == typeof(FileFlux.Core.SlideRenderingOptions))
+            return new FileFlux.Core.SlideRenderingOptions { SelectSlides = FileFlux.Core.SlideRenderingOptions.DrawnSlides, Dpi = 120 };
         throw new InvalidOperationException($"No distinct value generator for {name} ({type.Name}) - extend the test when FileVaultOptions grows a new kind of property");
     }
 

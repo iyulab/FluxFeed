@@ -75,6 +75,17 @@ public class FileFluxExtractorLlmRefineTests
     }
 
     [Fact]
+    public async Task TheVaultsSlideRendering_ReachesFileFluxExtraction()
+    {
+        var slideRendering = new SlideRenderingOptions { SelectSlides = SlideRenderingOptions.DrawnSlides };
+        var (extractor, processor) = Create("alpha\n\nbravo", TwoPages, llm: null);
+
+        await extractor.ExtractAsync("deck.pptx", new ExtractionSettings { SlideRendering = slideRendering }, TestContext.Current.CancellationToken);
+
+        await processor.Received(1).ExtractAsync(Arg.Is<ExtractOptions>(o => o.SlideRendering == slideRendering), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task APageScopedRefinement_KeepsItsSpans_AndReportsThePages()
     {
         var llm = new LlmRefinedContent

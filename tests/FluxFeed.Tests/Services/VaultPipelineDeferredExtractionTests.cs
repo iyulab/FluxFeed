@@ -37,6 +37,7 @@ public sealed class VaultPipelineDeferredExtractionTests : IDisposable
     private readonly IVectorStore _vectorStore;
 
     private static readonly PageReadingOptions PageReading = new() { SelectPages = q => !q.HasTextLayer };
+    private static readonly FileFlux.Core.SlideRenderingOptions SlideRendering = new() { SelectSlides = FileFlux.Core.SlideRenderingOptions.DrawnSlides };
     private static readonly LlmRefineOptions LlmRefine = new() { Scope = LlmRefineScope.Pages };
 
     public VaultPipelineDeferredExtractionTests()
@@ -97,6 +98,7 @@ public sealed class VaultPipelineDeferredExtractionTests : IDisposable
 
         extractor.Settings.Should().ContainSingle();
         extractor.Settings[0].PageReading.Should().BeSameAs(PageReading);
+        extractor.Settings[0].SlideRendering.Should().BeSameAs(SlideRendering);
         extractor.Settings[0].SkipLlmRefine.Should().BeFalse();
         entry.PendingEnrichment.Should().Be(EnrichmentStages.None);
     }
@@ -117,6 +119,7 @@ public sealed class VaultPipelineDeferredExtractionTests : IDisposable
 
         extractor.Settings.Should().HaveCount(2);
         extractor.Settings[1].PageReading.Should().BeSameAs(PageReading);
+        extractor.Settings[1].SlideRendering.Should().BeSameAs(SlideRendering, "rendering is not an LLM stage; the upgrade's re-extraction keeps it");
         extractor.Settings[1].SkipLlmRefine.Should().BeFalse();
         summary.StillPending.Should().Be(EnrichmentStages.None);
         entry.PendingEnrichment.Should().Be(EnrichmentStages.None);
@@ -159,7 +162,7 @@ public sealed class VaultPipelineDeferredExtractionTests : IDisposable
         NullLogger<VaultPipeline>.Instance,
         options: MsOptions.Create(new FileVaultOptions
         {
-            VaultBasePath = _vaultDir, DeferEnrichment = defer, PageReading = PageReading, LlmRefine = LlmRefine,
+            VaultBasePath = _vaultDir, DeferEnrichment = defer, PageReading = PageReading, LlmRefine = LlmRefine, SlideRendering = SlideRendering,
         }),
         extractor: extractor,
         vectorStore: _vectorStore,

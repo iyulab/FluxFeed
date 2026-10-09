@@ -6,6 +6,16 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
+## [Unreleased]
+
+### Added
+- **`FileVaultOptions.SlideRendering`** reaches FileFlux's extraction (`ExtractOptions.SlideRendering`, FileFlux 0.55.0):
+  the presentation slides it selects are rendered and join the entry's images with their slide number, so a slide drawn
+  as a diagram is described like any other image instead of reaching the index only as its labels. Null by default.
+
+### Dependencies
+- Re-pinned sibling package(s) `FileFlux` 0.54.0 -> 0.55.0.
+
 ## [0.51.1] - 2026-10-09
 
 ### Fixed

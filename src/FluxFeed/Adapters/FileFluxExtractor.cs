@@ -46,7 +46,7 @@ public sealed partial class FileFluxExtractor : IExtractor
             // exactly that text. A whole-document LLM rewrite changes the text, so its spans no longer apply and are not
             // kept; a page-scoped refinement re-expresses them over its text, so they are.
             // Extraction first, with the vault's extraction options: refine would otherwise extract on its own, with none.
-            await processor.ExtractAsync(new ExtractOptions { PageReading = settings?.PageReading }, ct);
+            await processor.ExtractAsync(new ExtractOptions { PageReading = settings?.PageReading, SlideRendering = settings?.SlideRendering }, ct);
             await processor.RefineAsync(cancellationToken: ct);
             if (settings?.SkipLlmRefine != true)
             {
