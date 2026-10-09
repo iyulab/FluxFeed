@@ -8,6 +8,10 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Removed
+- **Breaking** — **`TrackedFile` and its `TrackedFileStatus` enum are gone.** Nothing used them: no FluxFeed API returned,
+  accepted or stored a `TrackedFile`. Migration: a tracked file is a `VaultEntry` — read its state from the `IVault` APIs.
+
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.81.0 -> 0.82.0, `FluxIndex.Storage.SQLite` 0.81.0 -> 0.82.0.
 
