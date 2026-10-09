@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.51.1] - 2026-10-09
 
 ### Fixed
 - **Runs on FluxIndex 0.81.0.** FluxIndex 0.81.0 moved `HybridSearchService` and its siblings from `FluxIndex.Core.Services` to
