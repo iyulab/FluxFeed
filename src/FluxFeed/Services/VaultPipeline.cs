@@ -888,13 +888,6 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return chunks;
     }
 
-    /// <summary>
-    /// Runs about-to-be-indexed chunks through the opt-in <see cref="IRAGSecurityPipeline"/>
-    /// (indirect prompt injection / RAG poisoning detection) before they are embedded and stored —
-    /// catching poisoned content at the door rather than relying solely on a retrieval-time check.
-    /// A chunk the pipeline suggests blocking is dropped from the batch entirely; one it suggests
-    /// sanitizing has its content replaced with the pipeline's sanitized version.
-    /// </summary>
     /// <summary>Metadata key holding the first page (1-based) a text chunk covers — the key FluxIndex's own FileFlux integration uses.</summary>
     public const string PageNumberMetadataKey = "pageNumber";
 
@@ -1213,6 +1206,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return copy;
     }
 
+    /// <summary>
+    /// Runs about-to-be-indexed chunks through the opt-in <see cref="IRAGSecurityPipeline"/>
+    /// (indirect prompt injection / RAG poisoning detection) before they are embedded and stored —
+    /// catching poisoned content at the door rather than relying solely on a retrieval-time check.
+    /// A chunk the pipeline suggests blocking is dropped from the batch entirely; one it suggests
+    /// sanitizing has its content replaced with the pipeline's sanitized version.
+    /// </summary>
     private async Task<List<VaultChunk>> ApplyRagSecurityAsync(
         List<VaultChunk> chunks,
         string sourcePath,

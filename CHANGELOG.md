@@ -8,6 +8,10 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Fixed
+- **`VaultPipeline.PageNumberMetadataKey`'s documentation describes the key.** It had carried the summary of the RAG
+  security step as well, so an IDE showed that text for the page-number key.
+
 ### Removed
 - **Breaking** — **`TrackedFile` and its `TrackedFileStatus` enum are gone.** Nothing used them: no FluxFeed API returned,
   accepted or stored a `TrackedFile`. Migration: a tracked file is a `VaultEntry` — read its state from the `IVault` APIs.
