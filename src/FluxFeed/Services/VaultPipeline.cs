@@ -860,7 +860,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             {
                 var metadata = new Dictionary<string, object>
                 {
-                    ["chunk_kind"] = ImageDescriptionChunkKind,
+                    [ChunkKindMetadataKey] = ImageDescriptionChunkKind,
                     ["image_id"] = image.Id,
                     ["image_file"] = image.FileName
                 };
@@ -903,6 +903,18 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <summary>Metadata key holding the last page (1-based) a text chunk covers.</summary>
     public const string EndPageMetadataKey = "ff_end_page";
 
+    /// <summary>
+    /// Metadata key holding the headings a text chunk sits under, outermost first, joined with <c>" &gt; "</c>
+    /// (<c>"Installation &gt; Linux"</c>) — present when the document has headings above the chunk.
+    /// </summary>
+    public const string HeadingPathMetadataKey = "heading_path";
+
+    /// <summary>
+    /// Metadata key holding what a chunk holds: <see cref="TableChunkKind"/>, <see cref="ImageDescriptionChunkKind"/>, or
+    /// absent for document text.
+    /// </summary>
+    public const string ChunkKindMetadataKey = "chunk_kind";
+
     /// <summary>Metadata key holding where, in seconds from the start of a recording, a text chunk begins.</summary>
     public const string StartSecondsMetadataKey = "ff_start_seconds";
 
@@ -929,6 +941,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
             metadata[StartSecondsMetadataKey] = startTime.TotalSeconds;
         if (location.EndTime is { } endTime)
             metadata[EndSecondsMetadataKey] = endTime.TotalSeconds;
+        if (location.HeadingPath.Count > 0)
+            metadata[HeadingPathMetadataKey] = string.Join(" > ", location.HeadingPath);
         return metadata;
     }
 
@@ -943,7 +957,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             return location;
 
         var metadata = location is null ? new Dictionary<string, object>() : new Dictionary<string, object>(location);
-        metadata["chunk_kind"] = TableChunkKind;
+        metadata[ChunkKindMetadataKey] = TableChunkKind;
         metadata["table_piece"] = piece.Piece;
         metadata["table_pieces"] = piece.Pieces;
         metadata["table_row_start"] = piece.RowStart;
@@ -1421,7 +1435,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         foreach (var chunk in chunks)
         {
-            if (string.Equals(MetadataText(chunk.Metadata, "chunk_kind"), ImageDescriptionChunkKind, StringComparison.Ordinal))
+            if (string.Equals(MetadataText(chunk.Metadata, ChunkKindMetadataKey), ImageDescriptionChunkKind, StringComparison.Ordinal))
             {
                 var imageId = MetadataText(chunk.Metadata, "image_id");
                 if (string.IsNullOrWhiteSpace(imageId))
@@ -3028,8 +3042,11 @@ public sealed record ContentLocation
     /// <summary>End of the stretch of a recording the chunk covers.</summary>
     public TimeSpan? EndTime { get; init; }
 
+    /// <summary>The headings the chunk sits under, outermost first; empty when the document has none above it.</summary>
+    public IReadOnlyList<string> HeadingPath { get; init; } = [];
+
     /// <summary>True when no field is set.</summary>
-    public bool IsEmpty => StartPage is null && EndPage is null && StartTime is null && EndTime is null;
+    public bool IsEmpty => StartPage is null && EndPage is null && StartTime is null && EndTime is null && HeadingPath.Count == 0;
 }
 
 /// <summary>

@@ -8,6 +8,13 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Added
+- **A stored text chunk says which section it is in.** Its metadata carries `heading_path`
+  (`VaultPipeline.HeadingPathMetadataKey`): the headings above the chunk, outermost first, joined with `" > "`
+  (`"Install > Windows"`). A search hit can then be cited by section, not only by page. `ContentLocation` gains `HeadingPath`,
+  and the FileFlux chunker fills it. `VaultPipeline.ChunkKindMetadataKey` names the `chunk_kind` key that table and image
+  chunks already carry.
+
 ### Fixed
 - **`VaultPipeline.PageNumberMetadataKey`'s documentation describes the key.** It had carried the summary of the RAG
   security step as well, so an IDE showed that text for the page-number key.
@@ -19,6 +26,7 @@ Releases before 0.28.0 predate this file — see the git history.
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.81.0 -> 0.82.0, `FluxIndex.Storage.SQLite` 0.81.0 -> 0.82.0.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.82.0 -> 0.83.0, `FluxIndex.Storage.SQLite` 0.82.0 -> 0.83.0.
+- Re-pinned sibling package(s) `FileFlux` 0.55.0 -> 0.56.0.
 
 ## [0.52.0] - 2026-10-09
 

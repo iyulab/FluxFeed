@@ -1,4 +1,4 @@
-using AwesomeAssertions;
+﻿using AwesomeAssertions;
 
 using IDocumentProcessorFactory = FileFlux.Core.IDocumentProcessorFactory;
 using FluxIndex.Core.Application.Interfaces;
@@ -159,6 +159,27 @@ public sealed class VaultPipelineSourceLocationTests : IDisposable
         returns.Should().OnlyContain(c => (double)c.Metadata![VaultPipeline.StartSecondsMetadataKey] == 12.5
             && (double)c.Metadata[VaultPipeline.EndSecondsMetadataKey] == 30.0
             && !c.Metadata.ContainsKey(VaultPipeline.StartPageMetadataKey));
+    }
+
+    // A chunk cut from a document with headings says which section it is in, so a consumer can cite «Install > Linux»
+    // instead of only a page; the chunker's heading path reaches the stored chunk's metadata.
+    [Fact]
+    public async Task Memorize_ChunksCarryTheHeadingsTheySitUnder()
+    {
+        // Sections long enough that the chunker does not merge them into one chunk.
+        var linuxBody = string.Join(" ", Enumerable.Repeat("Run the installer script from a terminal and follow its prompts.", 6));
+        var windowsBody = string.Join(" ", Enumerable.Repeat("Double-click the setup program and accept the default folder.", 6));
+        var text = $"# Install\n\n## Linux\n\n{linuxBody}\n\n## Windows\n\n{windowsBody}\n";
+        var pipeline = CreatePipeline(ExtractorReturning(text, spans: null));
+        var options = new MemorizeOptions { MaxChunkSize = 120, OverlapSize = 0, Strategy = "Paragraph", SkipCommit = true };
+
+        await pipeline.MemorizeAsync(await NewEntryAsync(), options, TestContext.Current.CancellationToken);
+
+        var linux = _stored.Where(c => c.Content.Contains("installer script", StringComparison.Ordinal)).ToList();
+        var windows = _stored.Where(c => c.Content.Contains("setup program", StringComparison.Ordinal)).ToList();
+        // Where a chunk starts decides its path; the chunker may keep a heading with the section that follows it.
+        linux.Should().NotBeEmpty().And.OnlyContain(c => ((string)c.Metadata![VaultPipeline.HeadingPathMetadataKey]).StartsWith("Install", StringComparison.Ordinal));
+        windows.Should().NotBeEmpty().And.OnlyContain(c => (string)c.Metadata![VaultPipeline.HeadingPathMetadataKey] == "Install > Windows");
     }
 
     // Positive control: without spans the same document yields chunks with no location.

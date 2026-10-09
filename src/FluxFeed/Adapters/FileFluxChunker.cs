@@ -119,6 +119,7 @@ public sealed partial class FileFluxChunker : IChunker
             EndPage = location.EndPage,
             StartTime = location.StartTime,
             EndTime = location.EndTime,
+            HeadingPath = location.HeadingPath.Where(h => !string.IsNullOrWhiteSpace(h)).ToArray(),
         };
         return result.IsEmpty ? null : result;
     }
