@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.53.0] - Unreleased
 
 ### Added
 - **A stored text chunk says which section it is in.** Its metadata carries `heading_path`
