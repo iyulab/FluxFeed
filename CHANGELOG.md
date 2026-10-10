@@ -6,6 +6,11 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
+## [Unreleased]
+
+### Dependencies
+- Re-pinned sibling package(s) `FileFlux` 0.56.0 -> 0.57.0, `FluxIndex.Core` 0.83.0 -> 0.84.0, `FluxIndex.Storage.SQLite` 0.83.0 -> 0.84.0.
+
 ## [0.53.0] - 2026-10-10
 
 ### Added
