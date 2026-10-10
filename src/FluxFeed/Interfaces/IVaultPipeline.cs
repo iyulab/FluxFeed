@@ -188,6 +188,24 @@ public interface IVaultPipeline
         float minScore = 0.0f,
         VaultSearchStrategy strategy = VaultSearchStrategy.Vector,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// The documents closest to <paramref name="documentId"/>: the centroid of its stored chunk vectors searched against
+    /// the other documents' chunks, one result per document (its best chunk), closest first, the document itself
+    /// excluded.
+    /// </summary>
+    /// <param name="documentId">The document to compare against (an entry's filepath hash).</param>
+    /// <param name="documentIds">Candidate documents; null = every document.</param>
+    /// <param name="topK">Maximum documents returned.</param>
+    /// <param name="minScore">Minimum score of a document's best chunk.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="InvalidOperationException">No vector store is wired in, or the document has no stored vectors.</exception>
+    Task<IReadOnlyList<PipelineSearchResult>> FindSimilarDocumentsAsync(
+        string documentId,
+        IEnumerable<string>? documentIds = null,
+        int topK = 10,
+        float minScore = 0.0f,
+        CancellationToken ct = default);
 }
 
 /// <summary>

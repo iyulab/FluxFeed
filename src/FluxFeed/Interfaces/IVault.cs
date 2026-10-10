@@ -541,7 +541,47 @@ public interface IVault
     /// <exception cref="InvalidOperationException">The options ask for something the vault cannot honour (for example a reranker that is not registered).</exception>
     /// <remarks>Failures of the index or the embedding service propagate as the exception they raised.</remarks>
     Task<VaultSearchResult> SearchAsync(string query, VaultSearchOptions? options = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// The memorized entries closest to the entry at <paramref name="filePath"/> — «documents like this one» — ranked by
+    /// how close they are, the entry itself excluded. Closeness is the vault's: the centroid of the entry's stored chunk
+    /// vectors is searched against the other entries' chunks, and each entry scores by its best chunk.
+    /// </summary>
+    /// <param name="filePath">The source path of a memorized entry.</param>
+    /// <param name="options">Scope, number of results and minimum score.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Similar entries, closest first. Empty when nothing else is in scope or above the minimum score.</returns>
+    /// <exception cref="ArgumentException"><paramref name="filePath"/> is not a searchable entry of this vault.</exception>
+    /// <exception cref="InvalidOperationException">The vault has no vector store, or the entry was stored without vectors.</exception>
+    Task<IReadOnlyList<VaultSimilarEntry>> FindSimilarEntriesAsync(
+        string filePath, VaultSimilarityOptions? options = null, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Options for <see cref="IVault.FindSimilarEntriesAsync"/>.
+/// </summary>
+public sealed class VaultSimilarityOptions
+{
+    /// <summary>
+    /// Paths (folders, files or path prefixes) the similar entries must be under; empty = the whole vault. Read the same
+    /// way as <see cref="VaultSearchOptions.PathScope"/>.
+    /// </summary>
+    public IReadOnlyList<string> PathScope { get; init; } = [];
+
+    /// <summary>Maximum number of entries returned. Default 10.</summary>
+    public int TopK { get; init; } = 10;
+
+    /// <summary>Minimum similarity (the best chunk's score) an entry needs to be returned. Default 0.</summary>
+    public float MinScore { get; init; }
+}
+
+/// <summary>
+/// One entry similar to the requested one.
+/// </summary>
+/// <param name="Entry">The similar entry.</param>
+/// <param name="Score">Its similarity: the score of its chunk closest to the requested entry's centroid.</param>
+/// <param name="ChunkIndex">The index of that chunk.</param>
+public sealed record VaultSimilarEntry(VaultEntry Entry, float Score, int ChunkIndex);
 
 /// <summary>
 /// Result of change detection for a file.

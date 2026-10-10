@@ -1678,56 +1678,7 @@ public sealed partial class VaultManager : IVault
         var allEntries = (await ListAsync(null, ct)).Where(e => e.IsSearchable).ToList();
         var entriesDict = allEntries.ToDictionary(e => e.FilepathHash, e => e);
 
-        // Filter entries by path scope
-        List<VaultEntry> targetEntries;
-        var searchedPaths = new List<string>();
-
-        if (options.PathScope.Count == 0)
-        {
-            // Search all
-            targetEntries = allEntries;
-            searchedPaths.Add("*");
-        }
-        else
-        {
-            var filteredEntries = new List<VaultEntry>();
-
-            foreach (var scope in options.PathScope)
-            {
-                var normalizedScope = Path.GetFullPath(scope.TrimEnd('/', '\\'));
-                searchedPaths.Add(normalizedScope);
-
-                // Check if scope is a directory or file
-                if (Directory.Exists(normalizedScope))
-                {
-                    // Directory scope - match all files under this directory
-                    var scopePrefix = FolderPrefix(normalizedScope);
-                    var matchingEntries = allEntries.Where(e =>
-                        IsUnderFolder(e.SourcePath, scopePrefix) ||
-                        e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase));
-                    filteredEntries.AddRange(matchingEntries);
-                }
-                else if (File.Exists(normalizedScope))
-                {
-                    // File scope - match exact file
-                    var matchingEntry = allEntries.FirstOrDefault(e =>
-                        e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase));
-                    if (matchingEntry != null)
-                    {
-                        filteredEntries.Add(matchingEntry);
-                    }
-                }
-                else
-                {
-                    // Path doesn't exist - try to match as prefix pattern
-                    var matchingEntries = allEntries.Where(e =>
-                        e.SourcePath.StartsWith(normalizedScope, StringComparison.OrdinalIgnoreCase));
-                    filteredEntries.AddRange(matchingEntries);
-                }
-            }
-
-            targetEntries = filteredEntries.Distinct().ToList();
-        }
+        var (targetEntries, searchedPaths) = ResolvePathScope(allEntries, options.PathScope);
 
         if (targetEntries.Count == 0)
         {
@@ -1789,6 +1740,74 @@ public sealed partial class VaultManager : IVault
             RequestedStrategy = options.SearchStrategy,
             ExecutedStrategy = pipelineResponse.ExecutedStrategy
         };
+    }
+
+    public async Task<IReadOnlyList<VaultSimilarEntry>> FindSimilarEntriesAsync(
+        string filePath, VaultSimilarityOptions? options = null, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        options ??= new VaultSimilarityOptions();
+
+        var source = await GetAsync(filePath, ct);
+        if (source is not { IsSearchable: true })
+            throw new ArgumentException($"'{filePath}' is not a searchable entry of this vault.", nameof(filePath));
+
+        var allEntries = (await ListAsync(null, ct)).Where(e => e.IsSearchable).ToList();
+        var byHash = allEntries.ToDictionary(e => e.FilepathHash, e => e, StringComparer.OrdinalIgnoreCase);
+        var candidates = options.PathScope.Count == 0
+            ? null
+            : ResolvePathScope(allEntries, options.PathScope).Entries.Select(e => e.FilepathHash).ToList();
+
+        var results = await _pipeline.FindSimilarDocumentsAsync(source.FilepathHash, candidates, options.TopK, options.MinScore, ct);
+
+        return results
+            .Where(r => byHash.ContainsKey(r.DocumentId))
+            .Select(r => new VaultSimilarEntry(byHash[r.DocumentId], r.Score, r.ChunkIndex))
+            .ToList();
+    }
+
+    /// <summary>
+    /// The entries a path scope selects, and the paths it was read as: each scope is a folder (every entry under it), a
+    /// file (that entry), or — when the path does not exist — a source-path prefix. An empty scope selects every entry.
+    /// </summary>
+    private static (List<VaultEntry> Entries, List<string> SearchedPaths) ResolvePathScope(
+        List<VaultEntry> allEntries, IReadOnlyList<string> pathScope)
+    {
+        var searchedPaths = new List<string>();
+        if (pathScope.Count == 0)
+        {
+            searchedPaths.Add("*");
+            return (allEntries, searchedPaths);
+        }
+
+        var filteredEntries = new List<VaultEntry>();
+        foreach (var scope in pathScope)
+        {
+            var normalizedScope = Path.GetFullPath(scope.TrimEnd('/', '\\'));
+            searchedPaths.Add(normalizedScope);
+
+            if (Directory.Exists(normalizedScope))
+            {
+                var scopePrefix = FolderPrefix(normalizedScope);
+                filteredEntries.AddRange(allEntries.Where(e =>
+                    IsUnderFolder(e.SourcePath, scopePrefix) ||
+                    e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase)));
+            }
+            else if (File.Exists(normalizedScope))
+            {
+                var matchingEntry = allEntries.FirstOrDefault(e =>
+                    e.SourcePath.Equals(normalizedScope, StringComparison.OrdinalIgnoreCase));
+                if (matchingEntry != null)
+                    filteredEntries.Add(matchingEntry);
+            }
+            else
+            {
+                filteredEntries.AddRange(allEntries.Where(e =>
+                    e.SourcePath.StartsWith(normalizedScope, StringComparison.OrdinalIgnoreCase)));
+            }
+        }
+
+        return (filteredEntries.Distinct().ToList(), searchedPaths);
     }
 
     /// <summary>

@@ -8,13 +8,25 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Added
+- **«Documents like this one».** `IVault.FindSimilarEntriesAsync(filePath, VaultSimilarityOptions?)` returns the
+  memorized entries closest to an entry, closest first, the entry itself excluded, as `VaultSimilarEntry(Entry, Score,
+  ChunkIndex)`. The vault compares the entry's stored chunk vectors (their centroid, searched against the other
+  entries' chunks; an entry scores by its best chunk). `VaultSimilarityOptions` takes a `PathScope` (read like
+  `VaultSearchOptions.PathScope`), `TopK` and `MinScore`. Needs FluxIndex 0.85.0, whose sqlite-vec store returns the
+  vectors it stored.
+
 ### Changed
+- **Breaking: `IVault` and `IVaultPipeline` have a new member each** (`FindSimilarEntriesAsync`,
+  `FindSimilarDocumentsAsync`). Migration: an implementation of either interface (a test fake, a custom pipeline
+  registered with `AddFileVault<TPipeline>`) adds the member — a fake can throw `NotSupportedException`.
 - **Information-level log lines in extraction and the vault pipeline build their arguments only when that level is
   enabled.** The re-extract, start-upgrade and purge-by-vault lines computed counts and joined lists on every call.
   The build now treats warnings as errors and runs the recommended analyzers, like the sibling packages.
 
 ### Dependencies
 - Re-pinned sibling package(s) `FileFlux` 0.56.0 -> 0.57.0, `FluxIndex.Core` 0.83.0 -> 0.84.0, `FluxIndex.Storage.SQLite` 0.83.0 -> 0.84.0.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.84.0 -> 0.85.0, `FluxIndex.Storage.SQLite` 0.84.0 -> 0.85.0.
 
 ## [0.53.0] - 2026-10-10
 

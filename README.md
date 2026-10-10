@@ -39,6 +39,10 @@ document's extracted content, see its commit history, and edit it without touchi
 - **Move and rename without re-embedding** — `IVault.MoveAsync(sourcePath, destinationPath)` and
   `MoveFolderAsync(sourceFolder, destinationFolder)` move a tracked file's entry, git history and index rows (vector,
   keyword, GraphRAG) to its new path; always available — see [Moving and renaming files](#moving-and-renaming-files--moveasync)
+- **Similar entries** — `IVault.FindSimilarEntriesAsync(filePath, new VaultSimilarityOptions { PathScope, TopK, MinScore })`
+  returns the memorized entries closest to one entry («documents like this one»), closest first and the entry itself
+  left out: the centroid of its stored chunk vectors is searched against the others, and each entry scores by its best
+  chunk. Always available with a vector store; no query text to invent
 - **Reranking** — `VaultSearchOptions.UseReranker` orders an over-fetched candidate pool with the registered FluxIndex
   `IReranker` (opt-in; see [Reranked search](#reranked-search--vaultsearchoptionsusereranker))
 

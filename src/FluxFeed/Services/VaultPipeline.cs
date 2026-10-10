@@ -1664,6 +1664,75 @@ public sealed partial class VaultPipeline : IVaultPipeline
         return new VaultPipelineSearchResponse(vectorResults, VaultSearchStrategy.Vector);
     }
 
+    public async Task<IReadOnlyList<PipelineSearchResult>> FindSimilarDocumentsAsync(
+        string documentId,
+        IEnumerable<string>? documentIds = null,
+        int topK = 10,
+        float minScore = 0.0f,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(topK);
+        if (_vectorStore == null)
+            throw new InvalidOperationException("Finding similar entries needs a vector store; this vault has none (keyword-only).");
+
+        var source = (await _vectorStore.GetByDocumentIdAsync(documentId, ct)).ToList();
+        var vectors = source.Select(c => c.Embedding).OfType<float[]>().Where(v => v.Length > 0).ToList();
+        if (vectors.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"The document {documentId} has no stored vectors to compare (it was stored without an embedding); " +
+                "re-memorize it with an embedding service registered.");
+        }
+
+        var centroid = Centroid(vectors);
+        var docIdSet = documentIds?.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        docIdSet?.Remove(documentId);
+        if (docIdSet is { Count: 0 })
+            return [];
+
+        // Over-fetch: the source document's own chunks rank near the top, and several chunks of one document can
+        // outrank another document's best.
+        var fetch = (topK + 1) * 4 + source.Count;
+        var hits = await _vectorStore.SearchAsync(centroid, fetch, minScore, BuildDocScopeFilter(docIdSet), ct);
+
+        return hits
+            .Where(h => !string.Equals(h.DocumentId, documentId, StringComparison.OrdinalIgnoreCase))
+            .Where(h => docIdSet == null || docIdSet.Contains(h.DocumentId))
+            .GroupBy(h => h.DocumentId, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(h => h.Score ?? 0f).First())
+            .OrderByDescending(h => h.Score ?? 0f)
+            .Take(topK)
+            .Select(h => new PipelineSearchResult
+            {
+                DocumentId = h.DocumentId,
+                ChunkId = h.Id.ToString(),
+                ChunkIndex = h.ChunkIndex,
+                Content = h.Content,
+                Score = h.Score ?? 0f,
+                Metadata = h.Metadata
+            })
+            .ToList();
+    }
+
+    // The normalized mean of the vectors: one direction for the whole document.
+    private static float[] Centroid(List<float[]> vectors)
+    {
+        var dimensions = vectors[0].Length;
+        var sum = new double[dimensions];
+        foreach (var vector in vectors.Where(v => v.Length == dimensions))
+        {
+            for (var i = 0; i < dimensions; i++)
+                sum[i] += vector[i];
+        }
+
+        var norm = Math.Sqrt(sum.Sum(x => x * x));
+        var centroid = new float[dimensions];
+        for (var i = 0; i < dimensions; i++)
+            centroid[i] = norm > 0 ? (float)(sum[i] / norm) : 0f;
+        return centroid;
+    }
+
     private async Task<IReadOnlyList<PipelineSearchResult>> VectorSearchAsync(
         string query,
         HashSet<string>? docIdSet,
