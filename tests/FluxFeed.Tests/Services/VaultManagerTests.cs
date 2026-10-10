@@ -124,6 +124,8 @@ public class VaultManagerTests : IDisposable
                 // Ignore cleanup errors
             }
         }
+
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

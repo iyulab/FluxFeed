@@ -75,6 +75,8 @@ public class VaultManagerPriorityTests : IDisposable
         {
             // Best-effort cleanup.
         }
+
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

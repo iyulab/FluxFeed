@@ -22,6 +22,8 @@ public class VaultEntryTests : IDisposable
         {
             Directory.Delete(_testDir, recursive: true);
         }
+
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

@@ -1,0 +1,7 @@
+root = true
+
+# Test projects: underscores in test method names are the convention (e.g. Method_Should_Work)
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+# Literal arrays passed as test arguments are clearer inline than hoisted to static fields
+dotnet_diagnostic.CA1861.severity = none

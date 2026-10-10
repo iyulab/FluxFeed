@@ -56,7 +56,7 @@ public class VaultQueueGroupFairnessTests : IDisposable
     private VaultQueueService CreateService() =>
         new(NullLogger<VaultQueueService>.Instance, MsOptions.Create(_options));
 
-    private Task EnqueueAsync(VaultQueueService queue, string hash, string group) =>
+    private Task<VaultJob> EnqueueAsync(VaultQueueService queue, string hash, string group) =>
         queue.EnqueueMemorizeAsync(
             hash, Path.Combine(_testDir, hash + ".md"), groupKey: group,
             ct: TestContext.Current.CancellationToken);

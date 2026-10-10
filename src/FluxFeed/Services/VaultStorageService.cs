@@ -406,7 +406,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
         }
     }
 
-    private async Task<List<ImageManifestEntry>?> ReadManifestAsync(VaultEntry entry, CancellationToken ct)
+    private static async Task<List<ImageManifestEntry>?> ReadManifestAsync(VaultEntry entry, CancellationToken ct)
     {
         if (!File.Exists(entry.ImagesManifestPath))
             return null;
@@ -647,6 +647,6 @@ public sealed partial class VaultStorageService : IVaultStorageService
         // Settable: recorded per attempt, cleared once Description is finally set.
         public EnrichmentFailure? LastEnrichmentFailure { get; set; }
 
-        public IReadOnlyList<int> ShownOn() => PageNumbers is { Count: > 0 } pages ? pages : PageNumber is { } page ? [page] : [];
+        public List<int> ShownOn() => PageNumbers is { Count: > 0 } pages ? pages : PageNumber is { } page ? [page] : [];
     }
 }

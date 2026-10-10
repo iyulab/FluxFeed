@@ -72,15 +72,17 @@ public sealed partial class FileFluxExtractor : IExtractor
             var warnings = result.Raw?.Warnings is { Count: > 0 } w ? w.ToArray() : null;
 
             LogExtracted(_logger, content.Length, images?.Count ?? 0, sourcePath);
-            if (result.LlmRefined?.Pages is { Count: > 0 } refinedPages)
+            // The tallies are computed only when the line is written. They are locals rather than call
+            // arguments because CA1873 cannot see an IsEnabled guard around a static [LoggerMessage] method.
+            if (result.LlmRefined?.Pages is { Count: > 0 } refinedPages && _logger.IsEnabled(LogLevel.Information))
             {
-                LogPageRefinement(_logger, sourcePath,
-                    refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Refined),
-                    refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Native),
-                    refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Rejected),
-                    refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Skipped),
-                    PageReasons(refinedPages) ?? "none",
-                    PassFailures(refinedPages) ?? "none");
+                var refined = refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Refined);
+                var native = refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Native);
+                var rejected = refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Rejected);
+                var skipped = refinedPages.Count(p => p.Outcome == PageRefinementOutcome.Skipped);
+                var reasons = PageReasons(refinedPages) ?? "none";
+                var failures = PassFailures(refinedPages) ?? "none";
+                LogPageRefinement(_logger, sourcePath, refined, native, rejected, skipped, reasons, failures);
             }
             if (hints != null || warnings != null)
             {

@@ -36,6 +36,8 @@ public class VaultQueueStatisticsTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
         }
         catch { /* best-effort */ }
+
+        GC.SuppressFinalize(this);
     }
 
     private VaultQueueService CreateService() =>

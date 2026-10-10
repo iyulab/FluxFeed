@@ -1679,7 +1679,7 @@ public sealed partial class VaultManager : IVault
         var entriesDict = allEntries.ToDictionary(e => e.FilepathHash, e => e);
 
         // Filter entries by path scope
-        IReadOnlyList<VaultEntry> targetEntries;
+        List<VaultEntry> targetEntries;
         var searchedPaths = new List<string>();
 
         if (options.PathScope.Count == 0)

@@ -48,6 +48,8 @@ public class VaultQueueSameEntryConcurrencyTests : IDisposable
         {
             // Best-effort cleanup; OS may still hold file handles briefly.
         }
+
+        GC.SuppressFinalize(this);
     }
 
     private VaultQueueService CreateService() =>

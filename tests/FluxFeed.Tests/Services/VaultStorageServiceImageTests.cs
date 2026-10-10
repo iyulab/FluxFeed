@@ -18,6 +18,8 @@ namespace FluxFeed.Tests.Services;
 /// </summary>
 public class VaultStorageServiceImageTests : IDisposable
 {
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     private readonly string _testDir;
     private readonly string _vaultDir;
     private readonly VaultStorageService _storage;
@@ -47,6 +49,8 @@ public class VaultStorageServiceImageTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
         }
         catch { /* ignore cleanup errors */ }
+
+        GC.SuppressFinalize(this);
     }
 
     [Fact]
@@ -81,8 +85,7 @@ public class VaultStorageServiceImageTests : IDisposable
         File.Exists(manifestPath).Should().BeTrue();
 
         var manifestJson = await File.ReadAllTextAsync(manifestPath, TestContext.Current.CancellationToken);
-        var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-        var manifest = JsonSerializer.Deserialize<List<ImageManifestEntry>>(manifestJson, jsonOptions);
+        var manifest = JsonSerializer.Deserialize<List<ImageManifestEntry>>(manifestJson, ManifestJsonOptions);
 
         manifest.Should().NotBeNull();
         manifest!.Count.Should().Be(3);
@@ -298,7 +301,7 @@ public class VaultStorageServiceImageTests : IDisposable
     }
 
     // Helper class to deserialize manifest
-    private class ImageManifestEntry
+    private sealed class ImageManifestEntry
     {
         public string Id { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;

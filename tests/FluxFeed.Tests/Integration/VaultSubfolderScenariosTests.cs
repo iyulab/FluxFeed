@@ -104,6 +104,8 @@ public class VaultSubfolderScenariosTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
         }
         catch { /* ignore cleanup errors */ }
+
+        GC.SuppressFinalize(this);
     }
 
     #region Test Scenarios
@@ -338,7 +340,7 @@ public class VaultSubfolderScenariosTests : IDisposable
 
         // Assert
         afterCount.Should().BeLessThan(initialCount);
-        searchResult.Items.Any(i => i.SourcePath.EndsWith("c.pdf")).Should().BeFalse();
+        searchResult.Items.Any(i => i.SourcePath.EndsWith("c.pdf", StringComparison.Ordinal)).Should().BeFalse();
     }
 
     [Fact]
@@ -409,7 +411,7 @@ public class VaultSubfolderScenariosTests : IDisposable
     /// <summary>
     /// Simple in-memory vector store for testing.
     /// </summary>
-    private class InMemoryVectorStore : IVectorStore
+    private sealed class InMemoryVectorStore : IVectorStore
     {
         private readonly List<DocumentChunk> _chunks = [];
         private readonly object _lock = new();

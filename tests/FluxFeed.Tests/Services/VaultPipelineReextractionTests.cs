@@ -119,7 +119,7 @@ public sealed class VaultPipelineReextractionTests : IDisposable
 
     private static ExtractionResult New => new() { Content = "New extraction body.", Images = [Image("page3_Im1", page: 3)] };
 
-    private Task<string> RefinedAsync(VaultEntry entry) => File.ReadAllTextAsync(entry.RefinedMdPath, TestContext.Current.CancellationToken);
+    private static Task<string> RefinedAsync(VaultEntry entry) => File.ReadAllTextAsync(entry.RefinedMdPath, TestContext.Current.CancellationToken);
 
     [Fact]
     public async Task Memorize_RecordsTheExtractor_WithThePipelineRevision()

@@ -98,6 +98,8 @@ public class GitServiceTests : IDisposable
         {
             try { Directory.Delete(_repoDir, recursive: true); } catch { /* best-effort cleanup */ }
         }
+
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

@@ -75,7 +75,7 @@ public sealed class VaultFactoryTests : IDisposable
     /// built in, so the shared services are registered here rather than handed to the constructor.
     /// Scope validation is on: a captive dependency would fail these tests, not hide in them.
     /// </summary>
-    private ServiceProvider BuildProvider(
+    private static ServiceProvider BuildProvider(
         IVectorStore? vectorStore = null,
         IEmbeddingService? embeddingService = null,
         IHybridSearchService? hybridSearch = null,
@@ -104,7 +104,7 @@ public sealed class VaultFactoryTests : IDisposable
             _git,
             _fileWatcher);
 
-    private async Task MemorizeThroughTenantAsync(IVaultFactory factory)
+    private async Task MemorizeThroughTenantAsync(VaultFactory factory)
     {
         var vault = factory.GetOrCreate(TenantId);
         var context = factory.GetContext(TenantId)!;

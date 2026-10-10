@@ -97,7 +97,7 @@ public sealed class WatchedFolderRemovalTests : IDisposable
         return Path.GetFullPath(path);
     }
 
-    private IReadOnlyList<string> RemovedPaths() =>
+    private List<string> RemovedPaths() =>
         _queue.ReceivedCalls()
             .Where(c => c.GetMethodInfo().Name == nameof(IVaultQueueService.EnqueueRemoveAsync))
             .Select(c => (string)c.GetArguments()[1]!)

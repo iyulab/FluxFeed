@@ -160,7 +160,7 @@ public sealed class VaultPipelineContextualEnrichmentTests : IDisposable
 
         // The embedding saw the enriched text, not the plain passage.
         await _embedding.Received(1).GenerateEmbeddingsBatchAsync(
-            Arg.Is<IEnumerable<string>>(texts => texts.All(t => t.StartsWith("Quarterly sales report"))),
+            Arg.Is<IEnumerable<string>>(texts => texts.All(t => t.StartsWith("Quarterly sales report", StringComparison.Ordinal))),
             Arg.Any<CancellationToken>());
     }
 

@@ -97,6 +97,8 @@ public class FileVaultPipelineSimulationTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
         }
         catch { /* ignore cleanup errors */ }
+
+        GC.SuppressFinalize(this);
     }
 
     [Fact]
@@ -654,7 +656,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
 
     #region Helper Classes
 
-    private class SearchResult
+    private sealed class SearchResult
     {
         public string DocumentId { get; set; } = "";
         public string Content { get; set; } = "";
@@ -664,7 +666,7 @@ public class FileVaultPipelineSimulationTests : IDisposable
     /// <summary>
     /// Simple in-memory vector store for testing.
     /// </summary>
-    private class InMemoryVectorStore : IVectorStore
+    private sealed class InMemoryVectorStore : IVectorStore
     {
         private readonly List<DocumentChunk> _chunks = [];
         private readonly object _lock = new();

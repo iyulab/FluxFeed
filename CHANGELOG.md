@@ -8,6 +8,11 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Changed
+- **Information-level log lines in extraction and the vault pipeline build their arguments only when that level is
+  enabled.** The re-extract, start-upgrade and purge-by-vault lines computed counts and joined lists on every call.
+  The build now treats warnings as errors and runs the recommended analyzers, like the sibling packages.
+
 ### Dependencies
 - Re-pinned sibling package(s) `FileFlux` 0.56.0 -> 0.57.0, `FluxIndex.Core` 0.83.0 -> 0.84.0, `FluxIndex.Storage.SQLite` 0.83.0 -> 0.84.0.
 

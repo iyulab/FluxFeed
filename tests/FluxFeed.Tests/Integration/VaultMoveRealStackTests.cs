@@ -237,7 +237,7 @@ public sealed class VaultMoveRealStackTests : IDisposable
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
-    private static string? Text(IReadOnlyDictionary<string, object>? metadata, string key) =>
+    private static string? Text(Dictionary<string, object>? metadata, string key) =>
         metadata != null && metadata.TryGetValue(key, out var value) ? value switch
         {
             System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } json => json.GetString(),

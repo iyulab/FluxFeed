@@ -395,7 +395,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
         {
             if ((await _git.StatusAsync(entry.VaultPath, ct)).ModifiedFiles.Count == 0)
             {
-                LogReextractingOutdated(_logger, entry.SourcePath, entry.ExtractedBy?.ToString() ?? "unrecorded", current.ToString());
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    var recorded = entry.ExtractedBy?.ToString() ?? "unrecorded";
+                    var currentExtractor = current.ToString();
+                    LogReextractingOutdated(_logger, entry.SourcePath, recorded, currentExtractor);
+                }
+
                 return await MemorizeAsync(entry, options ?? VaultDefaults($"re-extract: {current}"), ct);
             }
 
@@ -469,7 +475,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
         try
         {
-            LogStartingUpgrade(_logger, entry.SourcePath, entry.PendingEnrichment.ToString());
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                var pending = entry.PendingEnrichment.ToString();
+                LogStartingUpgrade(_logger, entry.SourcePath, pending);
+            }
 
             // An upgrade works from what memorize already produced; it never re-extracts.
             if (!entry.RefinedExists)
@@ -828,7 +838,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // The per-format strategy override is deliberately not applied here: it is keyed on the
             // source document's extension, and a description is prose produced by the enricher, not
             // content in that document's format.
-            IReadOnlyList<string> parts;
+            List<string> parts;
             if (_chunker != null)
             {
                 var located = await _chunker.ChunkAsync(
@@ -1139,7 +1149,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// The rows currently stored under <paramref name="ids"/>. Empty when the store cannot say (no vector store, or a store
     /// that does not implement the lookup) — then nothing is reused or skipped, which is today's behaviour.
     /// </summary>
-    private async Task<IReadOnlyDictionary<string, DocumentChunk>> GetStoredChunksAsync(IReadOnlyList<string> ids, CancellationToken ct)
+    private async Task<IReadOnlyDictionary<string, DocumentChunk>> GetStoredChunksAsync(List<string> ids, CancellationToken ct)
     {
         if (_vectorStore is null || ids.Count == 0)
         {
@@ -1211,7 +1221,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         _ => System.Text.Json.JsonSerializer.Serialize(value),
     };
 
-    private static IReadOnlyDictionary<string, object> WithMetadata(IReadOnlyDictionary<string, object>? existing, string key, object value)
+    private static Dictionary<string, object> WithMetadata(IReadOnlyDictionary<string, object>? existing, string key, object value)
     {
         var copy = existing is null
             ? new Dictionary<string, object>(StringComparer.Ordinal)
@@ -1500,7 +1510,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     }
 
     /// <summary>A metadata value as text, whether the store hands it back as a string or as JSON.</summary>
-    private static string? MetadataText(IReadOnlyDictionary<string, object>? metadata, string key)
+    private static string? MetadataText(Dictionary<string, object>? metadata, string key)
     {
         if (metadata == null || !metadata.TryGetValue(key, out var value) || value == null)
             return null;
@@ -1548,7 +1558,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
             LogPurgedKeywordIndex(_logger, keywordDeleted, vaultId);
         }
 
-        LogRemovedChunks(_logger, $"vault_id={vaultId}");
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            var scope = $"vault_id={vaultId}";
+            LogRemovedChunks(_logger, scope);
+        }
 
         // Still the vector count rather than a sum: both legs hold the same chunks, so adding them
         // would report twice the number of chunks that existed.
@@ -2280,7 +2294,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
     /// <param name="entry">The entry whose partial generation is being rolled back.</param>
     private async Task<IReadOnlyList<string>> TryRollbackAsync(
         VaultEntry entry,
-        IReadOnlyList<string> attemptedChunkIds)
+        List<string> attemptedChunkIds)
     {
         if (attemptedChunkIds.Count == 0)
         {

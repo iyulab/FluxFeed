@@ -112,7 +112,7 @@ public sealed class VaultPipelineRollbackResilienceTests : IDisposable
     }
 
     /// <summary>The shape of the reported failure: the store refuses the read outright.</summary>
-    private static Exception LookupFailure() =>
+    private static InvalidOperationException LookupFailure() =>
         new InvalidOperationException("Received message exceeds the maximum configured message size.");
 
     public void Dispose()
