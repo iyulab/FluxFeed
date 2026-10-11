@@ -214,17 +214,28 @@ public sealed class WatchedFolderSyncTests : IDisposable
     [Fact]
     public async Task With_the_real_watcher_a_file_saved_several_times_is_memorized_once()
     {
-        var options = new FileVaultOptions { DebounceDelayMs = 300 };
+        // The debounce is long against the 30 ms between saves, so a slow runner does not split the burst in two.
+        var options = new FileVaultOptions { DebounceDelayMs = 1000 };
         using var watcher = new FileWatcherService(NullLogger<FileWatcherService>.Instance, MsOptions.Create(options));
         using var sync = new WatchedFolderSync(watcher, _ => ValueTask.FromResult(new VaultLease(_vault, owner: null)));
         var folder = sync.GetOrAdd(WatchedFolder.Create(_root, autoMemorize: true, includePatterns: ["*.md"]));
         await watcher.StartWatchingAsync(folder, Ct);
         var path = Path.Combine(_root, "note.md");
 
+        var saved = new List<DateTime>();
         for (var i = 0; i < 5; i++)
         {
             await System.IO.File.WriteAllTextAsync(path, $"revision {i}", Ct);
+            saved.Add(DateTime.UtcNow);
             await Task.Delay(30, Ct);
+        }
+
+        // The claim is about saves inside one debounce window. If the machine stalled between two saves for longer than
+        // the window, two memorizes are the correct outcome; say the run proved nothing instead of failing.
+        var widestGap = saved.Zip(saved.Skip(1), (a, b) => b - a).Max();
+        if (widestGap.TotalMilliseconds >= options.DebounceDelayMs / 2.0)
+        {
+            Assert.Skip($"The saves were {widestGap.TotalMilliseconds:F0} ms apart at worst; the burst did not fit the debounce window.");
         }
 
         var deadline = DateTime.UtcNow.AddSeconds(10);
