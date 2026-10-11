@@ -8,6 +8,8 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Version>0.54.0</Version>
+    <!-- nuget.org «Release Notes»: the GitHub release of this version (its notes are the CHANGELOG section). -->
+    <PackageReleaseNotes>https://github.com/iyulab/FluxFeed/releases/tag/v$(Version)</PackageReleaseNotes>
     <AssemblyVersion>$(Version).0</AssemblyVersion>
     <FileVersion>$(Version).0</FileVersion>
     <Authors>iyulab</Authors>
