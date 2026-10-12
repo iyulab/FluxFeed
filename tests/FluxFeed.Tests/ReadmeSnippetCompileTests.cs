@@ -1,38 +1,29 @@
-using System.Collections.Immutable;
 using System.Reflection;
-using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
+using Iyu.Conventions.Testing.Snippets;
 using Xunit;
 
 namespace FluxFeed.Tests;
 
 /// <summary>
-/// Compiles every <c>```csharp</c> block in README.md against the current assemblies. A compiler checks the receiver,
-/// the arguments, the return types a block goes on to use, and the namespaces it needs.
+/// Compiles every C# block in README.md against the current assemblies. A compiler checks the receiver, the arguments,
+/// the return types a block goes on to use, and the namespaces it needs.
 /// </summary>
 /// <remarks>
-/// A block is compiled as a top-level program: its <c>using</c> lines are hoisted, the common usings below and the
-/// usings the Quick Start states are added, and the stand-ins below are declared when the block uses the name without
-/// declaring it — values a reader already has from the surrounding text (the vault, a file path, a logger), not part of
-/// what the block shows.
+/// Each block is compiled as a top-level program by <see cref="SnippetCompiler"/>: its own usings, the common usings and
+/// the usings the Quick Start states, and the stand-ins below when the block uses the name without declaring it — values
+/// and types a reader already has from the surrounding text (the vault, a file path, a logger, their own embedder), not
+/// part of what the block shows.
 /// </remarks>
-public class ReadmeSnippetCompileTests
+public partial class ReadmeSnippetCompileTests
 {
-    // A block that is deliberately not a program (a signature sketch, pseudocode) is listed here by the heading it sits
-    // under, with the reason. Shrink this, never grow it silently.
-    private static readonly Dictionary<string, string> Fragments = new(StringComparer.Ordinal);
+    // A block that is deliberately not a program (a signature sketch, pseudocode), by the heading it sits under, with the
+    // reason. Shrink this, never grow it silently.
+    private static readonly SnippetRoster Fragments = new(new Dictionary<string, string>(StringComparer.Ordinal));
 
     // The implicit usings of an SDK console project (ImplicitUsings=enable).
-    private const string CommonUsings = """
-        using System;
-        using System.Collections.Generic;
-        using System.IO;
-        using System.Linq;
-        using System.Threading;
-        using System.Threading.Tasks;
-        """;
+    private static readonly string[] CommonUsings =
+        ["System", "System.Collections.Generic", "System.IO", "System.Linq", "System.Threading", "System.Threading.Tasks"];
 
     // The README reads as one guide: its Quick Start states these usings once, and every later block assumes them.
     // ReadmeUsings_AreTheOnesTheQuickStartStates keeps this list and the README's statement the same.
@@ -42,37 +33,33 @@ public class ReadmeSnippetCompileTests
         "Microsoft.Extensions.DependencyInjection", "Microsoft.Extensions.Hosting",
     ];
 
-    private static readonly (string Name, string Declaration)[] StandIns =
-    [
-        ("services", "IServiceCollection services = new ServiceCollection();"),
-        ("embedder", "IEmbeddingService embedder = null!;"),
-        ("vault", "IVault vault = null!;"),
-        ("path", "string path = \"\";"),
-        ("ct", "CancellationToken ct = default;"),
+    private static readonly Dictionary<string, string> StandIns = new(StringComparer.Ordinal)
+    {
+        ["services"] = "IServiceCollection services = new ServiceCollection();",
+        ["embedder"] = "IEmbeddingService embedder = null!;",
+        ["vault"] = "IVault vault = null!;",
+        ["path"] = "string path = \"\";",
+        ["ct"] = "CancellationToken ct = default;",
         // A typed logger is an ILogger too; the hand-built pipeline takes ILogger<VaultPipeline>.
-        ("logger", "Microsoft.Extensions.Logging.ILogger<FluxFeed.Services.VaultPipeline> logger = null!;"),
-        ("configuration", "Microsoft.Extensions.Configuration.IConfiguration configuration = null!;"),
-        ("factory", "IVaultFactory factory = null!;"),
+        ["logger"] = "Microsoft.Extensions.Logging.ILogger<FluxFeed.Services.VaultPipeline> logger = null!;",
+        ["configuration"] = "Microsoft.Extensions.Configuration.IConfiguration configuration = null!;",
+        ["factory"] = "IVaultFactory factory = null!;",
         // The Quick Start's host, which later blocks keep using.
-        ("host", "IHost host = null!;"),
-        ("queue", "IVaultQueueService queue = null!;"),
-        ("hash", "string hash = \"\";"),
-        ("vaultBasePath", "string vaultBasePath = \"\";"),
+        ["host"] = "IHost host = null!;",
+        ["queue"] = "IVaultQueueService queue = null!;",
+        ["hash"] = "string hash = \"\";",
+        ["vaultBasePath"] = "string vaultBasePath = \"\";",
         // The option snippets are the body of an AddFileVault*(o => { ... }) callback.
-        ("o", "FluxFeed.Options.FileVaultOptions o = new();"),
+        ["o"] = "FluxFeed.Options.FileVaultOptions o = new();",
         // Hand-constructing the pipeline: the collaborators a reader has already built.
-        ("git", "IGitService git = null!;"),
-        ("hasher", "IContentHasher hasher = null!;"),
-        ("storage", "IVaultStorageService storage = null!;"),
-        ("vectorStore", "FluxIndex.Core.Application.Interfaces.IVectorStore vectorStore = null!;"),
-        ("embeddingService", "IEmbeddingService embeddingService = null!;"),
-    ];
+        ["git"] = "IGitService git = null!;",
+        ["hasher"] = "IContentHasher hasher = null!;",
+        ["storage"] = "IVaultStorageService storage = null!;",
+        ["vectorStore"] = "FluxIndex.Core.Application.Interfaces.IVectorStore vectorStore = null!;",
+        ["embeddingService"] = "IEmbeddingService embeddingService = null!;",
 
-    // Types the reader brings (their own embedder, vision model, enrichment port). Appended after the body: a top-level
-    // program declares its types after its statements.
-    private static readonly (string Name, string Declaration)[] TypeStandIns =
-    [
-        ("MyEmbeddingService", """
+        // Types the reader brings (their own embedder, vision model, enrichment port).
+        ["MyEmbeddingService"] = """
             public class MyEmbeddingService : FluxIndex.Core.Application.Interfaces.IEmbeddingService
             {
                 public Task<float[]> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -83,68 +70,60 @@ public class ReadmeSnippetCompileTests
                 public Task<int> CountTokensAsync(string text, CancellationToken cancellationToken = default) => throw new NotImplementedException();
                 public FluxIndex.Core.Domain.ValueObjects.EmbeddingIdentity GetIdentity() => throw new NotImplementedException();
             }
-            """),
-        ("MyVisionModel", """
+            """,
+        ["MyVisionModel"] = """
             public class MyVisionModel
             {
                 public Task<string?> CaptionAsync(string imagePath, string? documentText, CancellationToken ct) => Task.FromResult<string?>(null);
             }
-            """),
-        ("MyContextualEnrichment", """
+            """,
+        ["MyContextualEnrichment"] = """
             public abstract class MyContextualEnrichment : FluxIndex.Core.Application.Interfaces.IContextualEnrichmentService
             {
                 public abstract Task<string> GenerateContextAsync(string chunkContent, string fullDocumentText, int chunkIndex, int totalChunks, CancellationToken cancellationToken = default);
                 public abstract Task<IReadOnlyList<string>> GenerateContextBatchAsync(IReadOnlyList<string> chunks, string fullDocumentText, CancellationToken cancellationToken = default);
             }
-            """),
-    ];
+            """,
+    };
 
-    private static readonly string[] AssembliesToLoad =
-    [
-        "FluxFeed", "FluxIndex.Core", "FluxIndex.Storage.SQLite", "FluxGuard.Remote", "FileFlux",
-        "Microsoft.Extensions.DependencyInjection", "Microsoft.Extensions.DependencyInjection.Abstractions",
-        "Microsoft.Extensions.Hosting", "Microsoft.Extensions.Hosting.Abstractions",
-        "Microsoft.Extensions.Configuration.Abstractions", "Microsoft.Extensions.Options.ConfigurationExtensions",
-        "Microsoft.Extensions.Logging.Abstractions",
-    ];
+    private static readonly IReadOnlyList<Microsoft.CodeAnalysis.MetadataReference> References = SnippetCompiler.ReferencesFor(
+        [.. new[]
+        {
+            "FluxFeed", "FluxIndex.Core", "FluxIndex.Storage.SQLite", "FluxGuard.Remote", "FileFlux",
+            "Microsoft.Extensions.DependencyInjection", "Microsoft.Extensions.DependencyInjection.Abstractions",
+            "Microsoft.Extensions.Hosting", "Microsoft.Extensions.Hosting.Abstractions",
+            "Microsoft.Extensions.Configuration.Abstractions", "Microsoft.Extensions.Options.ConfigurationExtensions",
+            "Microsoft.Extensions.Logging.Abstractions",
+        }.Select(Assembly.Load)]);
 
-    public static TheoryData<string> Blocks()
+    private static readonly SnippetCompiler Compiler = new(References)
     {
-        var data = new TheoryData<string>();
-        foreach (var block in ReadBlocks())
-            data.Add(block.Key);
-        return data;
-    }
+        Usings = [.. CommonUsings, .. ReadmeUsings],
+        StandIns = StandIns,
+    };
+
+    private static readonly IReadOnlyList<DocSnippet> Snippets = DocSnippets.Read(Path.Combine(RepoRoot(), "README.md"), "README.md");
+
+    public static TheoryData<string> Blocks() => new(Snippets.Select(s => s.Key));
 
     [Theory]
     [MemberData(nameof(Blocks))]
     public void ReadmeBlock_Compiles(string key)
     {
-        var block = ReadBlocks().Single(b => b.Key == key);
-        if (Fragments.ContainsKey(block.Heading))
-            return;
-
-        var errors = Compile(block.Code);
-
-        Assert.True(errors.IsEmpty,
-            $"README block {key} does not compile against the current API:\n" +
-            string.Join("\n", errors.Select(e => e.ToString())) + "\n--- source ---\n" + Program(block.Code));
+        var snippet = Snippets.Single(s => s.Key == key);
+        if (!Fragments.IsFragment(snippet))
+            Compiler.ShouldCompile(snippet);
     }
 
     [Fact]
-    public void EveryReadmeBlock_IsFoundAndFragmentsNameRealHeadings()
-    {
-        var blocks = ReadBlocks();
-        Assert.True(blocks.Count >= 15, $"expected the README's C# blocks, found {blocks.Count}");
-        Assert.All(Fragments.Keys, heading => Assert.Contains(blocks, b => b.Heading == heading));
-    }
+    public void EveryReadmeBlock_IsFoundAndFragmentsNameRealHeadings() => Fragments.ShouldMatch([.. Snippets], atLeast: 15);
 
     [Fact]
     public void ReadmeUsings_AreTheOnesTheQuickStartStates()
     {
-        var quickStart = ReadBlocks().First();
-        var stated = quickStart.Code.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')
-            .Select(l => Regex.Match(l, @"^using ([\w.]+);"))
+        var quickStart = Snippets[0];
+        var stated = quickStart.Code.Split('\n')
+            .Select(l => UsingDirective().Match(l))
             .Where(m => m.Success)
             .Select(m => m.Groups[1].Value);
 
@@ -155,7 +134,7 @@ public class ReadmeSnippetCompileTests
     [Fact]
     public void Compile_RejectsAMethodTheLibraryDoesNotHave()
     {
-        var errors = Compile("""
+        var errors = Compiler.Compile("""
             services.AddFileVaultThatDoesNotExist();
             """);
 
@@ -166,90 +145,12 @@ public class ReadmeSnippetCompileTests
     [Fact]
     public void Compile_RejectsAnOptionTheLibraryDoesNotHave()
     {
-        Assert.Empty(Compile("o.MaxInFlightPerGroup = 2;"));
-        Assert.NotEmpty(Compile("o.MaxInFlightPerGroupThatDoesNotExist = 2;"));
+        Assert.Empty(Compiler.Compile("o.MaxInFlightPerGroup = 2;"));
+        Assert.NotEmpty(Compiler.Compile("o.MaxInFlightPerGroupThatDoesNotExist = 2;"));
     }
 
-    private sealed record Block(string Key, string Heading, string Code);
-
-    private static List<Block> ReadBlocks()
-    {
-        var lines = File.ReadAllText(Path.Combine(RepoRoot(), "README.md")).Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        var blocks = new List<Block>();
-        var heading = "(top)";
-        for (var i = 0; i < lines.Length; i++)
-        {
-            if (lines[i].StartsWith('#'))
-                heading = lines[i].TrimStart('#').Trim();
-            if (lines[i].Trim() != "```csharp")
-                continue;
-
-            var start = i + 1;
-            var code = new StringBuilder();
-            for (i++; i < lines.Length && lines[i].Trim() != "```"; i++)
-                code.AppendLine(lines[i]);
-            blocks.Add(new Block($"README.md line {start}: {heading}", heading, code.ToString()));
-        }
-
-        return blocks;
-    }
-
-    private static string Program(string code)
-    {
-        var lines = code.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        // "using X;   // what it is for" is a directive too: the README annotates its usings.
-        static string Code(string l) => l.Split("//", 2)[0].TrimEnd();
-        bool IsUsingDirective(string l) =>
-            l.StartsWith("using ", StringComparison.Ordinal) && Code(l).EndsWith(';') && !l.StartsWith("using var ", StringComparison.Ordinal)
-            && !l.StartsWith("using (", StringComparison.Ordinal);
-
-        var body = string.Join("\n", lines.Where(l => !IsUsingDirective(l)));
-        var standIns = StandIns
-            .Where(s => Regex.IsMatch(body, $@"\b{s.Name}\b")
-                        && !Regex.IsMatch(body, $@"\b(var|[A-Z][\w<>?,\s]*)\s+{s.Name}\s*[=;]")
-                        // A lambda parameter of the same name (o => ...) is the block's own.
-                        && !Regex.IsMatch(body, $@"\b{s.Name}\s*=>"))
-            .Select(s => s.Declaration);
-
-        var typeStandIns = TypeStandIns
-            .Where(s => Regex.IsMatch(body, $@"\b{s.Name}\b") && !Regex.IsMatch(body, $@"\bclass\s+{s.Name}\b"))
-            .Select(s => s.Declaration);
-
-        // A block that states a using the README already assumes must not get it twice.
-        var stated = lines.Where(IsUsingDirective).Select(Code).ToHashSet(StringComparer.Ordinal);
-        var assumed = ReadmeUsings.Select(n => $"using {n};").Where(u => !stated.Contains(u));
-
-        return string.Join("\n", stated) + "\n" + CommonUsings + "\n" + string.Join("\n", assumed) + "\n"
-               + string.Join("\n", standIns) + "\n" + body + "\n" + string.Join("\n", typeStandIns);
-    }
-
-    private static ImmutableArray<Diagnostic> Compile(string code)
-    {
-        var tree = CSharpSyntaxTree.ParseText(Program(code), new CSharpParseOptions(LanguageVersion.Latest));
-        var compilation = CSharpCompilation.Create(
-            "ReadmeSnippet", [tree], References(),
-            new CSharpCompilationOptions(
-                // A block that only declares types (a service, an enricher) is a library, not a program.
-                tree.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.GlobalStatementSyntax>().Any()
-                    ? OutputKind.ConsoleApplication
-                    : OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable));
-        return compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToImmutableArray();
-    }
-
-    private static List<MetadataReference> References()
-    {
-        foreach (var name in AssembliesToLoad)
-            Assembly.Load(name);
-
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") is string trusted)
-            paths.UnionWith(trusted.Split(Path.PathSeparator).Where(p => p.Length > 0));
-        paths.UnionWith(AppDomain.CurrentDomain.GetAssemblies()
-            .Where(a => !a.IsDynamic && a.Location.Length > 0)
-            .Select(a => a.Location));
-        return paths.Select(p => (MetadataReference)MetadataReference.CreateFromFile(p)).ToList();
-    }
+    [GeneratedRegex(@"^using ([\w.]+);")]
+    private static partial Regex UsingDirective();
 
     private static string RepoRoot()
     {

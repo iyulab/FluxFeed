@@ -19,13 +19,13 @@
     <PackageReference Include="Microsoft.Testing.Extensions.HangDump" />
     <PackageReference Include="AwesomeAssertions" />
     <PackageReference Include="Iyu.Conventions.Testing" />
+    <PackageReference Include="Iyu.Conventions.Testing.Snippets" />
     <PackageReference Include="NSubstitute" />
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Extensions.Options" />
     <!-- README default stack (AddSQLiteVecVectorStore + AddFileVaultWithFluxIndex) exercised for real -->
     <PackageReference Include="FluxIndex.Storage.SQLite" />
-    <!-- README C# blocks compiled against the current API; the Quick Start runs under a Generic Host -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <!-- The README Quick Start runs under a Generic Host -->
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
   <ItemGroup>
