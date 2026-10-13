@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [0.54.1] - Unreleased
+## [0.54.1] - 2026-10-14
 
 ### Fixed
 - **A memorize whose git commit fails reports git's error and is retried, instead of recording a stale commit or
