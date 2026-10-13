@@ -22,6 +22,7 @@ Releases before 0.28.0 predate this file — see the git history.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.91.0 -> 0.91.1, `FluxIndex.Storage.SQLite` 0.91.0 -> 0.91.1.
 - Re-pinned sibling package(s) `FileFlux` 0.59.2 -> 0.59.3, `Iyu.Conventions.Testing` 0.9.0 -> 0.10.0.
 - Re-pinned sibling package(s) `FileFlux` 0.59.3 -> 0.60.0.
+- Re-pinned sibling package(s) `FileFlux` 0.60.0 -> 0.61.0.
 
 ### Changed
 - **The nuget.org «Release Notes» of every package link to the GitHub release of its version**, whose notes are this CHANGELOG's section for that version.
