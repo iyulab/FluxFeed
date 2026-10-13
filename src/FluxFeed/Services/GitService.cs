@@ -74,13 +74,27 @@ public sealed partial class GitService : IGitService
 
         // Escape message for command line
         var escapedMessage = message.Replace("\"", "\\\"");
-        await RunGitAsync(vaultPath, $"commit -m \"{escapedMessage}\"", ct);
+        var commit = await RunGitWithErrorAsync(vaultPath, $"commit -m \"{escapedMessage}\"", ct);
+        if (commit.ExitCode != 0)
+            throw GitFailed("commit", vaultPath, commit);
 
-        // Get the commit hash
-        var commitHash = await RunGitAsync(vaultPath, "rev-parse HEAD", ct);
+        // Get the commit hash. On a repository with no commit, `rev-parse HEAD` exits non-zero and echoes
+        // "HEAD" on stdout, so its output is read only when it succeeded.
+        var head = await RunGitWithErrorAsync(vaultPath, "rev-parse HEAD", ct);
+        if (head.ExitCode != 0 || head.Output.Length < 7)
+            throw GitFailed("rev-parse HEAD", vaultPath, head);
 
-        LogCommitted(_logger, vaultPath, message, commitHash[..7]);
-        return commitHash;
+        LogCommitted(_logger, vaultPath, message, head.Output[..7]);
+        return head.Output;
+    }
+
+    // An IOException: the vault's history could not be written, which a later attempt can succeed at
+    // (another git process holding index.lock is the common cause), so the queue retries the job.
+    private static IOException GitFailed(string command, string vaultPath, (string Output, string Error, int ExitCode) result)
+    {
+        var detail = result.Error.Length > 0 ? result.Error : result.Output;
+        return new IOException(
+            $"git {command} failed in {vaultPath} (exit {result.ExitCode}): {(detail.Length > 0 ? detail : "no output")}");
     }
 
     public async Task<string> DiffAsync(string vaultPath, string? filePath = null, CancellationToken ct = default)
@@ -250,6 +264,12 @@ public sealed partial class GitService : IGitService
 
     private async Task<(string Output, int ExitCode)> RunGitWithExitCodeAsync(string workingDirectory, string arguments, CancellationToken ct)
     {
+        var (output, _, exitCode) = await RunGitWithErrorAsync(workingDirectory, arguments, ct);
+        return (output, exitCode);
+    }
+
+    private async Task<(string Output, string Error, int ExitCode)> RunGitWithErrorAsync(string workingDirectory, string arguments, CancellationToken ct)
+    {
         var startInfo = new ProcessStartInfo
         {
             FileName = _gitExecutable,
@@ -294,7 +314,7 @@ public sealed partial class GitService : IGitService
             }
         }
 
-        return (output.ToString().Trim(), process.ExitCode);
+        return (output.ToString().Trim(), error.ToString().Trim(), process.ExitCode);
     }
 
     #region LoggerMessage Definitions

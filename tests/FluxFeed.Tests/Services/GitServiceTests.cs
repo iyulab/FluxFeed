@@ -43,6 +43,45 @@ public class GitServiceTests : IDisposable
         _log.Warnings.Should().BeEmpty(because: "HEAD~1 is probed, not tried-and-failed");
     }
 
+    [Theory]
+    [InlineData(false)] // the vault's first commit: no HEAD yet
+    [InlineData(true)]  // a later commit
+    public async Task CommitAsync_WhenGitCannotCommit_ThrowsAnIOExceptionCarryingGitsError(bool hasEarlierCommit)
+    {
+        // Another git process holding the index lock is the common way a commit fails. It used to surface as an
+        // ArgumentOutOfRangeException from slicing `rev-parse HEAD`'s output, which hid git's message and was classed
+        // as a failure no retry can fix.
+        var ct = TestContext.Current.CancellationToken;
+        await _git.InitAsync(_repoDir, ct);
+        if (hasEarlierCommit)
+        {
+            await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1", ct);
+            await _git.CommitAsync(_repoDir, "v1", ct);
+        }
+
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v2", ct);
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, ".git", "index.lock"), "", ct);
+
+        var act = () => _git.CommitAsync(_repoDir, "v2", ct);
+
+        var ex = (await act.Should().ThrowExactlyAsync<IOException>()).Which;
+        ex.Message.Should().Contain("index.lock");
+        FluxFeed.Interfaces.MemorizeFailureClassifier.Classify(ex.GetType().Name)
+            .Should().Be(FluxFeed.Interfaces.MemorizeFailureKind.Transient, "a held lock is released; the job is worth retrying");
+    }
+
+    [Fact]
+    public async Task CommitAsync_ReturnsTheFullHash()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await _git.InitAsync(_repoDir, ct);
+        await File.WriteAllTextAsync(Path.Combine(_repoDir, "refined.md"), "v1", ct);
+
+        var hash = await _git.CommitAsync(_repoDir, "v1", ct);
+
+        hash.Should().MatchRegex("^[0-9a-f]{40}$");
+    }
+
     [Fact]
     public async Task MissingGit_Default_FailsFastWithActionableMessage()
     {

@@ -6,7 +6,15 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.54.1] - Unreleased
+
+### Fixed
+- **A memorize whose git commit fails reports git's error and is retried, instead of recording a stale commit or
+  failing for good.** `GitService.CommitAsync` did not check that `git commit` succeeded. When it failed (another git
+  process holding the repository's index lock is the usual cause), a later commit returned the previous commit's hash as
+  if the new content were recorded, and the vault's first commit threw `ArgumentOutOfRangeException` from slicing
+  `rev-parse HEAD`'s output — which the job classifier ranks as a failure no retry can fix. It now throws an
+  `IOException` carrying git's message, which the queue retries.
 
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.85.0 -> 0.86.0, `FluxIndex.Storage.SQLite` 0.85.0 -> 0.86.0.

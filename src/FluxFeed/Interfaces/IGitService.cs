@@ -26,6 +26,8 @@ public interface IGitService
     /// Creates a commit with the given message.
     /// </summary>
     /// <returns>The commit hash if a commit was created, null if no changes to commit.</returns>
+    /// <exception cref="IOException">git could not create the commit (for example, another git process holds the
+    /// repository's index lock); the message carries git's error. A memorize job that hits it is retried.</exception>
     Task<string?> CommitAsync(string vaultPath, string message, CancellationToken ct = default);
 
     /// <summary>
