@@ -11,6 +11,7 @@ Releases before 0.28.0 predate this file — see the git history.
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.91.1 -> 0.92.0, `FluxIndex.Storage.SQLite` 0.91.1 -> 0.92.0.
 - Re-pinned sibling package(s) `FileFlux` 0.62.0 -> 0.63.0, `FluxIndex.Core` 0.92.0 -> 0.93.0, `FluxIndex.Storage.SQLite` 0.92.0 -> 0.93.0.
+- Microsoft.Extensions.* servicing 10.0.12 -> 10.0.13 (`Microsoft.Data.Sqlite`, `Microsoft.Extensions.Hosting.Abstractions`, `Microsoft.Extensions.Options`, `Microsoft.Extensions.Logging`, `Microsoft.Extensions.Hosting`) — the floor FluxIndex 0.94.0 carries.
 
 ## [0.54.1] - 2026-10-14
 
