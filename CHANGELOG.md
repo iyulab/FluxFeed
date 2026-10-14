@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.55.0] - 2026-10-15
 
 ### Added
 - **`IVault.EntryStateChanged` reports every persisted change of an entry's state.** One `VaultEntryStateChange`
