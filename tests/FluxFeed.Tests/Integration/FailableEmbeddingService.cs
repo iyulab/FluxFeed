@@ -21,7 +21,14 @@ internal sealed class FailableEmbeddingService : IEmbeddingService
         _failOnCall = call;
     }
 
-    public void Disarm() => _failOnCall = null;
+    public void Disarm()
+    {
+        _failOnCall = null;
+        FailEveryCall = false;
+    }
+
+    /// <summary>When set, every document embedding call (single or batch) throws.</summary>
+    public bool FailEveryCall { get; set; }
 
     /// <summary>Texts embedded since construction, through either the single or the batch call.</summary>
     public int EmbeddedTexts { get; private set; }
@@ -30,7 +37,7 @@ internal sealed class FailableEmbeddingService : IEmbeddingService
     {
         EmbeddedTexts++;
         _calls++;
-        if (_calls == _failOnCall)
+        if (_calls == _failOnCall || FailEveryCall)
             throw new InvalidOperationException("embedding provider rejected a chunk");
         return _inner.GenerateEmbeddingAsync(text, ct);
     }
@@ -47,6 +54,8 @@ internal sealed class FailableEmbeddingService : IEmbeddingService
     public Task<IEnumerable<float[]>> GenerateEmbeddingsBatchAsync(IEnumerable<string> texts, CancellationToken ct = default)
     {
         var list = texts.ToList();
+        if (FailEveryCall)
+            throw new InvalidOperationException("embedding provider rejected the batch");
         EmbeddedTexts += list.Count;
         return _inner.GenerateEmbeddingsBatchAsync(list, ct);
     }

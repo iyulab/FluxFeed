@@ -8,6 +8,15 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Added
+- **`IVault.EntryStateChanged` reports every persisted change of an entry's state.** One `VaultEntryStateChange`
+  (`FilepathHash`, `SourcePath`, `Previous` / `Current` `VaultEntryState` — stage, sync status, pending enrichment, chunk
+  count, last error) per write that changes any of them, whichever component made it: memorize, refresh, upgrade, the
+  background worker (a failed job's `Error` stage included), a scan that finds the source changed or deleted, a move
+  (`PreviousFilepathHash`) and a removal (`Current` is `null`). A rewrite that changes none of them — a scan updating its
+  check time — raises nothing. A host that showed live file status by polling can subscribe instead.
+  **Breaking** for implementers of `IVault`: add `public event EventHandler<VaultEntryStateChange>? EntryStateChanged { add { } remove { } }`.
+
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.91.1 -> 0.92.0, `FluxIndex.Storage.SQLite` 0.91.1 -> 0.92.0.
 - Re-pinned sibling package(s) `FileFlux` 0.62.0 -> 0.63.0, `FluxIndex.Core` 0.92.0 -> 0.93.0, `FluxIndex.Storage.SQLite` 0.92.0 -> 0.93.0.

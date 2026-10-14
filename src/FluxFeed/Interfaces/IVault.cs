@@ -525,6 +525,20 @@ public interface IVault
     event EventHandler<VaultEntry>? EntryUpgraded;
 
     /// <summary>
+    /// Raised after every persisted change of an entry's <see cref="VaultEntryState"/> — stage, sync status, pending
+    /// enrichment, chunk count or last error — whatever made it: memorize, refresh, upgrade, the background queue (including
+    /// a job that failed), recovery, synchronization, a move (<see cref="VaultEntryStateChange.PreviousFilepathHash"/>), and
+    /// removal (<see cref="VaultEntryStateChange.Current"/> is <c>null</c>). One change is raised per write that changed
+    /// that state, so a status display can follow the vault without polling it.
+    /// </summary>
+    /// <remarks>
+    /// Raised on the thread that wrote the change, after the write — keep a handler short and hand longer work off. It covers
+    /// changes made by any vault instance over the same vault directory in this process. A handler that throws is logged and
+    /// does not affect the write or other handlers.
+    /// </remarks>
+    event EventHandler<VaultEntryStateChange>? EntryStateChanged;
+
+    /// <summary>
     /// Gets entries that need synchronization (SourceModified or VaultModified).
     /// </summary>
     Task<IReadOnlyList<VaultEntry>> GetEntriesNeedingSyncAsync(CancellationToken ct = default);

@@ -34,6 +34,10 @@ public sealed class VaultEntry
         Converters = { new JsonStringEnumConverter() }
     };
 
+    // What this instance last read from or wrote to disk, and under which key — the «before» of the next persisted change.
+    private VaultEntryState? _persisted;
+    private string? _persistedHash;
+
     /// <summary>
     /// Unique identifier for this vault entry.
     /// </summary>
@@ -271,6 +275,8 @@ public sealed class VaultEntry
                 LastSyncCheckAt = meta.LastSyncCheckAt,
                 RemovalPhase = meta.RemovalPhase
             };
+            entry._persisted = VaultEntryState.Of(entry);
+            entry._persistedHash = entry.FilepathHash;
 
             return entry;
         }
@@ -579,6 +585,28 @@ public sealed class VaultEntry
         // The record is rewritten on a schedule as well as on demand, so writers overlap; see AtomicFile
         // for why an in-place rewrite would leave an unreadable record behind.
         AtomicFile.WriteAllText(MetaPath, json, EntryPath);
+
+        // Every persisted state transition passes through here, whichever component made it — so this is where the vault's
+        // EntryStateChanged signal starts. A rewrite that changes nothing a status display follows raises nothing.
+        var current = VaultEntryState.Of(this);
+        var moved = _persistedHash is not null && !string.Equals(_persistedHash, FilepathHash, StringComparison.Ordinal);
+        if (_persisted == current && !moved)
+            return;
+
+        var change = new VaultEntryStateChange(FilepathHash, SourcePath, _persisted, current, moved ? _persistedHash : null);
+        _persisted = current;
+        _persistedHash = FilepathHash;
+        VaultEntryChangeHub.Publish(VaultBasePath, change);
+    }
+
+    /// <summary>
+    /// Reports that this entry's directory was deleted: the last persisted change, with no current state.
+    /// </summary>
+    internal void PublishRemoved()
+    {
+        var change = new VaultEntryStateChange(FilepathHash, SourcePath, _persisted ?? VaultEntryState.Of(this), null);
+        _persisted = null;
+        VaultEntryChangeHub.Publish(VaultBasePath, change);
     }
 
     // === Path Properties ===

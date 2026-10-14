@@ -480,6 +480,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
             {
                 Directory.Delete(entry.EntryPath, recursive: true);
                 LogDeletedStorage(_logger, entry.Id);
+                entry.PublishRemoved();
                 return;
             }
             catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < DeleteMaxAttempts)

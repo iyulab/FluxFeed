@@ -33,6 +33,9 @@ document's extracted content, see its commit history, and edit it without touchi
 - **Multi-tenant** — isolated vaults via `IVaultFactory`, with single-call vector purge per tenant
 - **Extraction diagnostics** — a legitimate zero-chunk result (scanned PDF, blank page) says so
 - **Source locations** — a hit carries the page (`pageNumber`) or the stretch of a recording (`ff_start_seconds`) it came from — see [Where a hit came from](#where-a-hit-came-from)
+- **Entry state changes** — `IVault.EntryStateChanged` reports every persisted change of an entry's stage, sync status,
+  pending enrichment, chunk count or error — failures, removals, moves and the background worker's writes included —
+  so a status display can follow the vault instead of polling it (always on; see [Following entry state](#following-entry-state--ivaultentrystatechanged))
 - **Damage-aware records** — records are swapped in atomically, and an unreadable one is reported rather than dropped from listings
 - **Image enrichment** — plug in a vision model and extracted images become indexed content
 - **Hybrid-ready** — chunks are written to the keyword index alongside the vector store when one is registered
@@ -398,6 +401,38 @@ if (entry.ExtractionHints?.TryGetValue("extraction_failure_reason", out var reas
   its own reason overwrites the latter but not the former. Both clear on a successful stage or reset,
   and neither is cleared by sync-status transitions — so use `Stage`/`SyncStatus`, not
   `FirstError != null`, to decide whether an entry is currently broken.
+
+### Following entry state — `IVault.EntryStateChanged`
+
+Every write of an entry's record that changes what a status display follows — `Stage`, `SyncStatus`,
+`PendingEnrichment`, `ChunkCount`, `LastError` — raises one `VaultEntryStateChange`, whichever component made it: a
+memorize or refresh, the background worker (a failed job's `Error` stage included), an upgrade, a scan that finds the
+source changed or deleted, a move, a removal.
+
+```csharp
+using System.Collections.Concurrent;
+using FluxFeed.Domain.Entities;   // VaultEntryState, VaultEntryStateChange
+
+var status = new ConcurrentDictionary<string, VaultEntryState>();   // FilepathHash → what the UI shows
+
+vault.EntryStateChanged += (sender, change) =>
+{
+    if (change.PreviousFilepathHash is { } before)                  // MoveAsync: the entry has a new key
+        status.TryRemove(before, out _);
+
+    if (change.Current is { } current)
+        status[change.FilepathHash] = current;                      // Stage, SyncStatus, ChunkCount, LastError, ...
+    else
+        status.TryRemove(change.FilepathHash, out _);               // removed from the vault
+};
+```
+
+- A rewrite that changes none of those fields (a scan updating its check time) raises nothing.
+- It covers the writes of every vault instance over the same vault directory in this process, so a vault the host holds
+  hears what the queue worker's own pipeline writes. Keep the vault instance you subscribed to reachable.
+- Handlers run on the thread that wrote the change, after the write; a handler that throws is logged and changes nothing.
+- An entry has no «queued» or «processing» stage of its own — that is the job's state, on `IVaultQueueService`
+  (see [Observing the queue](#observing-the-queue)).
 
 ### Status, change detection, index audit — four calls, four costs
 

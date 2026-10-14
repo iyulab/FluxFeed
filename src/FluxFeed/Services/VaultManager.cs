@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using FluxFeed.Domain;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
 using FluxFeed.Domain.Exceptions;
@@ -15,7 +16,7 @@ namespace FluxFeed.Services;
 /// <summary>
 /// Main vault implementation providing file-based tracking with queue-based processing.
 /// </summary>
-public sealed partial class VaultManager : IVault
+public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
 {
     private readonly IContentHasher _hasher;
     private readonly IGitService _git;
@@ -63,6 +64,30 @@ public sealed partial class VaultManager : IVault
 
         // An upgrade the background queue ran reaches this vault through the queue's completion.
         _queue.JobCompleted += OnJobCompleted;
+
+        // Every persisted entry change under this vault's directory, from whichever component wrote it.
+        VaultEntryChangeHub.Subscribe(_storage.BasePath, this);
+    }
+
+    /// <inheritdoc/>
+    public event EventHandler<VaultEntryStateChange>? EntryStateChanged;
+
+    void IVaultEntryChangeListener.OnEntryStateChanged(VaultEntryStateChange change)
+    {
+        if (EntryStateChanged is not { } handlers)
+            return;
+
+        foreach (var handler in handlers.GetInvocationList().Cast<EventHandler<VaultEntryStateChange>>())
+        {
+            try
+            {
+                handler(this, change);
+            }
+            catch (Exception ex)
+            {
+                LogEntryStateChangedHandlerFailed(_logger, ex, change.SourcePath);
+            }
+        }
     }
 
     /// <inheritdoc/>
@@ -1869,6 +1894,9 @@ public sealed partial class VaultManager : IVault
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "An EntryUpgraded handler failed for {Entry}; the upgrade itself is unaffected")]
     private static partial void LogEntryUpgradedFailed(ILogger logger, Exception exception, string entry);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "An EntryStateChanged handler failed for {Entry}; the change itself is unaffected")]
+    private static partial void LogEntryStateChangedHandlerFailed(ILogger logger, Exception exception, string entry);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to scan folder {Path}")]
     private static partial void LogFailedToScanFolder(ILogger logger, Exception exception, string path);
