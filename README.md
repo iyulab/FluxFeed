@@ -431,8 +431,9 @@ vault.EntryStateChanged += (sender, change) =>
 - It covers the writes of every vault instance over the same vault directory in this process, so a vault the host holds
   hears what the queue worker's own pipeline writes. Keep the vault instance you subscribed to reachable.
 - Handlers run on the thread that wrote the change, after the write; a handler that throws is logged and changes nothing.
-- An entry has no «queued» or «processing» stage of its own — that is the job's state, on `IVaultQueueService`
-  (see [Observing the queue](#observing-the-queue)).
+- An entry has no «queued» or «processing» stage of its own — that is the job's state:
+  `IVaultQueueService.JobStateChanged` reports every job transition (queued, processing, completed, failed with its
+  error, cancelled), so the two events together are a file's whole status (see [Observing the queue](#observing-the-queue)).
 
 ### Status, change detection, index audit — four calls, four costs
 
@@ -934,6 +935,11 @@ await vault.MemorizeAsync(path, VaultJobPriority.High, waitForCompletion: true, 
 `GetStatisticsAsync`, `GetJobsAsync` and `RequeueAsync` are on `IVaultQueueService`, not `IVault`. For a single vault,
 resolve `IVaultQueueService` from the container; for tenants, use the tenant's own queue,
 `IVaultFactory.GetContext(tenantId)?.QueueService` (null until the tenant has been created with `GetOrCreate`).
+
+`JobStateChanged` is raised after every persisted job transition — queued (added, retried, requeued, put back after a
+crash), processing, completed, failed (`ErrorMessage`), cancelled — with the job as it now stands; `JobEnqueued` and
+`JobCompleted` stay as narrower signals. All three run after the queue's lock is released, one handler at a time: a
+handler may call back into the queue, and one that throws is logged without affecting the job.
 
 `GetStatisticsAsync()` answers two different questions, and conflating them is a reported source of false alarms:
 

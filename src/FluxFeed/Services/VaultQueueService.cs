@@ -62,6 +62,28 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
     public event EventHandler<VaultJob>? JobEnqueued;
     public event EventHandler<VaultJob>? JobCompleted;
+    public event EventHandler<VaultJob>? JobStateChanged;
+
+    // Raised only after _dbLock is released, one handler at a time: a handler that calls back into the queue would
+    // otherwise deadlock on the lock, and one that throws would fail the transition it is being told about (a throwing
+    // JobCompleted subscriber used to make CompleteAsync throw, and the worker then recorded the completed job as failed).
+    private void RaiseJobEvent(EventHandler<VaultJob>? handlers, VaultJob job, string eventName)
+    {
+        if (handlers is null)
+            return;
+
+        foreach (var handler in handlers.GetInvocationList().Cast<EventHandler<VaultJob>>())
+        {
+            try
+            {
+                handler(this, job);
+            }
+            catch (Exception ex)
+            {
+                LogJobEventHandlerFailed(_logger, ex, eventName, job.Id);
+            }
+        }
+    }
 
     public VaultQueueService(
         ILogger<VaultQueueService> logger,
@@ -220,6 +242,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         var fullPath = Path.GetFullPath(filePath);
         var job = VaultJob.Create(fullPath, filepathHash, jobType, priority, maxRetries: _maxRetryCount, groupKey: groupKey);
 
+        VaultJob? coalesced = null;
         await _dbLock.WaitAsync(ct);
         try
         {
@@ -236,39 +259,46 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             if (existing is not null)
             {
                 LogCoalesced(_logger, jobType, filePath, existing.Id);
-
-                // Still a wake signal: the worker may be parked on its 30s health-check wait, and this
-                // caller is about to await the merged job.
-                JobEnqueued?.Invoke(this, existing);
-                return existing;
+                coalesced = existing;
             }
+            else
+            {
+                await using var cmd = connection.CreateCommand();
+                cmd.CommandText = """
+                    INSERT INTO vault_jobs (id, file_path, filepath_hash, job_type, status, priority, queued_at, retry_count, max_retries, group_key)
+                    VALUES (@id, @file_path, @filepath_hash, @job_type, @status, @priority, @queued_at, @retry_count, @max_retries, @group_key)
+                    """;
 
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = """
-                INSERT INTO vault_jobs (id, file_path, filepath_hash, job_type, status, priority, queued_at, retry_count, max_retries, group_key)
-                VALUES (@id, @file_path, @filepath_hash, @job_type, @status, @priority, @queued_at, @retry_count, @max_retries, @group_key)
-                """;
+                cmd.Parameters.AddWithValue("@id", job.Id.ToString());
+                cmd.Parameters.AddWithValue("@file_path", job.FilePath);
+                cmd.Parameters.AddWithValue("@filepath_hash", job.FilepathHash);
+                cmd.Parameters.AddWithValue("@job_type", (int)job.JobType);
+                cmd.Parameters.AddWithValue("@status", (int)job.Status);
+                cmd.Parameters.AddWithValue("@priority", (int)job.Priority);
+                cmd.Parameters.AddWithValue("@group_key", (object?)job.GroupKey ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@queued_at", job.QueuedAt.ToString("O"));
+                cmd.Parameters.AddWithValue("@retry_count", job.RetryCount);
+                cmd.Parameters.AddWithValue("@max_retries", 3);
 
-            cmd.Parameters.AddWithValue("@id", job.Id.ToString());
-            cmd.Parameters.AddWithValue("@file_path", job.FilePath);
-            cmd.Parameters.AddWithValue("@filepath_hash", job.FilepathHash);
-            cmd.Parameters.AddWithValue("@job_type", (int)job.JobType);
-            cmd.Parameters.AddWithValue("@status", (int)job.Status);
-            cmd.Parameters.AddWithValue("@priority", (int)job.Priority);
-            cmd.Parameters.AddWithValue("@group_key", (object?)job.GroupKey ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@queued_at", job.QueuedAt.ToString("O"));
-            cmd.Parameters.AddWithValue("@retry_count", job.RetryCount);
-            cmd.Parameters.AddWithValue("@max_retries", 3);
-
-            await cmd.ExecuteNonQueryAsync(ct);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
         }
         finally
         {
             _dbLock.Release();
         }
 
+        if (coalesced is not null)
+        {
+            // Still a wake signal: the worker may be parked on its 30s health-check wait, and this caller is about to
+            // await the merged job. No state changed, so no JobStateChanged.
+            RaiseJobEvent(JobEnqueued, coalesced, nameof(JobEnqueued));
+            return coalesced;
+        }
+
         LogEnqueued(_logger, jobType, filePath);
-        JobEnqueued?.Invoke(this, job);
+        RaiseJobEvent(JobEnqueued, job, nameof(JobEnqueued));
+        RaiseJobEvent(JobStateChanged, job, nameof(JobStateChanged));
 
         return job;
     }
@@ -300,6 +330,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         if (_isPaused)
             return null;
 
+        VaultJob? started = null;
         await _dbLock.WaitAsync(ct);
         try
         {
@@ -379,12 +410,15 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
             job.TryStart();
             LogDequeued(_logger, job.Id, job.FilePath);
+            started = job;
 
             return job;
         }
         finally
         {
             _dbLock.Release();
+            if (started is not null)
+                RaiseJobEvent(JobStateChanged, started, nameof(JobStateChanged));
         }
     }
 
@@ -402,6 +436,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
     private async Task CompleteCoreAsync(Guid jobId, CancellationToken ct)
     {
+        VaultJob? completed = null;
         await _dbLock.WaitAsync(ct);
         try
         {
@@ -427,13 +462,18 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             var job = await GetJobInternalAsync(connection, jobId, ct);
             if (job != null)
             {
-                JobCompleted?.Invoke(this, job);
                 SignalWaiter(job);
+                completed = job;
             }
         }
         finally
         {
             _dbLock.Release();
+            if (completed is not null)
+            {
+                RaiseJobEvent(JobCompleted, completed, nameof(JobCompleted));
+                RaiseJobEvent(JobStateChanged, completed, nameof(JobStateChanged));
+            }
         }
     }
 
@@ -456,6 +496,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     private async Task FailCoreAsync(
         Guid jobId, string errorMessage, MemorizeFailureKind? failureKind, CancellationToken ct)
     {
+        VaultJob? failed = null;
         await _dbLock.WaitAsync(ct);
         try
         {
@@ -486,16 +527,22 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             // Release any caller awaiting terminal state (Failed is terminal).
             var job = await GetJobInternalAsync(connection, jobId, ct);
             if (job != null)
+            {
                 SignalWaiter(job);
+                failed = job;
+            }
         }
         finally
         {
             _dbLock.Release();
+            if (failed is not null)
+                RaiseJobEvent(JobStateChanged, failed, nameof(JobStateChanged));
         }
     }
 
     public async Task<bool> RetryAsync(Guid jobId, CancellationToken ct = default)
     {
+        VaultJob? retried = null;
         await _dbLock.WaitAsync(ct);
         try
         {
@@ -522,6 +569,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             if (rows > 0)
             {
                 LogRetrying(_logger, jobId, job.RetryCount + 1);
+                retried = await GetJobInternalAsync(connection, jobId, ct);
                 return true;
             }
 
@@ -530,11 +578,14 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         finally
         {
             _dbLock.Release();
+            if (retried is not null)
+                RaiseJobEvent(JobStateChanged, retried, nameof(JobStateChanged));
         }
     }
 
     public async Task RequeueAsync(Guid jobId, CancellationToken ct = default)
     {
+        VaultJob? requeued = null;
         await _dbLock.WaitAsync(ct);
         try
         {
@@ -582,15 +633,23 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
             LogRequeuedByRequest(_logger, jobId);
             job.TryRequeueByRequest();
             SignalWaiter(job);
+            requeued = job;
         }
         finally
         {
             _dbLock.Release();
+            if (requeued is not null)
+            {
+                // A wake signal too: without it the worker found an operator's rerun only on its 30 s health check.
+                RaiseJobEvent(JobEnqueued, requeued, nameof(JobEnqueued));
+                RaiseJobEvent(JobStateChanged, requeued, nameof(JobStateChanged));
+            }
         }
     }
 
     public async Task<bool> CancelAsync(Guid jobId, CancellationToken ct = default)
     {
+        VaultJob? cancelled = null;
         await _dbLock.WaitAsync(ct);
         try
         {
@@ -617,7 +676,10 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                 // Release any caller awaiting terminal state (Cancelled is terminal).
                 var job = await GetJobInternalAsync(connection, jobId, ct);
                 if (job != null)
+                {
                     SignalWaiter(job);
+                    cancelled = job;
+                }
 
                 return true;
             }
@@ -627,6 +689,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         finally
         {
             _dbLock.Release();
+            if (cancelled is not null)
+                RaiseJobEvent(JobStateChanged, cancelled, nameof(JobStateChanged));
         }
     }
 
@@ -970,6 +1034,7 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
 
     public async Task<int> RecoverStuckJobsAsync(CancellationToken ct = default)
     {
+        var requeuedJobs = new List<VaultJob>();
         await _dbLock.WaitAsync(ct);
         try
         {
@@ -1004,7 +1069,12 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
                 cmd.Parameters.AddWithValue("@queued", (int)VaultJobStatus.Queued);
                 cmd.Parameters.AddWithValue("@processing", (int)VaultJobStatus.Processing);
 
-                recovered += await cmd.ExecuteNonQueryAsync(ct);
+                if (await cmd.ExecuteNonQueryAsync(ct) > 0)
+                {
+                    recovered++;
+                    if (await GetJobInternalAsync(connection, jobId, ct) is { } job)
+                        requeuedJobs.Add(job);
+                }
             }
 
             if (recovered > 0)
@@ -1017,6 +1087,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
         finally
         {
             _dbLock.Release();
+            foreach (var job in requeuedJobs)
+                RaiseJobEvent(JobStateChanged, job, nameof(JobStateChanged));
         }
     }
 
@@ -1301,6 +1373,8 @@ public sealed partial class VaultQueueService : IVaultQueueService, IDisposable
     private static partial void LogPaused(ILogger logger);
     [LoggerMessage(Level = LogLevel.Information, Message = "Queue processing resumed")]
     private static partial void LogResumed(ILogger logger);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A {Event} handler failed for job {JobId}; the job's transition is unaffected")]
+    private static partial void LogJobEventHandlerFailed(ILogger logger, Exception exception, string @event, Guid jobId);
 
     #endregion
 }

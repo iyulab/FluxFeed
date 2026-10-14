@@ -334,14 +334,29 @@ public interface IVaultQueueService
     bool IsPaused { get; }
 
     /// <summary>
-    /// Event raised when a job is enqueued.
+    /// Raised when a job is added, merged into a waiting job of the same work, or put back by <see cref="RequeueAsync"/> —
+    /// a signal that there is work to pick up.
     /// </summary>
+    /// <remarks>Raised after the queue's own lock is released; a handler that throws is logged and changes nothing.</remarks>
     event EventHandler<VaultJob>? JobEnqueued;
 
     /// <summary>
-    /// Event raised when a job is completed.
+    /// Raised when a job completed successfully.
     /// </summary>
+    /// <remarks>Raised after the queue's own lock is released; a handler that throws is logged and changes nothing.</remarks>
     event EventHandler<VaultJob>? JobCompleted;
+
+    /// <summary>
+    /// Raised after every persisted change of a job's <see cref="VaultJob.Status"/>, with the job as it now stands: queued
+    /// (added, retried, requeued, or put back by <see cref="RecoverStuckJobsAsync"/>), processing (dequeued), completed,
+    /// failed (with <see cref="VaultJob.ErrorMessage"/>) and cancelled. Together with <c>IVault.EntryStateChanged</c> it is
+    /// the complete picture of a file's status: the job says whether it is waiting or running, the entry what was stored.
+    /// </summary>
+    /// <remarks>
+    /// Raised after the queue's own lock is released, on the thread that made the transition — a handler may call back
+    /// into the queue. A handler that throws is logged and changes nothing.
+    /// </remarks>
+    event EventHandler<VaultJob>? JobStateChanged;
 }
 
 /// <summary>

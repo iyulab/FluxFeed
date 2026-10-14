@@ -62,8 +62,10 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
 
         VaultBasePath = _options.VaultBasePath ?? _options.VaultDirectoryName;
 
-        // An upgrade the background queue ran reaches this vault through the queue's completion.
-        _queue.JobCompleted += OnJobCompleted;
+        // An upgrade the background queue ran reaches this vault through the queue's completion. Weakly: the queue outlives
+        // the vault (a container singleton, while a vault is scoped and one is made per watched-file change), and a strong
+        // subscription kept every one of them alive — and re-reading entries — for the queue's lifetime.
+        WeakJobCompletedRelay.Attach(_queue, this);
 
         // Every persisted entry change under this vault's directory, from whichever component wrote it.
         VaultEntryChangeHub.Subscribe(_storage.BasePath, this);
@@ -92,6 +94,29 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
 
     /// <inheritdoc/>
     public event EventHandler<VaultEntry>? EntryUpgraded;
+
+    private sealed class WeakJobCompletedRelay
+    {
+        private readonly IVaultQueueService _queue;
+        private readonly WeakReference<VaultManager> _vault;
+
+        private WeakJobCompletedRelay(IVaultQueueService queue, VaultManager vault)
+        {
+            _queue = queue;
+            _vault = new WeakReference<VaultManager>(vault);
+        }
+
+        public static void Attach(IVaultQueueService queue, VaultManager vault)
+            => queue.JobCompleted += new WeakJobCompletedRelay(queue, vault).OnJobCompleted;
+
+        private void OnJobCompleted(object? sender, VaultJob job)
+        {
+            if (_vault.TryGetTarget(out var vault))
+                vault.OnJobCompleted(sender, job);
+            else
+                _queue.JobCompleted -= OnJobCompleted;
+        }
+    }
 
     private void OnJobCompleted(object? sender, VaultJob job)
     {

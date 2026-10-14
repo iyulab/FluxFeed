@@ -16,6 +16,20 @@ Releases before 0.28.0 predate this file — see the git history.
   (`PreviousFilepathHash`) and a removal (`Current` is `null`). A rewrite that changes none of them — a scan updating its
   check time — raises nothing. A host that showed live file status by polling can subscribe instead.
   **Breaking** for implementers of `IVault`: add `public event EventHandler<VaultEntryStateChange>? EntryStateChanged { add { } remove { } }`.
+- **`IVaultQueueService.JobStateChanged` reports every job transition** — queued (added, retried, requeued, put back after a
+  crash), processing, completed, failed (with `ErrorMessage`), cancelled — with the job as it now stands. With
+  `EntryStateChanged` it covers a file's whole status, including a job that fails before it writes the entry.
+  **Breaking** for implementers of `IVaultQueueService`: add `public event EventHandler<VaultJob>? JobStateChanged { add { } remove { } }`.
+
+### Fixed
+- **A `JobCompleted` handler that throws no longer turns the completed job into a failed one.** The event ran inside
+  `CompleteAsync`, so the exception failed the call and the worker then recorded the job it had just completed as failed.
+  Queue events are now raised after the queue's lock is released, one handler at a time, each failure logged — which also
+  lets a handler call back into the queue (it used to deadlock).
+- **A vault no longer stays alive for as long as its queue.** Every vault instance subscribed to the queue's completions and
+  never let go; with a scoped vault (one per scope, one per watched-file change) they accumulated, each re-reading the entry
+  on every completed upgrade.
+- **An operator's `RequeueAsync` wakes the worker** (`JobEnqueued`) instead of waiting for its 30-second check.
 
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.91.1 -> 0.92.0, `FluxIndex.Storage.SQLite` 0.91.1 -> 0.92.0.

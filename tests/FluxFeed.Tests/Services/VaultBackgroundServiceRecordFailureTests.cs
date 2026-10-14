@@ -140,6 +140,7 @@ public class VaultBackgroundServiceRecordFailureTests : IDisposable
         public bool IsPaused { get; set; }
         public event EventHandler<VaultJob>? JobEnqueued;
         public event EventHandler<VaultJob>? JobCompleted;
+        public event EventHandler<VaultJob>? JobStateChanged { add { } remove { } }
 
         public readonly TaskCompletionSource<bool> JobSettled =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
