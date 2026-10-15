@@ -1,3 +1,4 @@
+using FluxIndex.Core.Domain.ValueObjects;
 using FluxIndex.Core.Application.Interfaces;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.ValueObjects;
@@ -23,6 +24,13 @@ public interface IVaultPipeline
     /// registered extractor reports no identity.
     /// </summary>
     ExtractionIdentity? CurrentExtractionIdentity { get; }
+
+    /// <summary>
+    /// What a memorize now would record as <see cref="VaultEntry.EmbeddedIdentity"/>: the embedding service's identity.
+    /// Null without an embedding service (keyword-only), or while the service cannot report one yet (a model chosen at run
+    /// time and not set).
+    /// </summary>
+    EmbeddingIdentity? CurrentEmbeddingIdentity => null;
 
     /// <summary>
     /// Which keyword index the <see cref="VaultSearchStrategy.Hybrid"/> strategy fuses with the vector leg. When a

@@ -58,6 +58,37 @@ public sealed class StagedEnrichmentTests : IDisposable
     }
 
     [Fact]
+    public async Task AfterTheEmbeddingModelChanged_ARefreshReEmbedsEveryChunk_AndRecordsTheNewModel()
+    {
+        await using var provider = BuildStack();
+        int chunkCount;
+        using (var scope = provider.CreateScope())
+        {
+            var entry = await scope.ServiceProvider.GetRequiredService<IVault>().MemorizeAsync(_file, Ct);
+            chunkCount = entry.ChunkCount;
+            entry.EmbeddedIdentity!.Model.Should().NotBe("model-b");
+        }
+
+        _embedder.ModelOverride = "model-b";
+        var before = _embedder.EmbeddedTexts;
+        using (var scope = provider.CreateScope())
+        {
+            var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+            var change = await vault.DetectChangesAsync(_file, Ct);
+            change.EmbeddingOutdated.Should().BeTrue();
+            change.RecommendedAction.Should().Be(ChangeAction.Refresh);
+            (await vault.StatusAsync(Ct)).OutdatedEmbeddingCount.Should().Be(1);
+
+            var refreshed = await vault.RefreshAsync(_file, Ct);
+
+            _embedder.EmbeddedTexts.Should().Be(before + chunkCount, "every stored vector belongs to the old model");
+            refreshed.EmbeddedIdentity!.Model.Should().Be("model-b");
+            (await vault.StatusAsync(Ct)).OutdatedEmbeddingCount.Should().Be(0);
+            (await vault.SearchAsync("coolant pressure gauge", ct: Ct)).Items.Should().NotBeEmpty();
+        }
+    }
+
+    [Fact]
     public async Task OneChangedParagraph_EmbedsOnlyItsChunk()
     {
         await using var provider = BuildStack();

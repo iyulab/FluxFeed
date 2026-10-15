@@ -8,6 +8,14 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Added
+- **Entries embedded by another model are re-embedded.** `ChangeDetectionResult.EmbeddingOutdated` is true when an
+  entry's `EmbeddedIdentity` differs from the identity the embedding service reports now, and the entry is recommended for
+  Refresh (Memorize without refined content) — so `SyncAsync` queues it after the embedding model changed. Its refresh
+  re-embeds every chunk instead of keeping stored rows whose text is unchanged. `VaultStatus` gains `CurrentEmbedding` and
+  `OutdatedEmbeddingCount`; `IVaultPipeline` gains `CurrentEmbeddingIdentity` (default: null). Entries memorized before
+  identities were recorded are not judged.
+
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.94.0 -> 0.95.0, `FluxIndex.Storage.SQLite` 0.94.0 -> 0.95.0.
 - Re-pinned sibling package(s) `FileFlux` 0.63.0 -> 0.63.1, `FluxIndex.Core` 0.95.0 -> 0.96.0, `FluxIndex.Storage.SQLite` 0.95.0 -> 0.96.0.

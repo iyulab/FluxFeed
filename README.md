@@ -222,6 +222,17 @@ With background processing on, both only enqueue a job and return the entry as i
 `waitForCompletion: true` (`MemorizeAsync(path, waitForCompletion: true)`,
 `RefreshAsync(path, waitForCompletion: true)`) to get the re-indexed entry — and its new commit — back.
 
+### When the embedding model changes — re-embedding
+
+Each memorize records the embedding identity its chunks were embedded with (`entry.EmbeddedIdentity` — provider, model,
+dimension, revision). When the embedding service reports another identity, those vectors no longer match new queries:
+`DetectChangesAsync` marks the entry `EmbeddingOutdated` and recommends Refresh (Memorize when it has no refined content),
+so `SyncAsync` queues it, and `RefreshAsync` re-embeds every chunk of its stored text without re-extracting.
+`StatusAsync()` reports `CurrentEmbedding` and `OutdatedEmbeddingCount`. Entries memorized before identities were recorded
+are not judged. Where the new vectors go is the vector store's naming: a store that names its table or collection by the
+model (sqlite-vec, Qdrant `ModelFingerprint`) gets the new model its own; a Qdrant `Fixed` collection refuses another model
+(`EmbeddingModelMismatchException`) — clear it, or switch to `ModelFingerprint`, before re-embedding.
+
 ### Where a hit came from
 
 With the FileFlux extractor, each text chunk records where it came from in its source, as search-hit metadata:

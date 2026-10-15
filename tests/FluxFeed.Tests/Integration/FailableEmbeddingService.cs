@@ -62,5 +62,8 @@ internal sealed class FailableEmbeddingService : IEmbeddingService
 
     public int GetEmbeddingDimension() => _inner.GetEmbeddingDimension();
     public string GetModelName() => _inner.GetModelName();
-    public EmbeddingIdentity GetIdentity() => _inner.GetIdentity();
+    /// <summary>A model name to report instead of the inner service's — a host that switched its embedding model.</summary>
+    public string? ModelOverride { get; set; }
+
+    public EmbeddingIdentity GetIdentity() => ModelOverride is { } model ? _inner.GetIdentity() with { Model = model } : _inner.GetIdentity();
 }

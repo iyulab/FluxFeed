@@ -1,3 +1,4 @@
+using FluxIndex.Core.Domain.ValueObjects;
 using FluxIndex.Core.Application.Services;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -1876,6 +1877,32 @@ public sealed partial class VaultPipeline : IVaultPipeline
             .ToList();
     }
 
+    /// <inheritdoc />
+    public EmbeddingIdentity? CurrentEmbeddingIdentity
+    {
+        get
+        {
+            if (_embeddingService is null || NoEmbeddingService.IsKeywordOnly(_embeddingService))
+                return null;
+            try
+            {
+                return _embeddingService.GetIdentity();
+            }
+            catch (InvalidOperationException)
+            {
+                // A service whose identity is read at use and not set yet: nothing to compare entries with now.
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an entry's chunks were embedded under another identity than <paramref name="current"/>. Unknown on
+    /// either side (an entry memorized before identities were recorded, a service that cannot say) is not outdated.
+    /// </summary>
+    internal static bool IsEmbeddingOutdated(VaultEntry entry, EmbeddingIdentity? current)
+        => current is not null && entry.EmbeddedIdentity is { } recorded && recorded != current;
+
     /// <summary>
     /// Marks entry as memorized with identity if available, falling back to dimension-only.
     /// </summary>
@@ -2427,8 +2454,11 @@ public sealed partial class VaultPipeline : IVaultPipeline
         CancellationToken ct)
     {
         // A row identical to its replacement is left in place rather than embedded and written again. Not with GraphRAG:
-        // the graph is rebuilt from the written chunks, and a kept row carries no embedding to hand it.
-        var keepUnchanged = stored.Count > 0 && !(options.EnableGraphRAG ?? (_graphRAGService != null));
+        // the graph is rebuilt from the written chunks, and a kept row carries no embedding to hand it. Not when the entry
+        // was embedded under another identity either: the same text then needs a vector from the current model.
+        var keepUnchanged = stored.Count > 0
+            && !(options.EnableGraphRAG ?? (_graphRAGService != null))
+            && !IsEmbeddingOutdated(entry, CurrentEmbeddingIdentity);
         var keep = keepUnchanged ? stored : EmptyStoredChunks;
 
         // Branch: when CheckpointCallback is set (job-queue path), use per-chunk processing

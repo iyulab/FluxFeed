@@ -1,3 +1,4 @@
+using FluxIndex.Core.Domain.ValueObjects;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using FluxFeed.Domain;
@@ -543,8 +544,12 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
         var extractionOutdated = entryExists && entry!.Stage != ProcessingStage.Source
             && ExtractionIdentity.IsOutdated(entry.ExtractedBy, _pipeline.CurrentExtractionIdentity, _options.Reextraction);
 
+        // Chunks embedded under another embedding identity (the model changed): their vectors no longer match queries.
+        var embeddingOutdated = entryExists && entry!.Stage == ProcessingStage.Memorized
+            && VaultPipeline.IsEmbeddingOutdated(entry, _pipeline.CurrentEmbeddingIdentity);
+
         // Determine recommended action
-        var action = DetermineAction(entryExists, sourceExists, sourceChanged, vaultChanged, extractionOutdated,
+        var action = DetermineAction(entryExists, sourceExists, sourceChanged, vaultChanged, extractionOutdated, embeddingOutdated,
             canRefresh: entry?.RefinedExists ?? false);
 
         // Update entry's SyncStatus based on detection results
@@ -600,6 +605,7 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
             SourceChanged = sourceChanged,
             VaultChanged = vaultChanged,
             ExtractionOutdated = extractionOutdated,
+            EmbeddingOutdated = embeddingOutdated,
             SourceExists = sourceExists,
             RecommendedAction = action,
             ModifiedVaultFiles = modifiedVaultFiles,
@@ -627,13 +633,18 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
     /// Whether a newer extractor would make a different extraction (<c>FileVaultOptions.Reextraction</c>). Acted on only
     /// when nothing else changed: a vault edit is refreshed, not overwritten by a re-extraction.
     /// </param>
+    /// <param name="embeddingOutdated">
+    /// Whether the entry's chunks were embedded under another embedding identity. A refresh re-embeds the stored text;
+    /// without refined content only a memorize can.
+    /// </param>
     /// <param name="canRefresh">
     /// Whether a refresh could actually succeed for this entry (refined content present). Recommending
     /// a refresh that the pipeline is guaranteed to reject produces work that can never complete, and
     /// each failed attempt overwrites the entry's error with the rejection instead of its real cause.
     /// </param>
     private static ChangeAction DetermineAction(
-        bool entryExists, bool sourceExists, bool sourceChanged, bool vaultChanged, bool extractionOutdated, bool canRefresh)
+        bool entryExists, bool sourceExists, bool sourceChanged, bool vaultChanged, bool extractionOutdated,
+        bool embeddingOutdated, bool canRefresh)
     {
         if (!sourceExists)
             return entryExists ? ChangeAction.Remove : ChangeAction.None;
@@ -651,6 +662,9 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
 
         if (extractionOutdated)
             return ChangeAction.Memorize;
+
+        if (embeddingOutdated)
+            return canRefresh ? ChangeAction.Refresh : ChangeAction.Memorize;
 
         return ChangeAction.None;
     }
@@ -1041,6 +1055,8 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
         var errorStageCount = 0;
         var orphanedCount = 0;
         var outdatedExtractionCount = 0;
+        var outdatedEmbeddingCount = 0;
+        var currentEmbedding = _pipeline.CurrentEmbeddingIdentity;
         var currentExtraction = _pipeline.CurrentExtractionIdentity;
         var countPolicy = _options.Reextraction == ReextractionPolicy.Never
             ? ReextractionPolicy.WhenExtractorChanges
@@ -1068,6 +1084,11 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
             {
                 outdatedExtractionCount++;
             }
+
+            if (entry.Stage == ProcessingStage.Memorized && VaultPipeline.IsEmbeddingOutdated(entry, currentEmbedding))
+            {
+                outdatedEmbeddingCount++;
+            }
         }
 
         var queueStatus = await GetQueueStatusAsync(ct);
@@ -1084,6 +1105,8 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
             ErrorStageCount = errorStageCount,
             CurrentExtraction = currentExtraction,
             OutdatedExtractionCount = outdatedExtractionCount,
+            CurrentEmbedding = currentEmbedding,
+            OutdatedEmbeddingCount = outdatedEmbeddingCount,
             InSyncCount = all.Count(e => e.SyncStatus == SyncStatus.InSync),
             SourceModifiedCount = all.Count(e => e.SyncStatus == SyncStatus.SourceModified),
             VaultModifiedCount = all.Count(e => e.SyncStatus == SyncStatus.VaultModified),

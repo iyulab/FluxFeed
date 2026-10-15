@@ -1145,6 +1145,69 @@ public class VaultManagerTests : IDisposable
         minor.OutdatedExtractionCount.Should().Be(1, "a patch release does not re-extract under the minor policy; the unrecorded entry does");
     }
 
+    private static FluxIndex.Core.Domain.ValueObjects.EmbeddingIdentity Embedding(string model)
+        => new() { Provider = "test", Model = model, Dimension = 4 };
+
+    private VaultEntry CreateEntryEmbeddedBy(string filePath, FluxIndex.Core.Domain.ValueObjects.EmbeddingIdentity? identity)
+    {
+        var entry = CreateEntryWithMetadataAtStage(filePath, ProcessingStage.Memorized);
+        var hash = _contentHasher.ComputeHashAsync(Path.GetFullPath(filePath), default).GetAwaiter().GetResult();
+        entry.MarkExtracted(hash);
+        if (identity is null)
+            entry.MarkMemorized(1);
+        else
+            entry.MarkMemorized(1, identity);
+        entry.SaveMetadata();
+        WriteRefinedContent(entry);
+        return entry;
+    }
+
+    [Fact]
+    public async Task DetectChangesAsync_AnEntryEmbeddedByAnotherModel_IsRecommendedForRefresh()
+    {
+        // After the embedding model changed, an unchanged file's vectors are not comparable with new queries; a refresh
+        // re-embeds its stored text without re-extracting.
+        var filePath = CreateTestFile("contract.pdf", "body");
+        CreateEntryEmbeddedBy(filePath, Embedding("model-a"));
+        GivenModifiedVaultFiles();
+        _pipelineMock.CurrentEmbeddingIdentity.Returns(Embedding("model-b"));
+
+        var change = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
+
+        change.EmbeddingOutdated.Should().BeTrue();
+        change.RecommendedAction.Should().Be(ChangeAction.Refresh);
+    }
+
+    [Theory]
+    [InlineData("model-a")]
+    [InlineData(null)]
+    public async Task DetectChangesAsync_TheSameModel_OrNoRecordedIdentity_IsNotOutdated(string? recordedModel)
+    {
+        var filePath = CreateTestFile("contract.pdf", "body");
+        CreateEntryEmbeddedBy(filePath, recordedModel is null ? null : Embedding(recordedModel));
+        GivenModifiedVaultFiles();
+        _pipelineMock.CurrentEmbeddingIdentity.Returns(Embedding("model-a"));
+
+        var change = await _vault.DetectChangesAsync(filePath, TestContext.Current.CancellationToken);
+
+        change.EmbeddingOutdated.Should().BeFalse();
+        change.RecommendedAction.Should().Be(ChangeAction.None);
+    }
+
+    [Fact]
+    public async Task StatusAsync_CountsEntriesEmbeddedByAnotherModel()
+    {
+        CreateEntryEmbeddedBy(CreateTestFile("a.pdf", "a"), Embedding("model-a"));
+        CreateEntryEmbeddedBy(CreateTestFile("b.pdf", "b"), Embedding("model-b"));
+        CreateEntryEmbeddedBy(CreateTestFile("c.pdf", "c"), identity: null);
+        _pipelineMock.CurrentEmbeddingIdentity.Returns(Embedding("model-b"));
+
+        var status = await _vault.StatusAsync(TestContext.Current.CancellationToken);
+
+        status.CurrentEmbedding.Should().Be(Embedding("model-b"));
+        status.OutdatedEmbeddingCount.Should().Be(1, "the unrecorded entry cannot be judged and the current one is current");
+    }
+
     [Fact]
     public async Task DetectChangesAsync_VaultModifiedOnFailedEntry_RecommendsMemorizeSoItCanRecover()
     {

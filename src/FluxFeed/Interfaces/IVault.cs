@@ -1,3 +1,4 @@
+using FluxIndex.Core.Domain.ValueObjects;
 using FluxFeed.Domain.Entities;
 using FluxFeed.Domain.Enums;
 using FluxFeed.Domain.ValueObjects;
@@ -630,6 +631,14 @@ public sealed class ChangeDetectionResult
     public bool ExtractionOutdated { get; init; }
 
     /// <summary>
+    /// Whether the entry's chunks were embedded under another embedding identity than the one the embedding service
+    /// reports now (<see cref="VaultEntry.EmbeddedIdentity"/> — provider, model, dimension, revision). Its vectors are not
+    /// comparable with new queries, so the entry is recommended for Refresh (re-embedding its stored text) — or Memorize
+    /// when it has no refined content. Entries memorized before identities were recorded are not judged.
+    /// </summary>
+    public bool EmbeddingOutdated { get; init; }
+
+    /// <summary>
     /// Whether the source file exists on disk.
     /// </summary>
     public bool SourceExists { get; init; }
@@ -754,6 +763,18 @@ public sealed class VaultStatus
     /// number can be read before deciding. Entries extracted before identities were recorded are included.
     /// </summary>
     public int OutdatedExtractionCount { get; init; }
+
+    /// <summary>
+    /// The embedding identity the embedding service reports now; null without one (keyword-only) or while it cannot report
+    /// one yet.
+    /// </summary>
+    public EmbeddingIdentity? CurrentEmbedding { get; init; }
+
+    /// <summary>
+    /// Memorized entries whose chunks were embedded under another identity than <see cref="CurrentEmbedding"/> — what a
+    /// sync re-embeds after the embedding model changed. Entries memorized before identities were recorded are not counted.
+    /// </summary>
+    public int OutdatedEmbeddingCount { get; init; }
 
     // SyncStatus counts
     public int InSyncCount { get; init; }
