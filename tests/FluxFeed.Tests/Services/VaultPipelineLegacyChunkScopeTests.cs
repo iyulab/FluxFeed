@@ -2,6 +2,7 @@ using AwesomeAssertions;
 using FluxIndex.Core.Application.Interfaces;
 using FluxIndex.Core.Application.Services.Base;
 using FluxIndex.Core.Domain.Entities;
+using FluxIndex.Core.Domain.ValueObjects;
 using FluxIndex.Core.Application.Utilities;
 using FluxFeed.Interfaces;
 using FluxFeed.Services;
@@ -42,6 +43,7 @@ public class VaultPipelineLegacyChunkScopeTests
     {
         _embedding.GenerateQueryEmbeddingAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(QueryVector);
+        _embedding.GetIdentity().Returns(new EmbeddingIdentity { Provider = "Test", Model = "legacy-scope", Dimension = QueryVector.Length });
 
         return new VaultPipeline(
             _git, _hasher, _storage, NullLogger<VaultPipeline>.Instance,
