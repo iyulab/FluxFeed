@@ -61,7 +61,6 @@ internal sealed class DeterministicEmbeddingService : IEmbeddingService
 
     public int GetEmbeddingDimension() => Dimension;
     public string GetModelName() => "InMemoryTestEmbedding";
-    public int GetMaxTokens() => MaxTokens;
 
     public EmbeddingIdentity GetIdentity() => new()
     {
@@ -69,12 +68,6 @@ internal sealed class DeterministicEmbeddingService : IEmbeddingService
         Model = GetModelName(),
         Dimension = Dimension
     };
-
-    public Task<int> CountTokensAsync(string text, CancellationToken ct = default)
-    {
-        // Simple approximation: ~4 characters per token
-        return Task.FromResult(text.Length / 4);
-    }
 
     /// <summary>
     /// Lower-cased terms split on any whitespace (a newline is a separator too — splitting on the

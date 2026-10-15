@@ -62,7 +62,5 @@ internal sealed class FailableEmbeddingService : IEmbeddingService
 
     public int GetEmbeddingDimension() => _inner.GetEmbeddingDimension();
     public string GetModelName() => _inner.GetModelName();
-    public int GetMaxTokens() => _inner.GetMaxTokens();
     public EmbeddingIdentity GetIdentity() => _inner.GetIdentity();
-    public Task<int> CountTokensAsync(string text, CancellationToken ct = default) => _inner.CountTokensAsync(text, ct);
 }

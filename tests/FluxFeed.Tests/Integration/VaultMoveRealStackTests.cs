@@ -321,8 +321,6 @@ public sealed class VaultMoveRealStackTests : IDisposable
 
         public int GetEmbeddingDimension() => inner.GetEmbeddingDimension();
         public string GetModelName() => inner.GetModelName();
-        public int GetMaxTokens() => inner.GetMaxTokens();
         public EmbeddingIdentity GetIdentity() => inner.GetIdentity();
-        public Task<int> CountTokensAsync(string text, CancellationToken ct = default) => inner.CountTokensAsync(text, ct);
     }
 }

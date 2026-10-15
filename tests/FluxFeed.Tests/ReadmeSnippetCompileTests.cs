@@ -66,8 +66,6 @@ public partial class ReadmeSnippetCompileTests
                 public Task<IEnumerable<float[]>> GenerateEmbeddingsBatchAsync(IEnumerable<string> texts, CancellationToken cancellationToken = default) => throw new NotImplementedException();
                 public int GetEmbeddingDimension() => 384;
                 public string GetModelName() => "";
-                public int GetMaxTokens() => 512;
-                public Task<int> CountTokensAsync(string text, CancellationToken cancellationToken = default) => throw new NotImplementedException();
                 public FluxIndex.Core.Domain.ValueObjects.EmbeddingIdentity GetIdentity() => throw new NotImplementedException();
             }
             """,
