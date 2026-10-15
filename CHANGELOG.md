@@ -6,6 +6,11 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
+## [Unreleased]
+
+### Dependencies
+- Re-pinned sibling package(s) `FluxGuard.Remote` 0.22.1 -> 0.23.0.
+
 ## [0.56.0] - 2026-10-16
 
 ### Added
