@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.56.0] - 2026-10-16
 
 ### Added
 - **Entries embedded by another model are re-embedded.** `ChangeDetectionResult.EmbeddingOutdated` is true when an
