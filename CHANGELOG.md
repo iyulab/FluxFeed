@@ -8,12 +8,20 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Fixed
+- **Vectors FluxFeed writes now carry the vector-space revision they were computed in.** The pipeline (batch and per-chunk
+  memorize) and `FluxIndexMemorizer` embed and call `IVectorStore.StoreBatchAsync` themselves, and stored every vector
+  without a revision — so on FluxIndex 0.101.0 `CountVectorsOutsideSpaceAsync` counted all of them as outside the current
+  space and an in-place re-embed could never be seen to finish. Each now records the revision the embedding service
+  reports right after embedding (`IEmbeddingService.StampVectorSpace`, FluxIndex 0.102.0).
+
 ### Dependencies
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.22.1 -> 0.23.0.
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.23.0 -> 0.23.1.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.99.0 -> 0.100.0, `FluxIndex.Storage.SQLite` 0.99.0 -> 0.100.0.
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.23.1 -> 0.24.0.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.100.0 -> 0.101.0, `FluxIndex.Storage.SQLite` 0.100.0 -> 0.101.0.
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.101.0 -> 0.102.0, `FluxIndex.Storage.SQLite` 0.101.0 -> 0.102.0.
 
 ## [0.56.0] - 2026-10-16
 

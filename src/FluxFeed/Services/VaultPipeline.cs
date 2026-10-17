@@ -2636,6 +2636,9 @@ public sealed partial class VaultPipeline : IVaultPipeline
             {
                 changed[i].SetEmbedding(embeddingList[i]);
             }
+
+            // The store keeps the revision each vector was computed in only when the writer records it.
+            _embeddingService.StampVectorSpace(changed);
         }
 
         // Recorded before the write, not after: deleting an id that never landed is a no-op, while
@@ -2709,6 +2712,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
 
             // Embed single chunk
             chunk.SetEmbedding(await _embeddingService!.GenerateEmbeddingAsync(chunks[i].Content, ct));
+            _embeddingService.StampVectorSpace([chunk]);
             counters.ReEmbedded++;
 
             // Recorded before the write for the same reason as the batch path: a chunk that lands

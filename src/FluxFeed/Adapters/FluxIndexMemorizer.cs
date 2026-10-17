@@ -82,6 +82,9 @@ public sealed partial class FluxIndexMemorizer
             documentChunks.Add(chunk);
         }
 
+        // The store keeps the revision each vector was computed in only when the writer records it.
+        _embeddingService.StampVectorSpace(documentChunks);
+
         // Store in vector store (batch operation)
         var storedIds = await _vectorStore.StoreBatchAsync(documentChunks, ct);
         var storedCount = storedIds.Count();

@@ -145,6 +145,24 @@ public sealed class VaultPipelineChunkIdentityTests : IDisposable
 
     private List<string> RowIds() => _vectorRows.Select(c => c.Id).ToList();
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Memorize_RecordsOnEveryStoredVector_TheRevisionItWasComputedIn(bool perChunk)
+    {
+        _embeddingService.GetIdentity()
+            .Returns(new EmbeddingIdentity { Provider = "Test", Model = "test", Dimension = 3, VectorSpaceRevision = "rev-1" });
+        var pipeline = CreatePipeline();
+        var entry = await CreateEntryAsync("contract.txt", LineOne, LineTwo, LineThree);
+
+        (await pipeline.MemorizeAsync(entry, perChunk ? PerChunkOptions() : BatchOptions(), TestContext.Current.CancellationToken))
+            .Success.Should().BeTrue();
+
+        _vectorRows.Should().HaveCount(3);
+        _vectorRows.Should().OnlyContain(c => c.VectorSpaceRevision == "rev-1",
+            "a store counts a vector without a revision as outside every space");
+    }
+
     [Fact]
     public async Task Memorize_Twice_Unchanged_WritesTheSameIds_AndDeletesNothing()
     {
