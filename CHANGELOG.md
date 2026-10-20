@@ -11,6 +11,7 @@ Releases before 0.28.0 predate this file — see the git history.
 ### Dependencies
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.24.0 -> 0.25.0.
 - Re-pinned sibling package(s) `FileFlux` 0.65.0 -> 0.65.1.
+- Re-pinned sibling package(s) `FluxGuard.Remote` 0.25.0 -> 0.25.1.
 
 ## [0.56.1] - 2026-10-17
 

@@ -16,7 +16,7 @@
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.13" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.13" />
     <!-- FluxGuard (opt-in ingestion-time RAG security pipeline) -->
-    <PackageVersion Include="FluxGuard.Remote" Version="0.25.0" />
+    <PackageVersion Include="FluxGuard.Remote" Version="0.25.1" />
   </ItemGroup>
   <ItemGroup>
     <!-- Testing (xUnit v3 / Microsoft.Testing.Platform) -->
