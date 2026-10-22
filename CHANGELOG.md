@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.58.0] - 2026-10-23
 
 ### Changed
 - **A vault search can pin the hybrid fusion method and leave the weights to FluxIndex.** `VaultSearchFusion.VectorWeight`
@@ -15,6 +15,9 @@ Releases before 0.28.0 predate this file — see the git history.
   weight leaves the store's own weight.
 - **Breaking**: `VaultSearchFusion.VectorWeight` and `KeywordWeight` are `double?`. Code that reads them as `double` adds
   `.Value` (or `?? fallback`); constructing a fusion with a weight is unchanged.
+
+### Dependencies
+- Re-pinned sibling package(s) `FileFlux` 0.65.1 -> 0.65.2.
 
 ## [0.57.0] - 2026-10-22
 
