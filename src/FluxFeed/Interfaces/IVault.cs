@@ -1053,6 +1053,22 @@ public enum VaultSearchStrategy
 }
 
 /// <summary>
+/// The fusion a <see cref="VaultSearchStrategy.Hybrid"/> vault search uses (<see cref="VaultSearchOptions.Fusion"/>).
+/// </summary>
+/// <param name="Method">How the two legs' results are combined.</param>
+/// <param name="VectorWeight">Weight of the vector leg, 0.0 to 1.0; the keyword leg gets <c>1 - VectorWeight</c>.</param>
+public sealed record VaultSearchFusion(FluxIndex.Core.Domain.Models.FusionMethod Method, double VectorWeight)
+{
+    /// <summary>Weight of the vector leg, 0.0 to 1.0.</summary>
+    public double VectorWeight { get; } = VectorWeight is >= 0.0 and <= 1.0
+        ? VectorWeight
+        : throw new ArgumentOutOfRangeException(nameof(VectorWeight), VectorWeight, "VectorWeight must be between 0.0 and 1.0.");
+
+    /// <summary>Weight of the keyword leg: <c>1 - VectorWeight</c>.</summary>
+    public double KeywordWeight => 1.0 - VectorWeight;
+}
+
+/// <summary>
 /// Search options for vault content search.
 /// </summary>
 public sealed class VaultSearchOptions
@@ -1122,6 +1138,17 @@ public sealed class VaultSearchOptions
     /// <c>SearchOptions.RerankCandidateCount</c>.
     /// </summary>
     public int? RerankCandidateCount { get; init; }
+
+    /// <summary>
+    /// How a <see cref="VaultSearchStrategy.Hybrid"/> search fuses its vector and keyword legs. Null (the default)
+    /// leaves the choice to FluxIndex's hybrid search, so its default — and any change to it — applies. Set it to
+    /// pin a retrieval policy, e.g. <c>new VaultSearchFusion(FusionMethod.RRF, VectorWeight: 0.8)</c> to keep rank
+    /// fusion. Ignored by the <see cref="VaultSearchStrategy.Vector"/> and <see cref="VaultSearchStrategy.Keyword"/>
+    /// strategies and when a hybrid request degrades to vector. A native hybrid store
+    /// (<c>IVaultPipeline.HybridKeywordLeg</c> = <c>Native</c>) fuses by rank only: there a method other than
+    /// <see cref="FluxIndex.Core.Domain.Models.FusionMethod.RRF"/> throws <see cref="NotSupportedException"/> instead of being ignored.
+    /// </summary>
+    public VaultSearchFusion? Fusion { get; init; }
 
     /// <summary>
     /// Creates options for searching all files.

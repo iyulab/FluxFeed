@@ -8,6 +8,18 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Added
+- **A vault search can choose how hybrid fuses its legs.** `VaultSearchOptions.Fusion` takes a `VaultSearchFusion(method,
+  vectorWeight)` and passes the method and both leg weights (keyword = `1 - vectorWeight`) to the hybrid search, so a
+  consumer can keep reciprocal rank fusion (`new VaultSearchFusion(FusionMethod.RRF, VectorWeight: 0.8)`) instead of
+  FluxIndex's per-query default. Unset keeps today's behavior. On a store-native hybrid leg (rank fusion only) the weight
+  is passed and any method other than `RRF` throws `NotSupportedException`.
+
+### Changed
+- **Breaking**: `IVaultPipeline.SearchAsync` has a new optional `fusion` parameter before `ct`. Callers that pass named
+  arguments are unaffected; implementations of the interface add the parameter, and positional callers that pass a
+  cancellation token as the sixth argument name it (`ct: token`).
+
 ### Dependencies
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.24.0 -> 0.25.0.
 - Re-pinned sibling package(s) `FileFlux` 0.65.0 -> 0.65.1.

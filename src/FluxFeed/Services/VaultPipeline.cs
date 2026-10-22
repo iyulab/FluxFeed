@@ -1612,6 +1612,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         int topK = 10,
         float minScore = 0.0f,
         VaultSearchStrategy strategy = VaultSearchStrategy.Vector,
+        VaultSearchFusion? fusion = null,
         CancellationToken ct = default)
     {
         if (_vectorStore == null || _embeddingService == null)
@@ -1630,14 +1631,24 @@ public sealed partial class VaultPipeline : IVaultPipeline
             // the fused ranking of the in-scope chunks, not a fused ranking of everything filtered afterwards.
             if (_hybridKeywordLeg == HybridKeywordLeg.Native && _vectorStore is INativeHybridSearch nativeHybrid)
             {
-                var nativeResults = await NativeHybridSearchAsync(nativeHybrid, query, docIdSet, topK, minScore, ct);
+                // A native store fuses by rank only; it takes a vector weight but no method. Refuse a method it cannot
+                // run rather than fuse differently from what the caller asked for.
+                if (fusion is { Method: not FluxIndex.Core.Domain.Models.FusionMethod.RRF })
+                {
+                    throw new NotSupportedException(
+                        $"VaultSearchOptions.Fusion asks for {fusion.Method}, but this vault's hybrid search runs on the vector " +
+                        $"store's native hybrid path ({_vectorStore.GetType().Name}), which fuses by rank (RRF) only. Use " +
+                        "FusionMethod.RRF, or register an IKeywordSearchService so hybrid search fuses through FluxIndex.");
+                }
+
+                var nativeResults = await NativeHybridSearchAsync(nativeHybrid, query, docIdSet, topK, minScore, (float?)fusion?.VectorWeight, ct);
                 LogSearchResults(_logger, query, nativeResults.Count);
                 return new VaultPipelineSearchResponse(nativeResults, VaultSearchStrategy.Hybrid);
             }
 
             if (_hybridKeywordLeg == HybridKeywordLeg.KeywordIndex && _hybridSearch != null)
             {
-                var hybridResults = await HybridSearchAsync(query, docIdSet, topK, minScore, ct);
+                var hybridResults = await HybridSearchAsync(query, docIdSet, topK, minScore, fusion, ct);
                 LogSearchResults(_logger, query, hybridResults.Count);
                 return new VaultPipelineSearchResponse(hybridResults, VaultSearchStrategy.Hybrid);
             }
@@ -1810,6 +1821,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         HashSet<string>? docIdSet,
         int topK,
         float minScore,
+        VaultSearchFusion? fusion,
         CancellationToken ct)
     {
         var options = new FluxIndex.Core.Domain.Models.HybridSearchOptions
@@ -1829,6 +1841,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
             },
             SparseOptions = new FluxIndex.Core.Domain.Models.SparseSearchOptions { MaxResults = topK * 2 }
         };
+        if (fusion != null)
+        {
+            // Method and both weights together, so the service fills none of them in.
+            options.FusionMethod = fusion.Method;
+            options.VectorWeight = fusion.VectorWeight;
+            options.SparseWeight = fusion.KeywordWeight;
+        }
         if (BuildDocScopeFilter(docIdSet) is { } scopeFilter)
             options.Filters = scopeFilter;
 
@@ -1842,6 +1861,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         HashSet<string>? docIdSet,
         int topK,
         float minScore,
+        float? vectorWeight,
         CancellationToken ct)
     {
         // Native hybrid fuses dense vectors with the store's own keyword index (e.g. chunk_fts);
@@ -1850,7 +1870,7 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // the same correctness backstop the vector path keeps. Over-fetch to survive it.
         var queryEmbedding = await _embeddingService!.GenerateQueryEmbeddingAsync(query, ct);
         var nativeResults = await nativeHybrid.HybridSearchAsync(
-            queryEmbedding, query, topK * 2, minScore, vectorWeight: null, BuildDocScopeFilter(docIdSet), ct);
+            queryEmbedding, query, topK * 2, minScore, vectorWeight, BuildDocScopeFilter(docIdSet), ct);
         return ProjectHybrid(nativeResults, docIdSet, topK);
     }
 

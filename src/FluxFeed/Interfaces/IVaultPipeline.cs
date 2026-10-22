@@ -187,6 +187,8 @@ public interface IVaultPipeline
     /// <see cref="VaultSearchStrategy.Keyword"/> request degrades to vector when no
     /// <c>IKeywordSearchService</c> is available; the response reports the strategy actually
     /// executed.</param>
+    /// <param name="fusion">How a hybrid search fuses its legs (<see cref="VaultSearchOptions.Fusion"/>); null leaves it
+    /// to FluxIndex. Ignored by the other strategies.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Search results plus the strategy that was actually executed.</returns>
     Task<VaultPipelineSearchResponse> SearchAsync(
@@ -195,6 +197,7 @@ public interface IVaultPipeline
         int topK = 10,
         float minScore = 0.0f,
         VaultSearchStrategy strategy = VaultSearchStrategy.Vector,
+        VaultSearchFusion? fusion = null,
         CancellationToken ct = default);
 
     /// <summary>

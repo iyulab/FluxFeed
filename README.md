@@ -46,6 +46,8 @@ document's extracted content, see its commit history, and edit it without touchi
   returns the memorized entries closest to one entry («documents like this one»), closest first and the entry itself
   left out: the centroid of its stored chunk vectors is searched against the others, and each entry scores by its best
   chunk. Always available with a vector store; no query text to invent
+- **Hybrid fusion choice** — `VaultSearchOptions.Fusion = new VaultSearchFusion(FusionMethod.RRF, VectorWeight: 0.8)` pins how a
+  `Hybrid` search fuses its legs (default: FluxIndex chooses per query); see [Hybrid search](#hybrid-search--over-the-keyword-index-or-store-native)
 - **Reranking** — `VaultSearchOptions.UseReranker` orders an over-fetched candidate pool with the registered FluxIndex
   `IReranker` (opt-in; see [Reranked search](#reranked-search--vaultsearchoptionsusereranker))
 
@@ -720,12 +722,29 @@ in-scope chunks. When hybrid is not available the query runs as vector search an
 `VaultSearchResult.ExecutedStrategy` — compare it against `RequestedStrategy` rather than assuming the request was
 honored.
 
-The legs are fused by weighted reciprocal rank, so **hybrid scores are usually rank-sized** — about 0.016 for a chunk
-both legs rank first, never near 1. On the keyword-index leg the stock `HybridSearchService` picks the weights from the
-query's length (one or two terms: vector 0.3 / keyword 0.7; three to five: 0.6 / 0.4; longer: 0.8 / 0.2), and a query
-containing one of the whole words `API`, `HTTP`, `JSON`, `SQL`, `AI` or `ML` is fused by weighted sum of normalized
-scores instead — not rank-sized. The native leg uses the store's own weighting. FluxFeed does not expose these weights
-yet.
+On the keyword-index leg the stock `HybridSearchService` chooses the fusion per query unless you set it: relative
+score fusion (each leg's scores min-max normalized, then weighted), with the vector leg weighted 0.4 for one or two
+terms, 0.5 for three to five, and 0.6 for longer queries or any query with CJK text — so **hybrid scores are on a 0–1
+scale**. The native leg fuses by weighted reciprocal rank (rank-sized scores, about 0.016 for a chunk both legs rank
+first) with the store's own weight.
+
+**Choosing the fusion — `VaultSearchOptions.Fusion`.** Set it to pin the fusion instead of taking FluxIndex's per-query
+choice (and any later change to it):
+
+```csharp
+var results = await vault.SearchAsync("INV-2024-0042 refund terms", new VaultSearchOptions
+{
+    SearchStrategy = VaultSearchStrategy.Hybrid,
+    // Reciprocal rank fusion, vector 0.8 / keyword 0.2: keeps a chunk the keyword leg alone ranks first
+    // (an exact identifier) near the top even when the vector leg prefers documents about the other words.
+    Fusion = new VaultSearchFusion(FluxIndex.Core.Domain.Models.FusionMethod.RRF, VectorWeight: 0.8),
+});
+```
+
+The keyword leg gets `1 - VectorWeight`. A set fusion goes to the hybrid search as method and both weights, so nothing is
+chosen for you. On the `Native` leg only `FusionMethod.RRF` can run — the weight is passed to the store, and any other
+method throws `NotSupportedException` rather than fusing differently from what you asked. `Vector` and `Keyword`
+requests ignore it.
 
 `VaultSearchOptions.MinScore` under `Hybrid` is a **similarity floor on the vector leg, applied before fusion** —
 the same meaning it has for `Vector`, so one similarity-sized value works whichever of the two runs. It is never

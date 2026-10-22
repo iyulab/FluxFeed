@@ -416,4 +416,84 @@ public class VaultPipelineSearchStrategyTests
         response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
         response.Results.Should().ContainSingle().Which.DocumentId.Should().Be("keep");
     }
+
+    // Fusion choice (VaultSearchOptions.Fusion): a set fusion reaches the hybrid call as method plus both weights, an
+    // unset one leaves all three to FluxIndex, and a native store that fuses by rank only refuses another method.
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_WithFusion_PassesMethodAndBothWeights()
+    {
+        HybridSearchOptions? seen = null;
+        var hybrid = Substitute.For<IHybridSearchService>();
+        hybrid.SearchAsync(Arg.Any<string>(), Arg.Do<HybridSearchOptions?>(o => seen = o), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>());
+        var pipeline = CreatePipeline(hybrid);
+
+        await pipeline.SearchAsync("q", topK: 5, strategy: VaultSearchStrategy.Hybrid,
+            fusion: new VaultSearchFusion(FusionMethod.RRF, VectorWeight: 0.8), ct: TestContext.Current.CancellationToken);
+
+        seen.Should().NotBeNull();
+        seen!.FusionMethod.Should().Be(FusionMethod.RRF);
+        seen.VectorWeight.Should().BeApproximately(0.8, 1e-9);
+        seen.SparseWeight.Should().BeApproximately(0.2, 1e-9);
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_WithoutFusion_LeavesTheChoiceToFluxIndex()
+    {
+        HybridSearchOptions? seen = null;
+        var hybrid = Substitute.For<IHybridSearchService>();
+        hybrid.SearchAsync(Arg.Any<string>(), Arg.Do<HybridSearchOptions?>(o => seen = o), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>());
+        var pipeline = CreatePipeline(hybrid);
+
+        await pipeline.SearchAsync("q", topK: 5, strategy: VaultSearchStrategy.Hybrid, ct: TestContext.Current.CancellationToken);
+
+        seen.Should().NotBeNull();
+        seen!.FusionMethod.Should().BeNull();
+        seen.VectorWeight.Should().BeNull();
+        seen.SparseWeight.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_NativeHybrid_WithRrfFusion_PassesTheVectorWeight()
+    {
+        float? seenWeight = -1f;
+        var nativeStore = Substitute.For<IVectorStore, INativeHybridSearch>();
+        ((INativeHybridSearch)nativeStore).HybridSearchAsync(
+                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Do<float?>(w => seenWeight = w), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>());
+        var pipeline = CreatePipelineWithStore(nativeStore, hybrid: null);
+
+        var response = await pipeline.SearchAsync("q", topK: 5, strategy: VaultSearchStrategy.Hybrid,
+            fusion: new VaultSearchFusion(FusionMethod.RRF, VectorWeight: 0.3), ct: TestContext.Current.CancellationToken);
+
+        response.ExecutedStrategy.Should().Be(VaultSearchStrategy.Hybrid);
+        seenWeight.Should().NotBeNull();
+        seenWeight!.Value.Should().BeApproximately(0.3f, 1e-6f);
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_NativeHybrid_WithOtherMethod_Throws()
+    {
+        var nativeStore = Substitute.For<IVectorStore, INativeHybridSearch>();
+        var pipeline = CreatePipelineWithStore(nativeStore, hybrid: null);
+
+        var act = () => pipeline.SearchAsync("q", topK: 5, strategy: VaultSearchStrategy.Hybrid,
+            fusion: new VaultSearchFusion(FusionMethod.RelativeScoreFusion, VectorWeight: 0.6), ct: TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<NotSupportedException>()).WithMessage("*RRF*");
+        await ((INativeHybridSearch)nativeStore).DidNotReceive().HybridSearchAsync(
+            Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<float?>(), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData(-0.1)]
+    [InlineData(1.1)]
+    public void VaultSearchFusion_RejectsAWeightOutsideZeroToOne(double weight)
+    {
+        var act = () => new VaultSearchFusion(FusionMethod.RRF, weight);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
 }

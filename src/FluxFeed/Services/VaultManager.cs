@@ -1774,7 +1774,7 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
 
         // Execute pipeline search with the requested strategy
         var pipelineResponse = await _pipeline.SearchAsync(
-            query, documentIds, fetchCount, options.MinScore, options.SearchStrategy, ct);
+            query, documentIds, fetchCount, options.MinScore, options.SearchStrategy, options.Fusion, ct);
 
         var ranked = options.UseReranker
             ? await RerankAsync(query, pipelineResponse.Results, options.TopK, ct)

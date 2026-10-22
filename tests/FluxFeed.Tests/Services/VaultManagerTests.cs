@@ -934,7 +934,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadataAtStage(file, ProcessingStage.Memorized);
 
         _pipelineMock
-            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<CancellationToken>())
+            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<VaultSearchFusion?>(), Arg.Any<CancellationToken>())
             .Returns(new VaultPipelineSearchResponse([], VaultSearchStrategy.Hybrid));
 
         var result = await _vault.SearchAsync("query", new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Hybrid }, CancellationToken.None);
@@ -945,7 +945,24 @@ public class VaultManagerTests : IDisposable
         // The requested strategy must be forwarded to the pipeline (carrier wired through).
         await _pipelineMock.Received().SearchAsync(
             Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(),
-            VaultSearchStrategy.Hybrid, Arg.Any<CancellationToken>());
+            VaultSearchStrategy.Hybrid, Arg.Any<VaultSearchFusion?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SearchAsync_ForwardsTheFusionChoiceToThePipeline()
+    {
+        var file = CreateTestFile("fusion-forward.txt", "content");
+        CreateEntryWithMetadataAtStage(file, ProcessingStage.Memorized);
+        _pipelineMock
+            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<VaultSearchFusion?>(), Arg.Any<CancellationToken>())
+            .Returns(new VaultPipelineSearchResponse([], VaultSearchStrategy.Hybrid));
+        var fusion = new VaultSearchFusion(FluxIndex.Core.Domain.Models.FusionMethod.RRF, VectorWeight: 0.8);
+
+        await _vault.SearchAsync("query", new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Hybrid, Fusion = fusion }, CancellationToken.None);
+
+        await _pipelineMock.Received().SearchAsync(
+            Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(),
+            VaultSearchStrategy.Hybrid, fusion, Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -956,7 +973,7 @@ public class VaultManagerTests : IDisposable
 
         // Pipeline reports it actually ran vector (no IHybridSearchService registered downstream).
         _pipelineMock
-            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<CancellationToken>())
+            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<VaultSearchFusion?>(), Arg.Any<CancellationToken>())
             .Returns(new VaultPipelineSearchResponse([], VaultSearchStrategy.Vector));
 
         var result = await _vault.SearchAsync("query", new VaultSearchOptions { SearchStrategy = VaultSearchStrategy.Hybrid }, CancellationToken.None);
@@ -981,7 +998,7 @@ public class VaultManagerTests : IDisposable
         cts.Cancel();
 
         _pipelineMock
-            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<CancellationToken>())
+            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<VaultSearchFusion?>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
         // Act
@@ -999,7 +1016,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadataAtStage(file, ProcessingStage.Memorized);
 
         _pipelineMock
-            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<CancellationToken>())
+            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<VaultSearchFusion?>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new OperationCanceledException());
 
         // Act
@@ -1017,7 +1034,7 @@ public class VaultManagerTests : IDisposable
         CreateEntryWithMetadataAtStage(file, ProcessingStage.Memorized);
 
         _pipelineMock
-            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<CancellationToken>())
+            .SearchAsync(Arg.Any<string>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Any<VaultSearchStrategy>(), Arg.Any<VaultSearchFusion?>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("boom"));
 
         // Act
