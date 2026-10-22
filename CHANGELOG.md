@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.57.0] - 2026-10-22
 
 ### Added
 - **A vault search can choose how hybrid fuses its legs.** `VaultSearchOptions.Fusion` takes a `VaultSearchFusion(method,
