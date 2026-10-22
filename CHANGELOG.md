@@ -6,6 +6,16 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
+## [Unreleased]
+
+### Changed
+- **A vault search can pin the hybrid fusion method and leave the weights to FluxIndex.** `VaultSearchFusion.VectorWeight`
+  is optional: `new VaultSearchFusion(FusionMethod.RRF)` runs rank fusion with the leg weights FluxIndex picks for each
+  query, as `HybridSearchOptions` already allows. A set weight behaves as before. On a store-native hybrid leg an unset
+  weight leaves the store's own weight.
+- **Breaking**: `VaultSearchFusion.VectorWeight` and `KeywordWeight` are `double?`. Code that reads them as `double` adds
+  `.Value` (or `?? fallback`); constructing a fusion with a weight is unchanged.
+
 ## [0.57.0] - 2026-10-22
 
 ### Added

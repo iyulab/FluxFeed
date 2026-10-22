@@ -46,8 +46,8 @@ document's extracted content, see its commit history, and edit it without touchi
   returns the memorized entries closest to one entry («documents like this one»), closest first and the entry itself
   left out: the centroid of its stored chunk vectors is searched against the others, and each entry scores by its best
   chunk. Always available with a vector store; no query text to invent
-- **Hybrid fusion choice** — `VaultSearchOptions.Fusion = new VaultSearchFusion(FusionMethod.RRF, VectorWeight: 0.8)` pins how a
-  `Hybrid` search fuses its legs (default: FluxIndex chooses per query); see [Hybrid search](#hybrid-search--over-the-keyword-index-or-store-native)
+- **Hybrid fusion choice** — `VaultSearchOptions.Fusion = new VaultSearchFusion(FusionMethod.RRF)` pins how a `Hybrid` search
+  fuses its legs (default: FluxIndex chooses per query); a `VectorWeight` fixes the weights too, unset leaves them to FluxIndex; see [Hybrid search](#hybrid-search--over-the-keyword-index-or-store-native)
 - **Reranking** — `VaultSearchOptions.UseReranker` orders an over-fetched candidate pool with the registered FluxIndex
   `IReranker` (opt-in; see [Reranked search](#reranked-search--vaultsearchoptionsusereranker))
 
@@ -735,14 +735,17 @@ choice (and any later change to it):
 var results = await vault.SearchAsync("INV-2024-0042 refund terms", new VaultSearchOptions
 {
     SearchStrategy = VaultSearchStrategy.Hybrid,
-    // Reciprocal rank fusion, vector 0.8 / keyword 0.2: keeps a chunk the keyword leg alone ranks first
-    // (an exact identifier) near the top even when the vector leg prefers documents about the other words.
-    Fusion = new VaultSearchFusion(FluxIndex.Core.Domain.Models.FusionMethod.RRF, VectorWeight: 0.8),
+    // Reciprocal rank fusion, with the leg weights FluxIndex picks for each query: keeps a chunk the keyword leg
+    // alone ranks first (an exact identifier) near the top even when the vector leg prefers documents about the
+    // other words.
+    Fusion = new VaultSearchFusion(FluxIndex.Core.Domain.Models.FusionMethod.RRF),
 });
 ```
 
-The keyword leg gets `1 - VectorWeight`. A set fusion goes to the hybrid search as method and both weights, so nothing is
-chosen for you. On the `Native` leg only `FusionMethod.RRF` can run — the weight is passed to the store, and any other
+`VectorWeight` is optional. Unset, only the method is pinned and FluxIndex picks both weights per query. Set
+(`new VaultSearchFusion(FusionMethod.RRF, VectorWeight: 0.5)`), the keyword leg gets `1 - VectorWeight` and the method
+and both weights go to the hybrid search, so nothing is chosen for you. Equal weights under RRF mean a chunk the
+keyword leg ranks first cannot lose to one only the vector leg found. On the `Native` leg only `FusionMethod.RRF` can run — the weight is passed to the store, and any other
 method throws `NotSupportedException` rather than fusing differently from what you asked. `Vector` and `Keyword`
 requests ignore it.
 

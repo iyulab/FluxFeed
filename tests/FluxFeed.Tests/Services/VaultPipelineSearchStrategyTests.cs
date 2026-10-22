@@ -456,6 +456,40 @@ public class VaultPipelineSearchStrategyTests
     }
 
     [Fact]
+    public async Task SearchAsync_HybridRequest_WithMethodOnly_PinsTheMethodAndLeavesTheWeightsToFluxIndex()
+    {
+        HybridSearchOptions? seen = null;
+        var hybrid = Substitute.For<IHybridSearchService>();
+        hybrid.SearchAsync(Arg.Any<string>(), Arg.Do<HybridSearchOptions?>(o => seen = o), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>());
+        var pipeline = CreatePipeline(hybrid);
+
+        await pipeline.SearchAsync("q", topK: 5, strategy: VaultSearchStrategy.Hybrid,
+            fusion: new VaultSearchFusion(FusionMethod.RRF), ct: TestContext.Current.CancellationToken);
+
+        seen.Should().NotBeNull();
+        seen!.FusionMethod.Should().Be(FusionMethod.RRF);
+        seen.VectorWeight.Should().BeNull();
+        seen.SparseWeight.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SearchAsync_HybridRequest_NativeHybrid_WithRrfMethodOnly_LeavesTheWeightToTheStore()
+    {
+        float? seenWeight = -1f;
+        var nativeStore = Substitute.For<IVectorStore, INativeHybridSearch>();
+        ((INativeHybridSearch)nativeStore).HybridSearchAsync(
+                Arg.Any<float[]>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<float>(), Arg.Do<float?>(w => seenWeight = w), Arg.Any<Dictionary<string, object>?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<HybridSearchResult>());
+        var pipeline = CreatePipelineWithStore(nativeStore, hybrid: null);
+
+        await pipeline.SearchAsync("q", topK: 5, strategy: VaultSearchStrategy.Hybrid,
+            fusion: new VaultSearchFusion(FusionMethod.RRF), ct: TestContext.Current.CancellationToken);
+
+        seenWeight.Should().BeNull();
+    }
+
+    [Fact]
     public async Task SearchAsync_HybridRequest_NativeHybrid_WithRrfFusion_PassesTheVectorWeight()
     {
         float? seenWeight = -1f;

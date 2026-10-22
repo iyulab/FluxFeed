@@ -1843,7 +1843,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
         };
         if (fusion != null)
         {
-            // Method and both weights together, so the service fills none of them in.
+            // The method, and the weights as given: set, both go (the service fills neither in); null, both stay null
+            // and the service picks them per query — HybridSearchOptions fills each field independently.
             options.FusionMethod = fusion.Method;
             options.VectorWeight = fusion.VectorWeight;
             options.SparseWeight = fusion.KeywordWeight;
