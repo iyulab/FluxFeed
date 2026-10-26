@@ -12,6 +12,7 @@ Releases before 0.28.0 predate this file — see the git history.
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.25.1 -> 0.26.0.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.103.1 -> 0.104.0, `FluxIndex.Storage.SQLite` 0.103.1 -> 0.104.0.
 - Re-pinned sibling package(s) `FileFlux` 0.65.2 -> 0.65.3.
+- Re-pinned sibling package(s) `FileFlux` 0.65.3 -> 0.66.0.
 
 ## [0.58.0] - 2026-10-23
 
