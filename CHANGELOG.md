@@ -6,9 +6,10 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.58.1] - 2026-10-28
 
 ### Dependencies
+- FluxIndex 0.105.0 changes the token counts it reports and uses for non-English text (see its CHANGELOG); FluxFeed's own API is unchanged.
 - Re-pinned sibling package(s) `FluxGuard.Remote` 0.25.1 -> 0.26.0.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.103.1 -> 0.104.0, `FluxIndex.Storage.SQLite` 0.103.1 -> 0.104.0.
 - Re-pinned sibling package(s) `FileFlux` 0.65.2 -> 0.65.3.
