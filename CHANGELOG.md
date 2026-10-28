@@ -14,6 +14,7 @@ Releases before 0.28.0 predate this file — see the git history.
 - Re-pinned sibling package(s) `FileFlux` 0.65.2 -> 0.65.3.
 - Re-pinned sibling package(s) `FileFlux` 0.65.3 -> 0.66.0.
 - Re-pinned third-party packages: 5 .NET servicing pins (Microsoft.Data, Microsoft.Extensions) 10.0.13 -> 10.0.14 (the 10.0.14 security servicing release).
+- Re-pinned sibling package(s) `FluxIndex.Core` 0.104.0 -> 0.105.0, `FluxIndex.Storage.SQLite` 0.104.0 -> 0.105.0.
 
 ## [0.58.0] - 2026-10-23
 
