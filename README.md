@@ -220,6 +220,10 @@ With the policy on, `RefreshAsync` (and a queued refresh) of an outdated entry r
 overwritten. `WhenExtractorMinorChanges` ignores patch releases; `WhenExtractorChanges` does not. Entries extracted
 before identities were recorded count as outdated. To re-extract one file regardless of the policy, call
 `MemorizeAsync` for it.
+
+The cost lands on every outdated entry at once — each one re-runs OCR and image description when they are configured —
+so a host with many documents may prefer to turn the policy on for a maintenance run it starts and watches
+(`StatusAsync().OutdatedExtractionCount` says how many it will touch), not as a start-up default.
 With background processing on, both only enqueue a job and return the entry as it was; pass
 `waitForCompletion: true` (`MemorizeAsync(path, waitForCompletion: true)`,
 `RefreshAsync(path, waitForCompletion: true)`) to get the re-indexed entry — and its new commit — back.
