@@ -32,6 +32,22 @@ public class FileFluxExtractorImagesTests
     }
 
     [Fact]
+    public void ToImageArtifacts_CarriesTheNameTheTextUses_AndLeavesItNullWhenTheReaderGivesNone()
+    {
+        // A Word document's Markdown refers to a picture by the media part's file name while its id is the resource id.
+        var named = new ImageInfo { Id = "rId9", Data = [1], MimeType = "image/png" };
+        named.Properties[FileFluxExtractor.ReferenceNameProperty] = "image1.png";
+        var unnamed = new ImageInfo { Id = "img_x", Data = [2], MimeType = "image/png" };
+
+        var artifacts = FileFluxExtractor.ToImageArtifacts([named, unnamed]);
+
+        artifacts.Should().NotBeNull();
+        artifacts![0].Id.Should().Be("rId9");
+        artifacts[0].ReferenceName.Should().Be("image1.png");
+        artifacts[1].ReferenceName.Should().BeNull();
+    }
+
+    [Fact]
     public void ToImageArtifacts_IsNull_WhenNoImageHasBytes() =>
         FileFluxExtractor.ToImageArtifacts([new ImageInfo { Id = "empty.png" }]).Should().BeNull();
 }

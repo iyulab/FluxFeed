@@ -106,6 +106,9 @@ public sealed partial class FileFluxExtractor : IExtractor
         }
     }
 
+    /// <summary>The <c>ImageInfo.Properties</c> key FileFlux records the text's name for an image under.</summary>
+    internal const string ReferenceNameProperty = "reference_name";
+
     /// <summary>
     /// FileFlux's images as vault image artifacts; an image without bytes is left out (null when none remain). Ids fall
     /// back to the document position when the reader gave none.
@@ -129,6 +132,11 @@ public sealed partial class FileFluxExtractor : IExtractor
                 ContentType = img.MimeType ?? "application/octet-stream",
                 // Alt text / caption when the format carries one (HTML alt, Office alt text).
                 AltText = string.IsNullOrWhiteSpace(img.Caption) ? null : img.Caption,
+                // The name the Markdown uses for the picture (Word / PowerPoint / Excel); Id is the resource id.
+                ReferenceName = img.Properties.TryGetValue(ReferenceNameProperty, out var reference)
+                    && reference is string { Length: > 0 } referenceName
+                        ? referenceName
+                        : null,
                 PageNumber = img.PageNumber,
                 // Every page that shows it (a picture reused across slides); FileFlux answers [PageNumber] for one page.
                 PageNumbers = img.PageNumbers.ToArray(),

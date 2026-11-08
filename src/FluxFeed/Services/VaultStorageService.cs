@@ -214,6 +214,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 ContentType = image.ContentType,
                 Description = carriedDescription,
                 AltText = image.AltText,
+                ReferenceName = image.ReferenceName,
                 PageNumber = image.PageNumber,
                 // Written only for an image on several pages: a single page is PageNumber, and the manifest of every
                 // other entry stays as it was.
@@ -272,6 +273,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                     ContentType = item.ContentType,
                     Description = item.Description,
                     AltText = item.AltText,
+                    ReferenceName = item.ReferenceName,
                     PageNumber = item.PageNumber,
                     PageNumbers = item.ShownOn(),
                     ReadAsPage = item.ReadAsPage,
@@ -300,6 +302,7 @@ public sealed partial class VaultStorageService : IVaultStorageService
                 ContentType = item.ContentType,
                 Description = item.Description,
                 AltText = item.AltText,
+                ReferenceName = item.ReferenceName,
                 PageNumber = item.PageNumber,
                 PageNumbers = item.ShownOn(),
                 ReadAsPage = item.ReadAsPage,
@@ -636,6 +639,10 @@ public sealed partial class VaultStorageService : IVaultStorageService
         // Settable: enrichment fills this in per image, long after the manifest was written.
         public string? Description { get; set; }
         public string? AltText { get; init; }
+        // The name the document text refers to the image by; not written when null, so the manifest of an image whose
+        // reader reports none (and of every entry stored before it existed) stays byte-for-byte as it was.
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReferenceName { get; init; }
         public int? PageNumber { get; init; }
         // Null unless the image is on several pages (and in manifests written before it existed); not written when null,
         // so the manifest of every single-page image stays byte-for-byte as it was.

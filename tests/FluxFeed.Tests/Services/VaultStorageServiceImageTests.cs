@@ -98,6 +98,33 @@ public class VaultStorageServiceImageTests : IDisposable
     }
 
     [Fact]
+    public async Task StoreImagesAsync_RecordsTheNameTheTextUses_OnlyForAnImageThatHasOne()
+    {
+        // A Word document's Markdown says ![](image1.png) while the picture is stored under its resource id (rId9.png).
+        var docPath = CreateDocument("named.txt", "Test content for reference names");
+        var entry = VaultEntry.Create(docPath, _vaultDir);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+        byte[] data = [0x89, 0x50, 0x4E, 0x47];
+
+        await _storage.StoreImagesAsync(entry,
+        [
+            new() { Id = "rId9", Data = data, ContentType = "image/png", ReferenceName = "image1.png" },
+            new() { Id = "img_001", Data = data, ContentType = "image/png" }
+        ], TestContext.Current.CancellationToken);
+
+        var manifestJson = await File.ReadAllTextAsync(entry.ImagesManifestPath, TestContext.Current.CancellationToken);
+        var manifest = await _storage.GetImageManifestAsync(entry, TestContext.Current.CancellationToken);
+
+        manifestJson.Should().Contain("\"referenceName\": \"image1.png\"");
+        manifestJson.Split("referenceName").Length.Should().Be(2, "an image the reader names nothing for writes no field");
+        manifest.Single(i => i.Id == "rId9").ReferenceName.Should().Be("image1.png");
+        manifest.Single(i => i.Id == "rId9").FileName.Should().Be("rId9.png");
+        manifest.Single(i => i.Id == "img_001").ReferenceName.Should().BeNull();
+        (await _storage.GetImagesAsync(entry, TestContext.Current.CancellationToken))
+            .Single(i => i.Id == "rId9").ReferenceName.Should().Be("image1.png");
+    }
+
+    [Fact]
     public async Task StoreImagesAsync_WithCustomIds_PreservesCustomIds()
     {
         // Arrange - simulate FileFlux returning custom IDs

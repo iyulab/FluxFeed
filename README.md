@@ -404,7 +404,8 @@ var entry = await vault.MemorizeAsync(path, waitForCompletion: true);
 
 if (entry.ExtractionHints?.TryGetValue("extraction_failure_reason", out var reason) == true)
 {
-    // "no_text_layer" (image-only/scanned) | "blank_page" (empty document)
+    // "no_text_layer" (image-only/scanned) | "blank_page" (empty document) | "empty_extraction" (a non-empty
+    // file that reads as nothing - FileFlux 0.68.0)
     // entry.ExtractionWarnings carries the human-readable explanation.
 }
 ```
@@ -660,6 +661,9 @@ on (PDF, a presentation's slide), the chunk also carries the page keys text chun
 the image again. A picture shown on several pages (a slide reused across a deck) keeps the first in those keys and
 lists every page in `pageNumbers` (`"1,4"`, `VaultPipeline.PageNumbersMetadataKey`); `ImageArtifact.PageNumbers` and
 `VaultImage.PageNumbers` carry the same list.
+For a Word, PowerPoint or Excel picture the extracted text names it by its media file (`![](image1.png)`) while the stored file is
+named by the document's resource id (`rId9.png`): `ImageArtifact.ReferenceName` / `VaultImage.ReferenceName` and the manifest's
+`referenceName` carry the name the text uses, so a reference in the text maps to the stored image (absent when the reader gives none).
 
 Descriptions go through the same chunker as the body, so `MaxChunkSize` bounds them too and a long
 description becomes several chunks that each carry the same `image_id` / `image_file`. Returning a

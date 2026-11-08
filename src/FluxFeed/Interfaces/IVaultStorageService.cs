@@ -228,6 +228,14 @@ public sealed class ImageArtifact
     public string? AltText { get; init; }
 
     /// <summary>
+    /// The name the extracted text refers to the image by (<c>![](image3.png)</c> in a Word, PowerPoint or Excel
+    /// document's Markdown), when the reader reports one. <see cref="Id"/> is the document's own resource id and
+    /// names the stored file, so a reference in the text maps to the stored image through this value. Null when the
+    /// reader gives no such name.
+    /// </summary>
+    public string? ReferenceName { get; init; }
+
+    /// <summary>
     /// The page the image is drawn on (1-based), when the source document has pages and its reader reports it (a PDF
     /// page, a presentation's slide). For an image shown on several pages, the first; see <see cref="PageNumbers"/>.
     /// </summary>
@@ -325,6 +333,12 @@ public sealed class VaultImage
 
     /// <summary>Alt text carried by the source document, when the reader reported one.</summary>
     public string? AltText { get; init; }
+
+    /// <summary>
+    /// The name the extracted text refers to the image by (<see cref="ImageArtifact.ReferenceName"/>), or null in a
+    /// manifest written before it was recorded or when the reader gave none - a re-memorize records it.
+    /// </summary>
+    public string? ReferenceName { get; init; }
 
     /// <summary>
     /// The page the image is drawn on (1-based), when the source document has pages and its reader reported it (a PDF
