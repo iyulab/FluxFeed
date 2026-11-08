@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.59.0] - 2026-11-09
 
 ### Added
 - **A stored image knows the name the document text uses for it.** For a Word, PowerPoint or Excel picture the extracted Markdown refers to the media file (`![](image1.png)`) while the stored file and `Id` are the resource id (`rId9`), so a reference in the text never resolved to a stored file. `ImageArtifact.ReferenceName` and `VaultImage.ReferenceName` now carry the text's name, and the images manifest gains `referenceName` next to `fileName` (written only for an image that has one; an entry is filled by its next memorize). Needs FileFlux 0.68.0.
