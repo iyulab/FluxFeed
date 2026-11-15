@@ -8,6 +8,9 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ## [Unreleased]
 
+### Fixed
+- **Memorizing a file that another program holds open for writing works on Windows.** The content hash and the text read of a file without an extractor opened the source asking to deny writers, so a document its editor had open (the moment it is most often asked about) was refused with «being used by another process» before extraction began; both reads share the file for read, write and delete now. Nothing changes on macOS or Linux, which do not enforce share modes. A file read by the FileFlux extractor needs FileFlux 0.69.0 or later, which opens its sources the same way.
+
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.105.0 -> 0.106.0, `FluxIndex.Storage.SQLite` 0.105.0 -> 0.106.0.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.106.0 -> 0.106.1, `FluxIndex.Storage.SQLite` 0.106.0 -> 0.106.1.

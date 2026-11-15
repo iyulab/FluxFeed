@@ -2767,7 +2767,13 @@ public sealed partial class VaultPipeline : IVaultPipeline
         // Check if file is readable as text (documents + code + custom)
         if (IsReadableTextExtension(extension))
         {
-            return await File.ReadAllTextAsync(sourcePath, ct);
+            // As File.ReadAllTextAsync (UTF-8, byte order mark honoured), but shared for read, write and delete so a
+            // file its editor holds open for writing is readable on Windows.
+            await using var stream = new FileStream(
+                sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return await reader.ReadToEndAsync(ct);
         }
 
         return $"[Content extraction required for {extension} files. Install FileFlux for full support.]";

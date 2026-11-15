@@ -18,11 +18,13 @@ public sealed class ContentHasher : IContentHasher
         if (!File.Exists(filePath))
             throw new FileNotFoundException("File not found", filePath);
 
+        // Shared for read, write and delete: a document is most often hashed while the program that edits it still has
+        // it open for writing, and denying writers is what makes Windows refuse that file.
         await using var stream = new FileStream(
             filePath,
             FileMode.Open,
             FileAccess.Read,
-            FileShare.Read,
+            FileShare.ReadWrite | FileShare.Delete,
             bufferSize: 81920,
             useAsync: true);
 
