@@ -41,6 +41,23 @@ public sealed class FilesHeldOpenForWritingTests : IDisposable
         entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
     }
 
+    // The default stack: the text is read by the registered FileFlux extractor, so this is the end-to-end path of a consumer
+    // that did not replace it (FileFlux reads text and Markdown files shared for read, write and delete from 0.69.0).
+    [Fact]
+    public async Task Memorize_IndexesAFile_AnEditorHoldsOpenForWriting_ThroughTheFileFluxExtractor()
+    {
+        var path = Path.Combine(_root, "docs", "plan.md");
+        File.WriteAllText(path, "# Plan\n\nThe rollback command restores the previous release.\n");
+        await using var provider = BuildStack(keepExtractor: true);
+        using var scope = provider.CreateScope();
+        var vault = scope.ServiceProvider.GetRequiredService<IVault>();
+
+        using var editor = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        var entry = await vault.MemorizeAsync(path, waitForCompletion: true, TestContext.Current.CancellationToken);
+
+        entry.Stage.Should().Be(ProcessingStage.Memorized, because: entry.LastError);
+    }
+
     [Fact]
     public async Task TheContentHash_OfAHeldOpenFile_IsTheHashOfItsContent()
     {
@@ -55,7 +72,7 @@ public sealed class FilesHeldOpenForWritingTests : IDisposable
         held.Should().Be(closed);
     }
 
-    private ServiceProvider BuildStack()
+    private ServiceProvider BuildStack(bool keepExtractor = false)
     {
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
@@ -72,7 +89,8 @@ public sealed class FilesHeldOpenForWritingTests : IDisposable
             o.EnableRealTimeWatch = false;
             o.EnableBackgroundProcessing = false;
         });
-        services.RemoveAll<IExtractor>();
+        if (!keepExtractor)
+            services.RemoveAll<IExtractor>();
         return services.BuildServiceProvider();
     }
 
