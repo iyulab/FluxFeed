@@ -14,6 +14,7 @@ Releases before 0.28.0 predate this file — see the git history.
 ### Dependencies
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.105.0 -> 0.106.0, `FluxIndex.Storage.SQLite` 0.105.0 -> 0.106.0.
 - Re-pinned sibling package(s) `FluxIndex.Core` 0.106.0 -> 0.106.1, `FluxIndex.Storage.SQLite` 0.106.0 -> 0.106.1.
+- Re-pinned sibling package(s) `FileFlux` 0.68.0 -> 0.69.0, `FluxIndex.Core` 0.106.1 -> 0.107.0, `FluxIndex.Storage.SQLite` 0.106.1 -> 0.107.0.
 
 ## [0.59.0] - 2026-11-09
 
