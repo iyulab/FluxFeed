@@ -10,6 +10,7 @@ Releases before 0.28.0 predate this file — see the git history.
 
 ### Dependencies
 - Re-pinned sibling package(s) `FileFlux` 0.69.0 -> 0.70.0.
+- Re-pinned sibling package(s) `FileFlux` 0.70.0 -> 0.71.0, `FluxIndex.Core` 0.107.0 -> 0.108.0, `FluxIndex.Storage.SQLite` 0.107.0 -> 0.108.0.
 
 ## [0.59.1] - 2026-11-16
 
