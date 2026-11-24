@@ -469,6 +469,39 @@ public sealed class MemorizeResult
         Failure = failure,
         FailureExceptionType = failure?.ExceptionType
     };
+
+    /// <summary>
+    /// The exception behind a failure, as the object that was thrown (a store's typed exception stays that type).
+    /// Null when the failure has no exception (a plain message) and for a failure read back from the job queue, which
+    /// persists text only. <see cref="IVault"/> keeps it as the <see cref="Exception.InnerException"/> of the
+    /// exception it throws for an inline memorize or refresh.
+    /// </summary>
+    public Exception? FailureException { get; init; }
+
+    /// <summary>
+    /// A failure that carries the exception behind it, so a caller that handles a typed cause can reach it.
+    /// </summary>
+    public static MemorizeResult Failed(string errorMessage, TimeSpan duration, string? exceptionType, Exception exception) => new()
+    {
+        Success = false,
+        ErrorMessage = errorMessage,
+        Duration = duration,
+        FailureExceptionType = exceptionType,
+        FailureException = exception
+    };
+
+    /// <summary>
+    /// A failure with the stage and scale attached and the exception behind it.
+    /// </summary>
+    public static MemorizeResult Failed(string errorMessage, TimeSpan duration, IndexingFailure failure, Exception exception) => new()
+    {
+        Success = false,
+        ErrorMessage = errorMessage,
+        Duration = duration,
+        Failure = failure,
+        FailureExceptionType = failure?.ExceptionType,
+        FailureException = exception
+    };
 }
 
 /// <summary>

@@ -565,6 +565,11 @@ no per-group weights. Ungrouped jobs are never capped, and priority still orders
   holds the queue head for as long as the first did. A failure the library does not recognise stays
   retryable, so narrowing this cannot silently drop a recoverable job. `MemorizeResult.FailureKind`
   exposes the judgment (`Permanent` / `Transient` / `Unknown`) if you want to act on it yourself.
+- **The typed cause of an inline failure is kept.** When background processing is off, `MemorizeAsync` and `RefreshAsync`
+  throw an `InvalidOperationException` whose `InnerException` is the exception the failure came from - a vector
+  store's typed exception (a width mismatch, a lost extension) stays that type, so catch it by type instead of reading
+  the message. `MemorizeResult.FailureException` carries the same object. A job that ran on the queue persists text
+  only, so a failure reported through `waitForCompletion` on the queue has no cause object.
 - **A failed memorize is reported as failed** (fixed in 0.23.0). `MemorizeAsync`/`RefreshAsync` signal
   failure by *returning* `MemorizeResult.Failed(...)`, not by throwing. Before 0.23.0 the queue worker
   discarded that result and marked the job completed, so a document that failed to index still raised

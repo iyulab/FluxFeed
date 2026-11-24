@@ -362,8 +362,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
             entry.SaveMetadata();
             return ex is IndexingFailedException indexingFailure
                 ? MemorizeResult.Failed(indexingFailure.InnerException?.Message ?? ex.Message,
-                                        sw.Elapsed, indexingFailure.Failure)
-                : MemorizeResult.Failed(ex.Message, sw.Elapsed, ex.GetType().Name);
+                                        sw.Elapsed, indexingFailure.Failure, indexingFailure.InnerException ?? ex)
+                : MemorizeResult.Failed(ex.Message, sw.Elapsed, ex.GetType().Name, ex);
         }
     }
 
@@ -463,8 +463,8 @@ public sealed partial class VaultPipeline : IVaultPipeline
             entry.SaveMetadata();
             return ex is IndexingFailedException indexingFailure
                 ? MemorizeResult.Failed(indexingFailure.InnerException?.Message ?? ex.Message,
-                                        sw.Elapsed, indexingFailure.Failure)
-                : MemorizeResult.Failed(ex.Message, sw.Elapsed, ex.GetType().Name);
+                                        sw.Elapsed, indexingFailure.Failure, indexingFailure.InnerException ?? ex)
+                : MemorizeResult.Failed(ex.Message, sw.Elapsed, ex.GetType().Name, ex);
         }
     }
 

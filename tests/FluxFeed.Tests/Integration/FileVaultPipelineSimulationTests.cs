@@ -583,6 +583,102 @@ public class FileVaultPipelineSimulationTests : IDisposable
     }
 
     [Fact]
+    public async Task StoreFailure_HandsBackTheStoresOwnExceptionOnTheResult()
+    {
+        // A store that throws a typed exception (a width mismatch, a lost extension): the result keeps that object, so
+        // IVault can rethrow with it as the cause instead of flattening it to the message.
+        var typed = new IOException("Vector store disk full");
+        var failingVectorStore = Substitute.For<IVectorStore>();
+        failingVectorStore
+            .StoreAsync(Arg.Any<DocumentChunk>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(typed);
+        failingVectorStore
+            .StoreBatchAsync(Arg.Any<IEnumerable<DocumentChunk>>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(typed);
+
+        var failPipeline = new VaultPipeline(
+            _gitMock, _hasher, _storage,
+            NullLogger<VaultPipeline>.Instance,
+            extractor: null, chunker: null,
+            vectorStore: failingVectorStore,
+            embeddingService: _embeddingService);
+
+        var filePath = CreateDocument("store_typed.txt", "Content that will fail during vector storage.");
+        var entry = VaultEntry.Create(filePath, _vaultDir);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+
+        var result = await failPipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        result.Success.Should().BeFalse();
+        result.FailureException.Should().BeSameAs(typed);
+    }
+
+    [Fact]
+    public async Task MemorizeFailureOutsideIndexing_HandsBackTheThrownExceptionOnTheResult()
+    {
+        // The source disappears after the entry exists: the failure happens before any indexing stage, so there is no
+        // indexing wrapper - the result carries the exception that was thrown, the same one whose message it reports.
+        var filePath = CreateDocument("vanished.txt", "Gone before it is read.");
+        var entry = VaultEntry.Create(filePath, _vaultDir);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+        File.Delete(filePath);
+
+        var result = await _pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        result.Success.Should().BeFalse();
+        result.FailureException.Should().NotBeNull();
+        result.FailureException!.Message.Should().Be(result.ErrorMessage);
+        result.FailureException.GetType().Name.Should().Be(result.FailureExceptionType);
+    }
+
+    [Fact]
+    public async Task RefreshFailure_HandsBackTheThrownExceptionOnTheResult()
+    {
+        // Nothing was memorized, so there is no refined content to re-index: the pipeline reports the failure by
+        // returning, and the result keeps the exception that explains it.
+        var filePath = CreateDocument("refresh_fail.txt", "Never memorized.");
+        var entry = VaultEntry.Create(filePath, _vaultDir);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+
+        var result = await _pipeline.RefreshAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        result.Success.Should().BeFalse();
+        result.FailureException.Should().BeOfType<InvalidOperationException>()
+            .Which.Message.Should().Contain("No refined content");
+    }
+
+    [Fact]
+    public async Task RefreshStoreFailure_HandsBackTheStoresOwnExceptionOnTheResult()
+    {
+        // The memorize worked; the store then fails while refresh re-indexes the refined content. The indexing stage wraps
+        // the store's exception, and the result has to hand back the store's own object, as the memorize path does.
+        var filePath = CreateDocument("refresh_store_fail.txt", "Content that is indexed once and then re-indexed.");
+        var entry = VaultEntry.Create(filePath, _vaultDir);
+        await _storage.InitializeEntryAsync(entry, TestContext.Current.CancellationToken);
+        (await _pipeline.MemorizeAsync(entry, ct: TestContext.Current.CancellationToken)).Success.Should().BeTrue();
+
+        var typed = new IOException("Vector store disk full");
+        var failingVectorStore = Substitute.For<IVectorStore>();
+        failingVectorStore
+            .StoreAsync(Arg.Any<DocumentChunk>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(typed);
+        failingVectorStore
+            .StoreBatchAsync(Arg.Any<IEnumerable<DocumentChunk>>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(typed);
+        var failPipeline = new VaultPipeline(
+            _gitMock, _hasher, _storage,
+            NullLogger<VaultPipeline>.Instance,
+            extractor: null, chunker: null,
+            vectorStore: failingVectorStore,
+            embeddingService: _embeddingService);
+
+        var result = await failPipeline.RefreshAsync(entry, ct: TestContext.Current.CancellationToken);
+
+        result.Success.Should().BeFalse();
+        result.FailureException.Should().BeSameAs(typed);
+    }
+
+    [Fact]
     public async Task ErrorStage_PersistedToMetadata_SurvivesReload()
     {
         // Arrange — cause a failure

@@ -200,7 +200,8 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
             {
                 LogMemorizeFailed(_logger, entry.SourcePath, result.ErrorMessage ?? "Unknown error");
                 throw new InvalidOperationException(
-                    $"Memorize failed for {fullPath}: {result.ErrorMessage ?? "unknown error"}");
+                    $"Memorize failed for {fullPath}: {result.ErrorMessage ?? "unknown error"}",
+                    result.FailureException);
             }
         }
 
@@ -248,7 +249,8 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
             {
                 LogMemorizeFailed(_logger, entry.SourcePath, result.ErrorMessage ?? "Unknown error");
                 throw new InvalidOperationException(
-                    $"Memorize failed for {fullPath}: {result.ErrorMessage ?? "unknown error"}");
+                    $"Memorize failed for {fullPath}: {result.ErrorMessage ?? "unknown error"}",
+                    result.FailureException);
             }
         }
 
@@ -340,7 +342,8 @@ public sealed partial class VaultManager : IVault, IVaultEntryChangeListener
             {
                 LogRefreshFailed(_logger, entry.SourcePath, result.ErrorMessage ?? "Unknown error");
                 throw new InvalidOperationException(
-                    $"Refresh failed for {fullPath}: {result.ErrorMessage ?? "unknown error"}");
+                    $"Refresh failed for {fullPath}: {result.ErrorMessage ?? "unknown error"}",
+                    result.FailureException);
             }
         }
 

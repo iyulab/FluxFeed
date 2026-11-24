@@ -79,6 +79,65 @@ public sealed class VaultManagerInlineFailureTests : IDisposable
             .WithMessage("*no reader for .md*");
     }
 
+    // A typed store exception (a width mismatch, a lost extension) is how a consumer decides what to do about a
+    // failure. The pipeline hands the live exception back on the result; the manager has to keep it as the cause
+    // instead of flattening it to the message text.
+    private sealed class StoreWidthMismatchException(string message) : Exception(message);
+
+    [Fact]
+    public async Task InlineMemorize_ThatFailed_KeepsTheTypedCauseAsInnerException()
+    {
+        var cause = new StoreWidthMismatchException("vec0 table was created for 8-dimensional vectors");
+        _pipeline.MemorizeAsync(Arg.Any<VaultEntry>(), Arg.Any<MemorizeOptions>(), Arg.Any<CancellationToken>())
+            .Returns(MemorizeResult.Failed(cause.Message, TimeSpan.Zero, nameof(StoreWidthMismatchException), cause));
+
+        var act = async () => await _vault.MemorizeAsync(_file, TestContext.Current.CancellationToken);
+
+        var thrown = (await act.Should().ThrowAsync<InvalidOperationException>()).Which;
+        thrown.Message.Should().Contain(cause.Message);
+        thrown.InnerException.Should().BeSameAs(cause);
+    }
+
+    [Fact]
+    public async Task InlineMemorizeAndWait_ThatFailed_KeepsTheTypedCauseAsInnerException()
+    {
+        var cause = new StoreWidthMismatchException("vec0 table was created for 8-dimensional vectors");
+        _pipeline.MemorizeAsync(Arg.Any<VaultEntry>(), Arg.Any<MemorizeOptions>(), Arg.Any<CancellationToken>())
+            .Returns(MemorizeResult.Failed(cause.Message, TimeSpan.Zero, nameof(StoreWidthMismatchException), cause));
+
+        var act = async () => await _vault.MemorizeAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.InnerException.Should().BeSameAs(cause);
+    }
+
+    [Fact]
+    public async Task InlineRefreshAndWait_ThatFailed_KeepsTheTypedCauseAsInnerException()
+    {
+        var cause = new StoreWidthMismatchException("vec0 table was created for 8-dimensional vectors");
+        _pipeline.MemorizeAsync(Arg.Any<VaultEntry>(), Arg.Any<MemorizeOptions>(), Arg.Any<CancellationToken>())
+            .Returns(MemorizeResult.Succeeded(1, 10, TimeSpan.Zero));
+        var memorized = await _vault.MemorizeAsync(_file, TestContext.Current.CancellationToken);
+        Directory.CreateDirectory(memorized.VaultPath);
+        File.WriteAllText(memorized.RefinedMdPath, "# notes\n");   // refresh re-indexes refined content
+        _pipeline.RefreshAsync(Arg.Any<VaultEntry>(), Arg.Any<MemorizeOptions>(), Arg.Any<CancellationToken>())
+            .Returns(MemorizeResult.Failed(cause.Message, TimeSpan.Zero, nameof(StoreWidthMismatchException), cause));
+
+        var act = async () => await _vault.RefreshAsync(_file, waitForCompletion: true, TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.InnerException.Should().BeSameAs(cause);
+    }
+
+    [Fact]
+    public async Task InlineMemorize_ThatFailedWithoutAnException_HasNoInnerException()
+    {
+        _pipeline.MemorizeAsync(Arg.Any<VaultEntry>(), Arg.Any<MemorizeOptions>(), Arg.Any<CancellationToken>())
+            .Returns(MemorizeResult.Failed("no reader for .md", TimeSpan.Zero));
+
+        var act = async () => await _vault.MemorizeAsync(_file, TestContext.Current.CancellationToken);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.InnerException.Should().BeNull();
+    }
+
     [Fact]
     public async Task InlineMemorize_ThatSucceeded_StillReturnsTheEntry()
     {
