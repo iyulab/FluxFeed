@@ -6,7 +6,7 @@ version may contain breaking changes; they are listed under **Breaking**.
 
 Releases before 0.28.0 predate this file — see the git history.
 
-## [Unreleased]
+## [0.59.2] - 2026-11-27
 
 ### Fixed
 - **An inline memorize or refresh that fails keeps the exception it failed with.** `MemorizeAsync` / `RefreshAsync` with background processing off threw a bare `InvalidOperationException("Memorize failed for ...")` built from the message text, so a store's typed exception (for example a vector width mismatch or a lost extension) could only be recognised by parsing the message. It is now the `InnerException`, and `MemorizeResult.FailureException` (new, with `MemorizeResult.Failed` overloads that take the exception) carries it. A failure reported through the job queue persists text only and has no cause object.
